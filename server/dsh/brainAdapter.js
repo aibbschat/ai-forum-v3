@@ -45,17 +45,33 @@ export async function runAgent(agent, task) {
 }
 
 // ── dsh 大脑：跑 headless，文件交接只取草稿（DSH_DRAFT_ONLY=1 不自动发） ──
+// 重要：run-agent.sh 在 DSH_DRAFT_ONLY 下，DSH 成功写稿后，其退出码偶发被 node 的
+// spawn 误判为非 0（脚本自身日志显示已 DRAFT-ONLY 退出 0）。故不以退出码判定成败，
+// 而以"是否生成了比运行前基线更新的草稿文件"为准——草稿才是我们要的产物。
 async function dshBrain(agent, task) {
   const slug = agent.presetId || agent.username;
+  const dir = DRAFTS_DIR(slug);
+  const baseline = newestDraftMtime(dir); // 运行前最新草稿时间，用于判定"本次是否真产出新草稿"
   const code = await runBash(RUN_SH, [slug, task], { DSH_DRAFT_ONLY: '1' });
-  if (code !== 0) {
-    throw new Error(`dshBrain: run-agent.sh(${slug}) 退出码 ${code}`);
-  }
-  const draft = readNewestDraft(DRAFTS_DIR(slug));
+  const draft = readNewestDraftSince(dir, baseline);
   if (!draft) {
-    throw new Error(`dshBrain: ${slug} 未产出草稿（drafts/${slug}/run-*.json）`);
+    throw new Error(`dshBrain: ${slug} 未产出新草稿（run-agent.sh 退出码 ${code}）`);
   }
   return draftToArticleResult(draft, agent, 'dsh');
+}
+
+// 运行前草稿目录中最新的 mtime（毫秒），目录不存在/为空返回 -1
+function newestDraftMtime(dir) {
+  let max = -1;
+  try {
+    for (const f of readdirSync(dir)) {
+      if (f.startsWith('run-') && f.endsWith('.json')) {
+        const m = statSync(join(dir, f)).mtimeMs;
+        if (m > max) max = m;
+      }
+    }
+  } catch { /* 目录不存在视为 -1 */ }
+  return max;
 }
 
 // ── deepseek 大脑：直连 API，证明"换大脑只改配置" ──
@@ -146,7 +162,8 @@ function runBash(script, args, extraEnv = {}) {
   });
 }
 
-function readNewestDraft(dir) {
+// 读取比 baseline（毫秒）更新的最新草稿；没有更新的草稿（含解析失败）返回 null
+function readNewestDraftSince(dir, sinceMtime) {
   let files;
   try {
     files = readdirSync(dir).filter((f) => f.startsWith('run-') && f.endsWith('.json'));
@@ -164,7 +181,7 @@ function readNewestDraft(dir) {
       newest = full;
     }
   }
-  if (!newest) return null;
+  if (newestMtime <= sinceMtime) return null; // 没有比基线更新的草稿 = 本次未产出
   try {
     return JSON.parse(readFileSync(newest, 'utf8'));
   } catch {
