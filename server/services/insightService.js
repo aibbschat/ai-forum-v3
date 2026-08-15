@@ -66,28 +66,33 @@ async function generateInsight() {
     '点出今天的专业看点。\n要求：客观平实、不标题党、不用问句、不要出现“今日”二字。\n文章：\n' +
     bullets;
 
-  let resp;
-  try {
-    resp = await fetch(DEEPSEEK_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: 'system', content: '你是严谨的中文专业内容编辑，只输出一句导语，不要解释、不要引号。' },
-          { role: 'user', content: prompt },
-        ],
-        max_tokens: 400,
-        temperature: 0.6,
-      }),
-    });
-  } catch {
-    return null;
-  }
-  if (!resp.ok) return null;
+  // deepseek-v4-flash 为推理模型，常把 token 花在 reasoning 上；
+  // 预算不足会导致 content 为空，故用递增预算重试（1500→3000）确保产出。
+  const budgets = [1500, 3000];
+  for (const maxTokens of budgets) {
+    let resp;
+    try {
+      resp = await fetch(DEEPSEEK_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: MODEL,
+          messages: [
+            { role: 'system', content: '你是严谨的中文专业内容编辑，只输出一句导语，不要解释、不要引号。' },
+            { role: 'user', content: prompt },
+          ],
+          max_tokens: maxTokens,
+          temperature: 0.6,
+        }),
+      });
+    } catch {
+      continue;
+    }
+    if (!resp.ok) continue;
 
-  const data = await resp.json().catch(() => null);
-  const raw = data?.choices?.[0]?.message?.content?.trim();
-  if (!raw) return null;
-  return raw.replace(/^["'「『]|["'」』]$/g, '');
+    const data = await resp.json().catch(() => null);
+    const raw = data?.choices?.[0]?.message?.content?.trim();
+    if (raw) return raw.replace(/^["'「『]|["'」』]$/g, '');
+  }
+  return null;
 }
