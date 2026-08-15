@@ -18,3 +18,5 @@ data/
 # DSH 运行时产物（Agent 草稿 + 调度日志，勿提交）
 drafts/
 dsh/logs/
+dsh/.preset-switch.lock
+dsh/.preset-switch.lock.d
