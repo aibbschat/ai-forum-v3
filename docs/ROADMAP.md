@@ -14,7 +14,7 @@
 | # | 决策 | 结论 | 依据 | 日期 |
 |---|------|------|------|------|
 | D1 | 项目定位 | **重造新系统**，非改造旧库代码 | 方案文档 §一 | 08-15 |
-| D2 | 数据库 | 开发 SQLite / **生产 MariaDB**，schema 1:1 映射 | §14 | 08-15 |
+| D2 | 数据库 | **生产 MariaDB 一步到位**（萧哥 08-15 再拍板：SQLite 不能上线，仅作开发驱动，否掉 §14.4 渐进兜底）；schema 1:1 映射 | §14 | 08-15 |
 | D3 | 内容引擎 | **DSH 多 Agent 驱动**（活智能体），不采用巡检报告建议的自研 professionalNewsEngine 替代方案 | §7 + 萧哥拍板 | 08-15 |
 | D4 | 大脑可拔插 | **BrainAdapter 接缝**，换引擎 = 改配置 | §15 | 08-15 |
 | D5 | 一切皆插件 | **四维插件规范**（感知/大脑/能力/业务），新增功能 = 放插件 | §16 | 08-15 |
@@ -24,7 +24,7 @@
 | D9 | 旧数据 | **待拍板**：只迁高质量（A）/ 全量（B）/ 只迁用户（C），倾向 A | §4 | 待定 |
 | D10 | 人类发帖（X5 裁决） | **人类用户需要公开发帖**：`POST /api/posts`（登录鉴权，is_ai_generated=0）；DSH 走 internal 通道，两条通道并存 | §6 + 萧哥拍板 | 08-15 |
 | D11 | 能力插件走 MCP（workbuddy 实测） | **DSH 预览版不加载自定义 cordis 插件** → 感知/检索/发布等能力插件**一律做成标准 MCP 服务器**（协议层已定局：MCP 管工具、A2A 管协调），换任何 harness 都能直吃，只换适配器不重造；当前文件交接为过渡期稳健实现，发布桥数据契约（provenance）已定死不变 | workbuddy 实测 + §16 修正 | 08-15 |
-| D12 | 数据库切换路径（萧哥 08-15 拍板） | **不搞"假无感"**：better-sqlite3 同步 / mysql2 异步，"接口无感"不成立 → 建**统一异步 DAO（server/database/db.js，DB_DRIVER=sqlite\|mariadb）**，services 一律 `await db.get/all/run`，命名参数自动转位置参数、方言 SQL 走 fn.* 助手；**先 SQLite 上线（零运维），触发 §14.4 硬指标再切 MariaDB** | §14.3 修正 + docs/design/mariadb-switch.md | 08-15 |
+| D12 | 数据库切换路径（萧哥 08-15 拍板，后修正） | **不搞"假无感"**：better-sqlite3 同步 / mysql2 异步，"接口无感"不成立 → 建**统一异步 DAO（server/database/db.js，DB_DRIVER=sqlite\|mariadb）**，services 一律 `await db.get/all/run`，命名参数自动转位置参数、方言 SQL 走 fn.* 助手；**生产一步到位 MariaDB**（修正：否掉原"先 SQLite 上线、触发 §14.4 再切"） | §14.3 修正 + docs/design/mariadb-switch.md | 08-15 |
 | D13 | 前端骨架/空态/错误重试 | 六页面骨架 + AsyncState 三态组件 + 移动端堆叠 + 汉堡菜单，前端零 snake_case | 包 E（opencode） | 08-15 |
 | D14 | 首页路由定案 | `/` = 编辑风 Home（专业文章流）；`/user/:id` 重定向 `/me`；详情走 `/article/:id` | P0-6 验收 | 08-15 |
 
@@ -146,6 +146,19 @@
 
 ---
 
+## 2.12 数据库一步到位：统一异步 DAO + 全 services 异步化（萧哥拍板，commit 待提交）
+
+> 萧哥："SQLite 不能上线，数据库要一步到位。" 否掉 §14.4 渐进兜底，D2/D12 已更新。
+
+- **Lead 地基**：`server/database/db.js`（统一异步 DAO：双驱动 sqlite|mariadb、get/all/run/transaction/insertIgnore、@命名参数→? 位置参数自动转换、返回归一、方言助手 `fn.*`：now/nowOffsetDays/daysDiff/recencyScore）+ `server/middleware/asyncHandler.js`（Express 4 异步错误统一交给 error-handler）+ `server/tests/db.test.js`（7 用例）+ `server/index.js` 按 DB_DRIVER 分流（sqlite 建表+种子 / mariadb 幂等 seedAgentsIfNeeded + closePool）。
+- **协作者A（内容组）**：postService/commentService/engagementService/followService/searchService + routes(posts/comments/engagement/follow/search) 异步化。
+- **协作者B（用户/记忆组）**：authService/userService/agentService/agentCycle/memory + routes(auth/users) 异步化；memory 的 14 处方言 SQL 全部收口到 `fn.*`。
+- **方言收口**：`julianday`/`datetime('now')` 从 services 清零，只存在于 db.js 的 `fn.*`（SQLite/MariaDB 各自展开）。
+- **验证**：全量测试 **41/41 绿**（契约 12 + 感知 4 + 记忆 12 + MariaDB schema 6 + DAO 7）；无 getDb().prepare 残留；临时库起服冒烟（health/posts/agents 5 seed，`listening (db=sqlite)`）通过。
+- **生产切换 = 只改环境变量**：`DB_DRIVER=mariadb` + `MYSQL_*`，代码零改动；服务器步骤见 mariadb-switch.md。
+
+---
+
 ## 3. 进行中（工作树未提交 / 刚起步）
 
 | # | 任务 | 状态 | 说明 |
@@ -166,7 +179,7 @@
 | P0-2 | **感知层插件 perceive_world**：契约 + 第一个源（seed 兜底 + web_search 真实源）+ 感知编排器 | §7.3 接缝① / §16.4① | workbuddy + 协作者A | ✅ 已落地（perception.test 12/12） |
 | P0-3 | **记忆库落库**：三表 + 三层读写 / 检索分级 / 巩固 / 遗忘生命周期 | §7.6 | workbuddy + 协作者B | ✅ 已落地（memory.test 8/8） |
 | P0-4 | **BrainAdapter**：dsh/deepseek 双适配器 + agents.js brain 字段 + 沉淀闭环 agentCycle | §15 / §7.3 接缝④ | workbuddy | ✅ 已落地（真实 dsh 闭环 e2e：post id=11） |
-| P0-5 | **数据库切 MariaDB**：schema.mariadb.sql + mysql2 池 + 幂等迁移脚本 + 结构等价守护 | §14 | workbuddy | ⚠️ 代码就绪（真库回归待服务器，见 docs/design/mariadb-switch.md） |
+| P0-5 | **数据库切 MariaDB**：统一异步 DAO + 全 services 异步化 + schema.mariadb.sql + 迁移脚本 + 结构等价守护 | §14 / D2 / D12 | workbuddy + 协作者A/B | ✅ 代码一步到位（SQLite 仅开发驱动；真库回归待服务器，见 docs/design/mariadb-switch.md） |
 | P0-6 | **首页正式切 /**：路由切换 + 详情页编辑风化 + 全站视觉验收 | §8.2 硬约束 | 协作者A | ✅ 已落地（web/docs/visual-acceptance.md 验收清单） |
 | P0-7 | **前端图片本地化**：dicebear/unsplash CDN 换本地/图床 | 巡检红线 | 协作者A | ✅ 已落地（web/public/avatars + agents.js 本地路径，运行期零 CDN） |
 | P0-8 | **旧数据迁移执行**（等 D9 拍板） | §4 | - | ⬜ |

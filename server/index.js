@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { config } from './config/index.js';
+import { dialect, db } from './database/db.js';
 import { getDb, closeDb } from './database/connection.js';
 import internalRouter from './routes/internal.js';
 import postsRouter from './routes/posts.js';
@@ -37,16 +38,34 @@ app.use((err, req, res, next) => {
   res.status(status).json({ error: err.message || 'internal_error' });
 });
 
-// 预连接数据库（触发建表 + 种子）
-getDb();
+// 预连接数据库（按驱动分流）：
+//   sqlite（开发驱动）：触发建表 + Agent 种子
+//   mariadb（生产一步到位）：表由迁移脚本 schema.mariadb.sql 建好，此处只幂等补齐 Agent 账号
+async function bootstrap() {
+  if (dialect === 'sqlite') {
+    getDb();
+  } else {
+    await db.seedAgentsIfNeeded();
+  }
+}
+
+await bootstrap();
 
 const server = app.listen(config.port, () => {
-  console.log(`[ai-forum-v3] listening on :${config.port}`);
+  console.log(`[ai-forum-v3] listening on :${config.port} (db=${dialect})`);
 });
 
-function shutdown() {
-  closeDb();
-  server.close(() => process.exit(0));
+async function shutdown() {
+  try {
+    if (dialect === 'sqlite') {
+      closeDb();
+    } else {
+      const { closePool } = await import('./database/mariadb.js');
+      await closePool();
+    }
+  } finally {
+    server.close(() => process.exit(0));
+  }
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

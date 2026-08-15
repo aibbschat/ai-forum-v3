@@ -3,14 +3,14 @@
 // 依据：TECH-SPEC.md v2.3 §7.6（记忆生命周期管理）；ROADMAP P0-3。
 //
 // 设计要点：
-// - 所有 DB 访问统一走 getDb()，本文件不持有连接、不改动 connection.js。
-// - 时间统一用 SQLite 的 datetime('now')（UTC），与建表默认值 CURRENT_TIMESTAMP 同口径。
+// - 所有 DB 访问统一走 db.js（异步 DAO），时间/分数方言 SQL 一律经 fn.* 收口。
+// - 时间统一用当前时间（UTC），与建表默认值 CURRENT_TIMESTAMP 同口径。
 // - 检索加权 = importance × recency，recency = 1 / (1 + 距今天数)（Ebbinghaus 简化，§7.6.4）。
 // - 巩固（consolidate）由 LLM 驱动（§7.6.3）：按 domain 分组 → 每组一次 /chat/completions 总结
 //   成结构化 JSON（要点 + 置信度自评 + 存疑点）→ writeSemantic 沉淀，evidence_ids 全量保留出处。
 //   无 DEEPSEEK_API_KEY 或 LLM 调用/解析失败 → 自动回退 summarizeEpisodics 纯函数聚合（降级铁律）。
 
-import { getDb } from '../../database/connection.js';
+import { db, fn } from '../../database/db.js';
 
 /** 容量上限（每 Agent，§7.6.2）。 */
 export const MEMORY_LIMITS = {
@@ -40,7 +40,7 @@ const DEEPSEEK_MODEL = 'deepseek-v4-flash';
 const LLM_TIMEOUT_MS = 30_000;
 
 /** 检索加权表达式：importance × recency，recency = 1/(1+距今天数)。 */
-const SCORE_SQL = `importance * (1.0 / (1.0 + MAX(0, julianday('now') - julianday(created_at))))`;
+const SCORE_SQL = `importance * ${fn.recencyScore('created_at')}`;
 
 // ── 内部工具 ────────────────────────────────────────────────────────
 
@@ -67,6 +67,11 @@ function clamp01(value, fallback) {
 
 function normalizeSource(source) {
   return EPISODIC_SOURCES.includes(source) ? source : 'perceive';
+}
+
+/** UTC 时间字符串（与 SQLite datetime('now') 同格式）。fn 无负偏移助手，窗口起点在此计算，避免裸方言。 */
+function utcNowOffsetDays(days) {
+  return new Date(Date.now() + days * 86400000).toISOString().slice(0, 19).replace('T', ' ');
 }
 
 /** domain 允许缺省，统一落到 'general'，否则 UNIQUE(agent_id, domain) 对 NULL 不生效（SQLite 语义）。 */
@@ -97,18 +102,17 @@ function parseEvidenceIds(raw) {
  * @param {{agentId:number, content:string, source?:string, importance?:number}} input
  * @returns {{id:number, agentId:number, source:string, importance:number}}
  */
-export function writeEpisodic({ agentId, content, source = 'perceive', importance = 0.5 }) {
+export async function writeEpisodic({ agentId, content, source = 'perceive', importance = 0.5 }) {
   const id = requireAgentId(agentId);
   const text = requireText(content, 'content');
   const src = normalizeSource(source);
   const imp = clamp01(importance, 0.5);
 
-  const info = getDb()
-    .prepare(
-      `INSERT INTO memory_episodic (agent_id, content, source, importance, expires_at)
-       VALUES (?, ?, ?, ?, datetime('now', '+${EPISODIC_TTL_DAYS} days'))`
-    )
-    .run(id, text, src, imp);
+  const info = await db.run(
+    `INSERT INTO memory_episodic (agent_id, content, source, importance, expires_at)
+     VALUES (?, ?, ?, ?, ${fn.nowOffsetDays(EPISODIC_TTL_DAYS)})`,
+    [id, text, src, imp]
+  );
 
   return { id: Number(info.lastInsertRowid), agentId: id, source: src, importance: imp };
 }
@@ -120,35 +124,37 @@ export function writeEpisodic({ agentId, content, source = 'perceive', importanc
  * @param {{agentId:number, domain?:string, understanding:string, confidence?:number, evidenceIds?:number[]}} input
  * @returns {{id:number, agentId:number, domain:string, confidence:number, created:boolean}}
  */
-export function writeSemantic({ agentId, domain, understanding, confidence = 0.6, evidenceIds = [] }) {
+export async function writeSemantic({ agentId, domain, understanding, confidence = 0.6, evidenceIds = [] }) {
   const id = requireAgentId(agentId);
   const dom = normalizeDomain(domain);
   const text = requireText(understanding, 'understanding');
   const conf = clamp01(confidence, 0.6);
   const evidence = JSON.stringify(toIdArray(evidenceIds));
 
-  const db = getDb();
-  const existed = db
-    .prepare(`SELECT id FROM memory_semantic WHERE agent_id = ? AND domain = ?`)
-    .get(id, dom);
+  const existed = await db.get(
+    `SELECT id FROM memory_semantic WHERE agent_id = ? AND domain = ?`,
+    [id, dom]
+  );
 
   // 复核成功（重新沉淀）即视为再次验证：status 回到 verified，last_verified_at 刷新。
-  db.prepare(
+  await db.run(
     `INSERT INTO memory_semantic
        (agent_id, domain, understanding, confidence, evidence_ids, status, last_verified_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'verified', datetime('now'), datetime('now'))
+     VALUES (?, ?, ?, ?, ?, 'verified', ${fn.now()}, ${fn.now()})
      ON CONFLICT(agent_id, domain) DO UPDATE SET
        understanding    = excluded.understanding,
        confidence       = excluded.confidence,
        evidence_ids     = excluded.evidence_ids,
        status           = 'verified',
-       last_verified_at = datetime('now'),
-       updated_at       = datetime('now')`
-  ).run(id, dom, text, conf, evidence);
+       last_verified_at = ${fn.now()},
+       updated_at       = ${fn.now()}`,
+    [id, dom, text, conf, evidence]
+  );
 
-  const row = db
-    .prepare(`SELECT id FROM memory_semantic WHERE agent_id = ? AND domain = ?`)
-    .get(id, dom);
+  const row = await db.get(
+    `SELECT id FROM memory_semantic WHERE agent_id = ? AND domain = ?`,
+    [id, dom]
+  );
 
   return { id: row.id, agentId: id, domain: dom, confidence: conf, created: !existed };
 }
@@ -158,24 +164,25 @@ export function writeSemantic({ agentId, domain, understanding, confidence = 0.6
  * @param {{agentId:number, skill:string, procedure:string}} input
  * @returns {{id:number, agentId:number, skill:string, version:number}}
  */
-export function writeProcedural({ agentId, skill, procedure }) {
+export async function writeProcedural({ agentId, skill, procedure }) {
   const id = requireAgentId(agentId);
   const skillName = requireText(skill, 'skill');
   const text = requireText(procedure, 'procedure');
 
-  const db = getDb();
-  db.prepare(
+  await db.run(
     `INSERT INTO memory_procedural (agent_id, skill, procedure, version, updated_at)
-     VALUES (?, ?, ?, 1, datetime('now'))
+     VALUES (?, ?, ?, 1, ${fn.now()})
      ON CONFLICT(agent_id, skill) DO UPDATE SET
        procedure  = excluded.procedure,
        version    = memory_procedural.version + 1,
-       updated_at = datetime('now')`
-  ).run(id, skillName, text);
+       updated_at = ${fn.now()}`,
+    [id, skillName, text]
+  );
 
-  const row = db
-    .prepare(`SELECT id, version FROM memory_procedural WHERE agent_id = ? AND skill = ?`)
-    .get(id, skillName);
+  const row = await db.get(
+    `SELECT id, version FROM memory_procedural WHERE agent_id = ? AND skill = ?`,
+    [id, skillName]
+  );
 
   return { id: row.id, agentId: id, skill: skillName, version: row.version };
 }
@@ -189,46 +196,42 @@ export function writeProcedural({ agentId, skill, procedure }) {
  * @param {{domain?:string, limit?:number}} [opts]
  * @returns {{semantic:Array<object>, episodic:Array<object>}}
  */
-export function readMemory(agentId, { domain, limit = 20 } = {}) {
+export async function readMemory(agentId, { domain, limit = 20 } = {}) {
   const id = requireAgentId(agentId);
   const k = Math.max(1, Math.min(500, Number(limit) || 20));
-  const db = getDb();
 
   // ① semantic：作废（void）的不再供给大脑；suspect 保留但带 status，由调用方按 confidence 决策。
   const semanticRows = domain
-    ? db
-        .prepare(
-          `SELECT id, agent_id, domain, understanding, confidence, evidence_ids, status,
-                  last_verified_at, updated_at
-             FROM memory_semantic
-            WHERE agent_id = ? AND domain = ? AND status != 'void'
-            ORDER BY confidence DESC, updated_at DESC
-            LIMIT ?`
-        )
-        .all(id, normalizeDomain(domain), k)
-    : db
-        .prepare(
-          `SELECT id, agent_id, domain, understanding, confidence, evidence_ids, status,
-                  last_verified_at, updated_at
-             FROM memory_semantic
-            WHERE agent_id = ? AND status != 'void'
-            ORDER BY confidence DESC, updated_at DESC
-            LIMIT ?`
-        )
-        .all(id, k);
+    ? await db.all(
+        `SELECT id, agent_id, domain, understanding, confidence, evidence_ids, status,
+                last_verified_at, updated_at
+           FROM memory_semantic
+          WHERE agent_id = ? AND domain = ? AND status != 'void'
+          ORDER BY confidence DESC, updated_at DESC
+          LIMIT ?`,
+        [id, normalizeDomain(domain), k]
+      )
+    : await db.all(
+        `SELECT id, agent_id, domain, understanding, confidence, evidence_ids, status,
+                last_verified_at, updated_at
+           FROM memory_semantic
+          WHERE agent_id = ? AND status != 'void'
+          ORDER BY confidence DESC, updated_at DESC
+          LIMIT ?`,
+        [id, k]
+      );
 
   // ② episodic：过期未清扫的直接排除（sweep 之前也不该被读到）。
-  const episodicRows = db
-    .prepare(
-      `SELECT id, agent_id, content, source, importance, created_at, expires_at,
-              ${SCORE_SQL} AS score
-         FROM memory_episodic
-        WHERE agent_id = ?
-          AND (expires_at IS NULL OR expires_at > datetime('now'))
-        ORDER BY score DESC, created_at DESC
-        LIMIT ?`
-    )
-    .all(id, k);
+  const episodicRows = await db.all(
+    `SELECT id, agent_id, content, source, importance, created_at, expires_at,
+            ${SCORE_SQL} AS score
+       FROM memory_episodic
+      WHERE agent_id = ?
+        AND (expires_at IS NULL OR expires_at > ${fn.now()})
+      ORDER BY score DESC, created_at DESC
+      LIMIT ?`,
+    [id, k]
+  );
 
   return {
     semantic: semanticRows.map((r) => ({
@@ -265,48 +268,54 @@ export function readMemory(agentId, { domain, limit = 20 } = {}) {
  * @param {number} agentId
  * @returns {{expired:number, evicted:number, suspected:number, episodicRemaining:number}}
  */
-export function sweepForgetting(agentId) {
+export async function sweepForgetting(agentId) {
   const id = requireAgentId(agentId);
-  const db = getDb();
 
   // 1) TTL 过期
-  const expired = db
-    .prepare(
+  const expired = (
+    await db.run(
       `DELETE FROM memory_episodic
-        WHERE agent_id = ? AND expires_at IS NOT NULL AND expires_at < datetime('now')`
+        WHERE agent_id = ? AND expires_at IS NOT NULL AND expires_at < ${fn.now()}`,
+      [id]
     )
-    .run(id).changes;
+  ).changes;
 
   // 2) 容量淘汰（LRU 变体：加权分最低者先走）
-  const countStmt = db.prepare(`SELECT COUNT(*) AS n FROM memory_episodic WHERE agent_id = ?`);
-  const evictStmt = db.prepare(
-    `DELETE FROM memory_episodic
-      WHERE id IN (
-        SELECT id FROM memory_episodic
-         WHERE agent_id = ?
-         ORDER BY ${SCORE_SQL} ASC, created_at ASC
-         LIMIT ?
-      )`
-  );
-
   let evicted = 0;
-  let remaining = countStmt.get(id).n;
+  let remaining = (
+    await db.get(`SELECT COUNT(*) AS n FROM memory_episodic WHERE agent_id = ?`, [id])
+  ).n;
+
   while (remaining > MEMORY_LIMITS.episodic) {
     const batch = Math.min(EVICT_BATCH, remaining - MEMORY_LIMITS.episodic);
-    const changes = evictStmt.run(id, batch).changes;
+    const changes = (
+      await db.run(
+        `DELETE FROM memory_episodic
+          WHERE id IN (
+            SELECT id FROM memory_episodic
+             WHERE agent_id = ?
+             ORDER BY ${SCORE_SQL} ASC, created_at ASC
+             LIMIT ?
+          )`,
+        [id, batch]
+      )
+    ).changes;
     if (!changes) break; // 防御：删不动就退出，避免死循环
     evicted += changes;
-    remaining = countStmt.get(id).n;
+    remaining = (
+      await db.get(`SELECT COUNT(*) AS n FROM memory_episodic WHERE agent_id = ?`, [id])
+    ).n;
   }
 
   // 3) 低置信标疑（不删，保留审计与复核入口）
-  const suspected = db
-    .prepare(
+  const suspected = (
+    await db.run(
       `UPDATE memory_semantic
-          SET status = 'suspect', updated_at = datetime('now')
-        WHERE agent_id = ? AND confidence < ? AND status = 'verified'`
+          SET status = 'suspect', updated_at = ${fn.now()}
+        WHERE agent_id = ? AND confidence < ? AND status = 'verified'`,
+      [id, SUSPECT_THRESHOLD]
     )
-    .run(id, SUSPECT_THRESHOLD).changes;
+  ).changes;
 
   const result = { expired, evicted, suspected, episodicRemaining: remaining };
   console.log(
@@ -530,16 +539,15 @@ export async function consolidate(
   // 默认 LLM 总结器；未注入时每次调用现取（apiKey 读自 process.env，可测试无 key 场景）。
   const summarizer = llmSummarizer ?? createLlmSummarizer();
 
-  const rows = getDb()
-    .prepare(
-      `SELECT id, content, source, importance, created_at
-         FROM memory_episodic
-        WHERE agent_id = ?
-          AND created_at >= datetime('now', '-${win} days')
-          AND (expires_at IS NULL OR expires_at > datetime('now'))
-        ORDER BY created_at ASC, id ASC`
-    )
-    .all(id);
+  const rows = await db.all(
+    `SELECT id, content, source, importance, created_at
+       FROM memory_episodic
+      WHERE agent_id = ?
+        AND created_at >= ?
+        AND (expires_at IS NULL OR expires_at > ${fn.now()})
+      ORDER BY created_at ASC, id ASC`,
+    [id, utcNowOffsetDays(-win)]
+  );
 
   if (!rows.length) {
     console.log(`[memory] consolidate agent=${id} 近 ${win} 天无 episodic，跳过`);
@@ -578,7 +586,7 @@ export async function consolidate(
     // confidence：LLM 路径用自评（夹 0~1，缺失回落参数）；纯函数路径用参数。
     const finalConf = usedLlm ? clamp01(draft.confidence, conf) : conf;
 
-    const res = writeSemantic({
+    const res = await writeSemantic({
       agentId: id,
       domain,
       understanding: draft.understanding,

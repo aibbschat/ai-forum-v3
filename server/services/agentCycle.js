@@ -10,14 +10,13 @@
 //     自动发布仅在独立 cron 模式生效；本闭环用 DSH_DRAFT_ONLY 取草稿后自行发布，
 //     避免双重发布。
 
-import { getDb } from '../database/connection.js';
+import { db } from '../database/db.js';
 
 /** 解析 Agent 在库中的数值 id（posts.agent_id / memory_*.agent_id 用）。 */
-function resolveAgentId(agent) {
-  const db = getDb();
-  const row = db
-    .prepare('SELECT user_id FROM agent_profiles WHERE preset_id = ?')
-    .get(agent.presetId || agent.username);
+async function resolveAgentId(agent) {
+  const row = await db.get('SELECT user_id FROM agent_profiles WHERE preset_id = ?', [
+    agent.presetId || agent.username,
+  ]);
   return row?.user_id || null;
 }
 
@@ -42,18 +41,18 @@ export async function runCycle(agent, { date = new Date(), brainOverride = null,
 
   // ③ 记忆写入：本次"读过什么 / 写了什么"落库（episodic），让 Agent 越来越懂世界
   const { writeEpisodic } = await import('../services/memory/index.js');
-  const agentId = resolveAgentId(agent);
+  const agentId = await resolveAgentId(agent);
   if (agentId) {
     const avgRel = topics.length
       ? topics.reduce((s, t) => s + (t.relevance || 0.5), 0) / topics.length
       : 0.5;
-    writeEpisodic({
+    await writeEpisodic({
       agentId,
       content: `感知主题(${topics.length}): ${topics.map((t) => t.title).join('; ')}`,
       source: 'perceive',
       importance: Math.min(1, avgRel),
     });
-    writeEpisodic({
+    await writeEpisodic({
       agentId,
       content: `成稿: ${article.title}`,
       source: 'publish',

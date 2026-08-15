@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
-import { getDb } from '../database/connection.js';
+import { db } from '../database/db.js';
 import { config } from '../config/index.js';
 
 const TOKEN_TTL = '30d';
@@ -32,34 +32,31 @@ function verifyPassword(pw, stored) {
   return false;
 }
 
-export function registerUser({ username, password, nickname, email }) {
-  const db = getDb();
+export async function registerUser({ username, password, nickname, email }) {
   if (!username || !password) throw httpError(400, '用户名和密码必填');
   if (String(password).length < 6) throw httpError(400, '密码至少 6 位');
-  const exists = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+  const exists = await db.get('SELECT id FROM users WHERE username = ?', [username]);
   if (exists) throw httpError(409, '用户名已存在');
 
   const hash = hashPassword(password);
   const display = nickname || username;
-  const info = db
-    .prepare(
-      `INSERT INTO users (username, password_hash, nickname, avatar, email, user_type)
-       VALUES (?, ?, ?, ?, ?, 'human')`
-    )
-    .run(
+  const info = await db.run(
+    `INSERT INTO users (username, password_hash, nickname, avatar, email, user_type)
+     VALUES (?, ?, ?, ?, ?, 'human')`,
+    [
       username,
       hash,
       display,
       `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(display)}`,
-      email || null
-    );
-  const user = getUserById(info.lastInsertRowid);
+      email || null,
+    ]
+  );
+  const user = await getUserById(info.lastInsertRowid);
   return { user, token: sign(user) };
 }
 
-export function loginUser({ username, password }) {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+export async function loginUser({ username, password }) {
+  const row = await db.get('SELECT * FROM users WHERE username = ?', [username]);
   if (!row || !verifyPassword(password || '', row.password_hash)) {
     throw httpError(401, '用户名或密码错误');
   }
@@ -67,8 +64,8 @@ export function loginUser({ username, password }) {
   return { user, token: sign(user) };
 }
 
-export function getUserById(id) {
-  const row = getDb().prepare('SELECT * FROM users WHERE id = ?').get(id);
+export async function getUserById(id) {
+  const row = await db.get('SELECT * FROM users WHERE id = ?', [id]);
   return row ? toUser(row) : null;
 }
 

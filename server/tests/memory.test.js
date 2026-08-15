@@ -68,7 +68,7 @@ test('三张 memory 表与索引按 §7.6.6 落地（SQLite 方言）', () => {
 test('§7.6.8-1 写入 100 条 episodic → consolidate 产出 semantic，出处不丢', async () => {
   const ids = [];
   for (let i = 1; i <= 100; i++) {
-    const { id } = writeEpisodic({
+    const { id } = await writeEpisodic({
       agentId: AGENT_CONSOLIDATE,
       // 前缀 [领域] 约定，供 consolidate 分组
       content: `[${DOMAIN}] 第 ${i} 条史料：《宋会要》市舶条记载第 ${i} 则细节。`,
@@ -94,7 +94,7 @@ test('§7.6.8-1 写入 100 条 episodic → consolidate 产出 semantic，出处
   assert.equal(hit.created, true, '首次巩固应为新建');
 
   // 出处不丢：evidence_ids 全量保留 100 条 episodic id
-  const { semantic } = readMemory(AGENT_CONSOLIDATE, { domain: DOMAIN });
+  const { semantic } = await readMemory(AGENT_CONSOLIDATE, { domain: DOMAIN });
   assert.equal(semantic.length, 1);
   const s = semantic[0];
   assert.ok(s.understanding.length > 0, 'understanding 不应为空');
@@ -107,7 +107,7 @@ test('§7.6.8-1 写入 100 条 episodic → consolidate 产出 semantic，出处
   // 再次巩固 → upsert 同一行（不产生重复 domain）
   const again = await consolidate(AGENT_CONSOLIDATE, { days: 7 });
   assert.equal(again.written.find((w) => w.domain === DOMAIN).created, false, '第二次应为更新');
-  const after2 = readMemory(AGENT_CONSOLIDATE, { domain: DOMAIN });
+  const after2 = await readMemory(AGENT_CONSOLIDATE, { domain: DOMAIN });
   assert.equal(after2.semantic.length, 1, 'upsert 不应产生重复 semantic');
 });
 
@@ -119,7 +119,7 @@ const AGENT_NO_KEY = 9007;
 test('P1-1 LLM 巩固：mock 每 domain 调一次、产出 semantic、置信度用自评、出处不丢', async () => {
   const ids = [];
   for (let i = 1; i <= 100; i++) {
-    const { id } = writeEpisodic({
+    const { id } = await writeEpisodic({
       agentId: AGENT_LLM,
       content: `[${DOMAIN}] LLM 版史料第 ${i} 则：《宋会要》市舶条细节 ${i}。`,
       source: 'perceive',
@@ -147,7 +147,7 @@ test('P1-1 LLM 巩固：mock 每 domain 调一次、产出 semantic、置信度�
   assert.equal(res.written[0].llm, true, 'written 应标记走了 LLM 路径');
   assert.equal(res.written[0].count, 100);
 
-  const { semantic } = readMemory(AGENT_LLM, { domain: DOMAIN });
+  const { semantic } = await readMemory(AGENT_LLM, { domain: DOMAIN });
   assert.equal(semantic.length, 1);
   assert.match(semantic[0].understanding, /市舶司要点/, 'understanding 应为 LLM 总结');
   assert.equal(semantic[0].confidence, 0.87, 'confidence 应用 LLM 自评');
@@ -156,8 +156,8 @@ test('P1-1 LLM 巩固：mock 每 domain 调一次、产出 semantic、置信度�
 });
 
 test('P1-1 LLM 失败 → 自动回退 summarizeEpisodics 纯函数，不抛错', async () => {
-  writeEpisodic({ agentId: AGENT_LLM_FAIL, content: `[${DOMAIN}] 甲：LLM 故障时的史料一。`, importance: 0.6 });
-  writeEpisodic({ agentId: AGENT_LLM_FAIL, content: `[${DOMAIN}] 乙：LLM 故障时的史料二。`, importance: 0.4 });
+  await writeEpisodic({ agentId: AGENT_LLM_FAIL, content: `[${DOMAIN}] 甲：LLM 故障时的史料一。`, importance: 0.6 });
+  await writeEpisodic({ agentId: AGENT_LLM_FAIL, content: `[${DOMAIN}] 乙：LLM 故障时的史料二。`, importance: 0.4 });
 
   const boom = async () => {
     throw new Error('mock LLM 故障');
@@ -170,7 +170,7 @@ test('P1-1 LLM 失败 → 自动回退 summarizeEpisodics 纯函数，不抛错'
   assert.equal(hit.count, 2);
   assert.equal(hit.llm, false, 'written 应标记回退路径');
 
-  const { semantic } = readMemory(AGENT_LLM_FAIL, { domain: DOMAIN });
+  const { semantic } = await readMemory(AGENT_LLM_FAIL, { domain: DOMAIN });
   assert.equal(semantic.length, 1);
   assert.match(semantic[0].understanding, /聚合草稿/, '回退路径应产出纯函数聚合草稿');
   assert.equal(semantic[0].confidence, 0.6, '回退路径置信度用 consolidate 参数');
@@ -188,12 +188,12 @@ test('P1-1 无 DEEPSEEK_API_KEY → 不发起任何网络请求，回退纯函�
 
   try {
     delete process.env.DEEPSEEK_API_KEY;
-    writeEpisodic({ agentId: AGENT_NO_KEY, content: `[${DOMAIN}] 无 key 场景下的史料。`, importance: 0.5 });
+    await writeEpisodic({ agentId: AGENT_NO_KEY, content: `[${DOMAIN}] 无 key 场景下的史料。`, importance: 0.5 });
     // 不注入 llmSummarizer → 走默认实现（createLlmSummarizer），无 key 应在碰网络前就放弃。
     const res = await consolidate(AGENT_NO_KEY, { days: 7 });
     assert.equal(fetchCalls, 0, '无 key 时绝不能发起网络请求');
     assert.ok(res.written.length >= 1, '回退纯函数仍应产出 semantic');
-    const { semantic } = readMemory(AGENT_NO_KEY, { domain: DOMAIN });
+    const { semantic } = await readMemory(AGENT_NO_KEY, { domain: DOMAIN });
     assert.match(semantic[0].understanding, /聚合草稿/, '应走纯函数聚合');
     assert.equal(semantic[0].confidence, 0.6);
   } finally {
@@ -240,15 +240,15 @@ test('P1-1 createLlmSummarizer 默认实现：走 /chat/completions、deepseek-v
 });
 
 // ── 验收 2：episodic 超 TTL 删除原文，semantic 保留理解 ─────────────
-test('§7.6.8-2 超 TTL 的 episodic 被 sweepForgetting 删除，semantic 保留', () => {
+test('§7.6.8-2 超 TTL 的 episodic 被 sweepForgetting 删除，semantic 保留', async () => {
   const db = getDb();
 
-  const stale = writeEpisodic({
+  const stale = await writeEpisodic({
     agentId: AGENT_TTL,
     content: `[${DOMAIN}] 一条 91 天前的旧史料摘录。`,
     importance: 0.9,
   });
-  const fresh = writeEpisodic({
+  const fresh = await writeEpisodic({
     agentId: AGENT_TTL,
     content: `[${DOMAIN}] 一条刚读到的新史料摘录。`,
     importance: 0.5,
@@ -260,7 +260,7 @@ test('§7.6.8-2 超 TTL 的 episodic 被 sweepForgetting 删除，semantic 保�
   );
 
   // 原文已被巩固成理解（先 consolidate 再 sweep 是规定顺序）
-  writeSemantic({
+  await writeSemantic({
     agentId: AGENT_TTL,
     domain: DOMAIN,
     understanding: '市舶司抽解与博买要点（已从情景记忆炼成）。',
@@ -268,7 +268,7 @@ test('§7.6.8-2 超 TTL 的 episodic 被 sweepForgetting 删除，semantic 保�
     evidenceIds: [stale.id, fresh.id],
   });
 
-  const sweep = sweepForgetting(AGENT_TTL);
+  const sweep = await sweepForgetting(AGENT_TTL);
   assert.equal(sweep.expired, 1, '应删除 1 条过期 episodic');
 
   const staleRow = db.prepare(`SELECT id FROM memory_episodic WHERE id = ?`).get(stale.id);
@@ -276,7 +276,7 @@ test('§7.6.8-2 超 TTL 的 episodic 被 sweepForgetting 删除，semantic 保�
   const freshRow = db.prepare(`SELECT id FROM memory_episodic WHERE id = ?`).get(fresh.id);
   assert.ok(freshRow, '未过期 episodic 应保留');
 
-  const { semantic, episodic } = readMemory(AGENT_TTL);
+  const { semantic, episodic } = await readMemory(AGENT_TTL);
   assert.equal(semantic.length, 1, 'semantic 理解应保留');
   assert.equal(semantic[0].confidence, 0.7);
   assert.deepEqual(semantic[0].evidenceIds, [stale.id, fresh.id], '出处链条应保留');
@@ -284,15 +284,15 @@ test('§7.6.8-2 超 TTL 的 episodic 被 sweepForgetting 删除，semantic 保�
 });
 
 // ── 验收 3：semantic 置信度 < 0.4 → 自动标疑 ────────────────────────
-test('§7.6.8-3 semantic confidence < 0.4 → sweep 后 status=suspect', () => {
+test('§7.6.8-3 semantic confidence < 0.4 → sweep 后 status=suspect', async () => {
   // 读者纠错导致置信度跌到 0.3
-  const low = writeSemantic({
+  const low = await writeSemantic({
     agentId: AGENT_SUSPECT,
     domain: '存疑领域',
     understanding: '一条被读者纠错、置信度已跌破阈值的理解。',
     confidence: 0.3,
   });
-  const high = writeSemantic({
+  const high = await writeSemantic({
     agentId: AGENT_SUSPECT,
     domain: '稳固领域',
     understanding: '一条证据充分的理解。',
@@ -307,7 +307,7 @@ test('§7.6.8-3 semantic confidence < 0.4 → sweep 后 status=suspect', () => {
     'sweep 之前应仍是 verified'
   );
 
-  const sweep = sweepForgetting(AGENT_SUSPECT);
+  const sweep = await sweepForgetting(AGENT_SUSPECT);
   assert.equal(sweep.suspected, 1, '应标疑 1 条');
 
   assert.equal(
@@ -321,42 +321,42 @@ test('§7.6.8-3 semantic confidence < 0.4 → sweep 后 status=suspect', () => {
     '高置信 semantic 不应被动'
   );
   // 标疑不删：理解仍在库、仍可被检索到（带 status 供调用方决策）
-  const { semantic } = readMemory(AGENT_SUSPECT, { domain: '存疑领域' });
+  const { semantic } = await readMemory(AGENT_SUSPECT, { domain: '存疑领域' });
   assert.equal(semantic.length, 1, 'suspect 记录不应被删除');
   assert.equal(semantic[0].status, 'suspect');
 
   // 复核通过 → 重新沉淀，status 回 verified（§7.6.4 证伪作废闭环的正向分支）
-  writeSemantic({
+  await writeSemantic({
     agentId: AGENT_SUSPECT,
     domain: '存疑领域',
     understanding: '复核后修正的理解。',
     confidence: 0.65,
   });
-  const recheck = readMemory(AGENT_SUSPECT, { domain: '存疑领域' });
+  const recheck = await readMemory(AGENT_SUSPECT, { domain: '存疑领域' });
   assert.equal(recheck.semantic[0].status, 'verified');
 });
 
 // ── 辅助能力自检（不属验收清单，但保障上面三条的地基） ──────────────
-test('readMemory 按 importance × recency 加权排序 episodic', () => {
-  writeEpisodic({ agentId: AGENT_MISC, content: '低重要性', importance: 0.1 });
-  writeEpisodic({ agentId: AGENT_MISC, content: '高重要性', importance: 0.95 });
-  writeEpisodic({ agentId: AGENT_MISC, content: '中重要性', importance: 0.5 });
+test('readMemory 按 importance × recency 加权排序 episodic', async () => {
+  await writeEpisodic({ agentId: AGENT_MISC, content: '低重要性', importance: 0.1 });
+  await writeEpisodic({ agentId: AGENT_MISC, content: '高重要性', importance: 0.95 });
+  await writeEpisodic({ agentId: AGENT_MISC, content: '中重要性', importance: 0.5 });
 
-  const { episodic } = readMemory(AGENT_MISC, { limit: 10 });
+  const { episodic } = await readMemory(AGENT_MISC, { limit: 10 });
   assert.equal(episodic.length, 3);
   assert.equal(episodic[0].content, '高重要性');
   assert.equal(episodic[2].content, '低重要性');
   assert.ok(episodic[0].score > episodic[2].score, 'score 应递减');
 });
 
-test('writeProcedural 同 (agent, skill) 重复写入 → version 递增', () => {
-  const v1 = writeProcedural({
+test('writeProcedural 同 (agent, skill) 重复写入 → version 递增', async () => {
+  const v1 = await writeProcedural({
     agentId: AGENT_MISC,
     skill: 'how_to_cite',
     procedure: '引用必带出处。',
   });
   assert.equal(v1.version, 1);
-  const v2 = writeProcedural({
+  const v2 = await writeProcedural({
     agentId: AGENT_MISC,
     skill: 'how_to_cite',
     procedure: '引用必带出处；存疑必明说；优先 chtxt 精校。',
@@ -386,10 +386,10 @@ test('summarizeEpisodics 是纯函数：空输入安全，输出含出处', () =
   assert.match(draft.understanding, /#7/);
 });
 
-test('非法入参被拒（agentId / 空内容）', () => {
-  assert.throws(() => writeEpisodic({ agentId: 0, content: 'x' }), /agentId/);
-  assert.throws(() => writeEpisodic({ agentId: AGENT_MISC, content: '   ' }), /content/);
-  assert.throws(
+test('非法入参被拒（agentId / 空内容）', async () => {
+  await assert.rejects(() => writeEpisodic({ agentId: 0, content: 'x' }), /agentId/);
+  await assert.rejects(() => writeEpisodic({ agentId: AGENT_MISC, content: '   ' }), /content/);
+  await assert.rejects(
     () => writeSemantic({ agentId: AGENT_MISC, domain: 'd', understanding: '' }),
     /understanding/
   );

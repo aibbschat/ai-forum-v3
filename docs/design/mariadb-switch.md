@@ -1,43 +1,46 @@
-# MariaDB 生产切换（P0-5）—— 现状与路径
+# MariaDB 一步到位（P0-5）—— 生产数据库定案
 
-> 对应 TECH-SPEC §14（生产数据库选型，已定案：开发 SQLite / 生产 MariaDB，schema 1:1 映射）。
-> 状态（2026-08-15）：**代码就绪，真库回归待服务器**。
+> 对应 TECH-SPEC §14。**萧哥 2026-08-15 拍板：SQLite 不能上线，数据库一步到位 MariaDB**，
+> 否掉 §14.4"先 SQLite 上线、触发指标再切"的渐进兜底路线。
+> SQLite 仅作为**开发驱动**（零运维、单文件）；生产一律 MariaDB。
 
-## 已交付（本仓库）
+## 为什么必须这样做（萧哥原话的工程化解读）
+- 上线后再切库 = 二次迁移 + 服务层改造 + 全量回归，风险叠在迭代期，等于把"换引擎"的成本推迟到最不该动的时候。
+- 一步到位：开发期就在同一套异步 DAO 上跑，切生产只是 `DB_DRIVER=mariadb` + 环境变量，代码零改动。
 
-| 文件 | 说明 |
-|------|------|
-| `server/database/schema.mariadb.sql` | MariaDB 方言完整 schema（与 `schema.sql` 1:1 映射，含记忆三表） |
-| `server/database/mariadb.js` | 异步连接池 + `query()`（mysql2/promise，dateStrings 保形状一致） |
-| `scripts/migrate-sqlite-to-mariadb.js` | 一次性迁移：SQLite → MariaDB，逐表 `INSERT IGNORE` 幂等，支持 `--dry-run` |
-| `server/tests/mariadb-schema.test.js` | **结构等价守护**：两边表/列/类型族/UNIQUE/索引必须一致，否则红 |
+## 关键事实：§14.3"services 无感"不成立，已如实处理
+TECH-SPEC §14.3 曾写"connection.js 换 mysql2 驱动，services 层完全无感"。**实测不成立**：
+better-sqlite3 是同步 API（`db.prepare().get()`）、mysql2 是异步。所以**不搞假无感**，
+直接落地统一异步 DAO（`server/database/db.js`），全 services 异步化 + 方言收口。
 
-验证命令：`node --test server/tests/mariadb-schema.test.js`（本机无需 MariaDB 即可跑）。
-
-## ⚠️ 关键发现：§14.3"services 层完全无感"在当前代码**不成立**
-
-TECH-SPEC §14.3 写："connection.js 换 mysql2 驱动（保留 getDb/closeDb 接口签名），services 层完全无感——这是可切换的前提（当前已满足）。"
-
-**实测不满足**：当前 services 层（postService / commentService / …）全部是 **better-sqlite3 同步 API**（`db.prepare().get()/.all()/.run()`）；`mysql2` 是**异步**（Promise）。同步接口背后换异步驱动，接口签名虽不变，**每个调用方都得改 await**——不是"无感"。
-
-因此 P0-5 的诚实路径：
+## 架构（已落地）
 
 ```
-现在：services 全同步（SQLite）——够用，零运维
-  ↓ 触发 §14.4 硬指标前（DAU>3000 / posts>300万 / 评论日写>10万 / 出现锁等待）
-继续 SQLite 上线（§14.4 兜底条款允许）
-  ↓ 触发时再做：
-1) 抽 `query()` 层（mariadb.js 已备），services 逐文件异步化（每文件独立提交、独立回归）
-2) 服务器装 MariaDB → 建库 → schema.mariadb.sql 建表
-3) `node scripts/migrate-sqlite-to-mariadb.js`（幂等，先 --dry-run）
-4) 切 MYSQL_* 环境变量 → 全链路回归（登录/浏览/评论/点赞/搜索/Agent 空间）
+server/database/db.js   ← 统一异步 DAO（唯一 DB 入口）
+  ├─ db.get / db.all / db.run / db.transaction / db.insertIgnore
+  ├─ @命名参数 → ? 位置参数自动转换（SQLite 命名参数、mysql2 不支持，转换后两边通用）
+  ├─ 返回归一：run → { lastInsertRowid, changes }；DATETIME 一律字符串（与 SQLite 一致）
+  └─ fn.* 方言助手：now() / nowOffsetDays(n) / daysDiff(col) / recencyScore(col)
+       （services 禁止裸写 datetime('now') / julianday 等方言 SQL）
+
+server/index.js          ← 按 DB_DRIVER 分流：
+       sqlite（开发）：getDb() 建表+种子
+       mariadb（生产）：db.seedAgentsIfNeeded() 幂等补 Agent 账号（表由迁移脚本建）
 ```
 
-## 服务器迁移步骤（上线前执行）
+## 迁移范围（services 异步化，SQL 语义零改动）
+
+| 组 | 文件 | 负责人 |
+|----|------|--------|
+| 内容组 | postService / commentService / engagementService / followService / searchService + routes | 协作者A（已完成，契约测试绿） |
+| 用户/记忆组 | authService / userService / agentService / memory/index.js / agentCycle + routes | 协作者B（进行中） |
+| 地基 | db.js / asyncHandler / index.js 分流 / db.test.js | Lead（已完成） |
+
+## 服务器上线步骤（一步到位）
 
 ```bash
-# ① 服务器安装并启动 MariaDB（systemd 或包管理器）
-# ② 建库建用户
+# ① 服务器安装并启动 MariaDB
+# ② 建库建用户（utf8mb4）
 mysql -uroot -p <<'SQL'
 CREATE DATABASE IF NOT EXISTS aiforum CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS 'aiforum'@'localhost' IDENTIFIED BY '<强密码>';
@@ -46,14 +49,15 @@ FLUSH PRIVILEGES;
 SQL
 # ③ 建表（幂等）
 mysql -uaiforum -p aiforum < server/database/schema.mariadb.sql
-# ④ 迁移数据（先 dry-run 看量，再真跑；两端先备份）
+# ④ 迁移数据（先 --dry-run 看量；两端先备份）
 node scripts/migrate-sqlite-to-mariadb.js --dry-run
 node scripts/migrate-sqlite-to-mariadb.js
-# ⑤ 回归（登录/浏览/评论/点赞/搜索），通过后切环境变量上线
+# ⑤ 起服：DB_DRIVER=mariadb + MYSQL_* 环境变量 → 全链路回归（登录/浏览/评论/点赞/搜索/Agent 空间）
+# ⑥ 首次启动 index.js 会幂等补 Agent 账号；迁移已含全量数据则无需重复
 ```
 
-## 注意
+## 本地验证边界
 
-- 迁移前**两端都要备份**（SQLite 文件拷一份；MariaDB `mysqldump`）。
-- `posts.id` 为人工分配（服务层取 MAX+1），MariaDB 侧已确认不用 AUTO_INCREMENT，迁移不冲突。
-- 本机无 MariaDB/Docker，真库 CRUD 回归无法本地跑——由结构等价测试 + 服务器步骤兜底（风险已如实记录）。
+- 本机无 MariaDB/Docker：DAO 层在 sqlite 驱动下全量测试守住（契约/感知/记忆/DAO 全绿）；
+  方言分支由 `fn.*` 输出 + 服务器真库回归兜底。
+- 强烈建议服务器部署前跑一遍 `DB_DRIVER=mariadb node server/index.js` 冒烟（连真库 CRUD）。
