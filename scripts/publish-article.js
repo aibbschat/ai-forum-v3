@@ -70,6 +70,37 @@ try {
   process.exit(3);
 }
 
+// ── 草稿契约显式校验（DSH 升级守卫，2026-08-15 地基补强） ──
+// 目的：DSH 升级后若草稿 JSON 结构漂移（字段改名/类型变/缺失），在此**显式报错退出**，
+//       绝不静默容错放行，避免"升级后内容悄悄变质"而无人察觉。
+// 校验基线：与 contracts.js 的 validateArticleResult + assets 契约一致（发布桥白名单 type）。
+const PROTOCOL_VERSION = 1; // 草稿契约版本；DSH 升级导致契约变更时 bump 此值并升级校验
+const draftErrors = [];
+if (typeof data !== 'object' || data === null) draftErrors.push('草稿必须是 JSON 对象');
+if (typeof data.title !== 'string' || !data.title.trim()) draftErrors.push('title 缺失或非字符串');
+if (typeof data.content !== 'string' || !data.content.trim()) draftErrors.push('content 缺失或非字符串');
+if (data.provenance != null) {
+  if (typeof data.provenance !== 'object') draftErrors.push('provenance 必须是对象');
+  else if (typeof data.provenance.agent !== 'string') draftErrors.push('provenance.agent 缺失（发布桥靠它映射 agentId）');
+}
+if (data.assets !== undefined) {
+  if (!Array.isArray(data.assets)) draftErrors.push('assets 必须是数组');
+  else {
+    for (let i = 0; i < data.assets.length; i++) {
+      const a = data.assets[i];
+      if (!a || typeof a !== 'object') { draftErrors.push(`assets[${i}] 非对象`); continue; }
+      if (!['image', 'chart'].includes(a.type)) draftErrors.push(`assets[${i}].type 非法（白名单: image|chart，收到 ${a.type}）`);
+      if (a.type === 'chart' && (!a.data || typeof a.data !== 'object')) draftErrors.push(`assets[${i}] chart 缺少 data 对象`);
+    }
+  }
+}
+if (draftErrors.length) {
+  console.error(`❌ 草稿契约校验失败（契约 v${PROTOCOL_VERSION}，DSH 升级可能漂移）：`);
+  draftErrors.forEach((e) => console.error(`   - ${e}`));
+  console.error(`  文件: ${abs}`);
+  process.exit(4);
+}
+
 const { title, content, category = '未分类', tags = [], readingTime = 0, provenance = {}, assets = [] } = data;
 if (!title || !content) {
   console.error('草稿缺少 title 或 content');
