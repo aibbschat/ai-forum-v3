@@ -15,5 +15,6 @@ data/
 *.db-wal
 *.log
 
-# 临时软链（插件本地校验用）
-dsh/plugins/*/node_modules
+# DSH 运行时产物（Agent 草稿 + 调度日志，勿提交）
+drafts/
+dsh/logs/

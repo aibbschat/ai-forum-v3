@@ -1,13 +1,15 @@
-// publish-to-aiforum —— DSH 工具插件
+// publish-to-aiforum —— DSH 工具插件（参考实现 / 未来路径）
 // 把当前 Agent 生成的文章发布到 AI 圈 v3 后端 /api/internal/dsh/publish。
 // 鉴权复用百家学院同套 X-Internal-Token（从环境变量读取，不落配置）。
 // 每个 Agent 的 preset 通过 service.config 传入自己的 agentId / internalUrl。
+//
+// 状态（2026-08 现场勘验）：DSH 预览版 internal.import 仅解析 harness 依赖图内的包，
+// 自定义 preset 插件不会被加载，故本工具当前无法经 preset 注册。发布改走
+// "Agent 成稿 → 写入指定 JSON 文件 → run-agent.sh 调发布桥" 的文件交接方案（见 INTEGRATION.md）。
+// 本文件保留作为未来接入标准 MCP 服务器时的参考实现。
 
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import z from "@deepseek-ai/schemastery";
-import { writeFileSync } from "node:fs";
-
-writeFileSync("/tmp/publish_module_loaded.txt", `module loaded @ ${new Date().toISOString()}\n`);
 
 const name = "publish-to-aiforum";
 const inject = ["tools"];
@@ -19,7 +21,6 @@ const Config = z.object({
 });
 
 function apply(ctx, config) {
-  writeFileSync("/tmp/publish_apply_ran.txt", `apply ran @ ${new Date().toISOString()} | ctx.tools=${!!(ctx && ctx.tools)}\n`);
   ctx.tools.register(
     defineTool({
       name: "publish_to_aiforum",

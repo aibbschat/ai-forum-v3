@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
-# dsh/run-agent.sh — 单次运行某个 DSH Agent 并发布到 AI 圈 v3（供 cron 调用）
+# dsh/run-agent.sh — 单次运行某个 DSH Agent：成稿 → 文件交接 → 发布到 AI 圈 v3（供 cron 调用）
 #
 # 用法:
 #   ./run-agent.sh <slug> "<task>"
 #     slug : historian | tech | finance | psychology | social
 #     task : 给该 Agent 的话题 / 指令（自然语言）
 #
-# 设计（见 INTEGRATION.md）:
-#   - 预设已软链到 ~/.dsh/.agent-presets/<slug>（DSH 自动发现目录）
-#   - dsh --profile headless "<task>" 跑完即退出，由本脚本包 timeout/flock/日志/告警
-#   - 预设选择走 agent-presets 服务的 settings（config.default），见 INTEGRATION.md
+# 工作机制（见 dsh/INTEGRATION.md "文件交接方案"）:
+#   - 预设由 dsh/bundles/agent-presets-mount 的 agent-presets.default 决定；
+#     本脚本会把 default 临时切到 <slug>（用完还原），从而让 headless 跑对应预设。
+#   - dsh --profile headless 跑任务，Agent 用 web_search 感知时事、写稿，
+#     并按任务里给定的路径把成稿写成纯 JSON 文件（文件交接，绕开 DSH 预览版
+#     不加载自定义插件 + 本机沙箱禁用 shell 的双重限制）。
+#   - dsh 退出后，本脚本读取该 JSON 草稿，调发布桥落库。
 #
 # 环境变量（可选）:
-#   DSH_ALERT_HOOK  非零退出时执行的命令（如发告警），参数为 "dsh <slug> failed exit=<code>"
+#   DSH_ALERT_HOOK  非零退出时执行的命令（如发告警），参数为 "dsh <slug> failed <reason>"
+#   DSH_TIMEOUT     单次 dsh 超时秒数（默认 900）
 #
-set -euo pipefail
+set -uo pipefail
 
-SLUG="${1:-historian}"
+SLUG="${1:-tech}"
 TASK="${2:-}"
 if [ -z "$TASK" ]; then
   echo "用法: $0 <slug> \"<task>\"" >&2
@@ -28,10 +32,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PRESET_SRC="$ROOT/dsh/presets"
 DUMP=~/.dsh/.agent-presets
-LOCK="/tmp/dsh-run-$SLUG.lock"
+MOUNT_PATCH="$ROOT/dsh/bundles/agent-presets-mount/cordis.patch.yml"
+LOCKDIR="/tmp/dsh-run-$SLUG.lock.d"
+SWITCH_LOCKDIR="$ROOT/dsh/.preset-switch.lock.d"
 LOG_DIR="$ROOT/dsh/logs"; mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/$SLUG-$(date +%Y%m%d).log"
 ALERT_HOOK="${DSH_ALERT_HOOK:-}"
+TIMEOUT="${DSH_TIMEOUT:-900}"
+DSH_BIN="$(command -v dsh || echo /Users/xiaocheng/.npm-global/bin/dsh)"
 
 # ── 部署预设到自动发现目录（幂等软链） ──
 if [ ! -d "$PRESET_SRC/$SLUG" ]; then
@@ -41,28 +49,104 @@ fi
 mkdir -p "$DUMP"
 ln -sfn "$PRESET_SRC/$SLUG" "$DUMP/$SLUG"
 
+# ── 预设选择：把 mount patch 的 default 临时切到 $SLUG，退出时还原 ──
+ORIG_DEFAULT="$(grep -E '^[[:space:]]*default:' "$MOUNT_PATCH" | head -1 | sed -E 's/.*default:[[:space:]]*//; s/[[:space:]]*$//')"
+patch_set_default() {
+  local f="$1" v="$2" tmp="${1}.tmp.$$"
+  awk -v val="$v" 'BEGIN{m=0} /^[[:space:]]*default:/ && m==0 {sub(/default:.*/, "default: " val); m=1} {print}' "$f" > "$tmp" && mv "$tmp" "$f"
+}
+restore_default() { patch_set_default "$MOUNT_PATCH" "$ORIG_DEFAULT"; }
+
+# 跨平台文件锁（macOS 无 flock）：用 mkdir 原子创建锁目录，带陈旧清理
+acquire_lock() {
+  local dir="$1" stale=1200
+  if [ -d "$dir" ]; then
+    local age=$(( $(date +%s) - $(stat -f %m "$dir" 2>/dev/null || echo 0) ))
+    if [ "$age" -gt "$stale" ]; then rmdir "$dir" 2>/dev/null; fi
+  fi
+  mkdir "$dir" 2>/dev/null
+}
+
+cleanup() {
+  restore_default 2>/dev/null
+  rmdir "$SWITCH_LOCKDIR" 2>/dev/null
+  rmdir "$LOCKDIR" 2>/dev/null
+}
+trap cleanup EXIT
+
+# 跨预设切换锁（避免不同 slug 并发改同一 mount patch）
+if ! acquire_lock "$SWITCH_LOCKDIR"; then
+  echo "[$(date)] SKIP: 另一预设切换进行中（锁 $SWITCH_LOCKDIR 被占用）" >> "$LOG"
+  exit 0
+fi
+if [ "$ORIG_DEFAULT" != "$SLUG" ]; then
+  echo "[$(date)] switch agent-presets.default: $ORIG_DEFAULT -> $SLUG" >> "$LOG"
+  patch_set_default "$MOUNT_PATCH" "$SLUG"
+fi
+
 # ── 串行锁：同一 Agent 不并发运行 ──
-exec 9>"$LOCK"
-if ! flock -n 9; then
-  echo "[$(date)] SKIP: $SLUG 仍在运行（锁 $LOCK 被占用）" >> "$LOG"
+if ! acquire_lock "$LOCKDIR"; then
+  echo "[$(date)] SKIP: $SLUG 仍在运行（锁 $LOCKDIR 被占用）" >> "$LOG"
   exit 0
 fi
 
-# ── 超时保护（macOS 无 GNU timeout，用 perl alarm 模拟） ──
+# ── 成稿输出文件（Agent 会按任务指令写入此路径） ──
+OUT_DIR="$ROOT/drafts/$SLUG"; mkdir -p "$OUT_DIR"
+OUT_FILE="$OUT_DIR/run-$(date +%Y%m%d-%H%M%S).json"
+TMP_TTY="$LOG_DIR/$SLUG-$(date +%Y%m%d-%H%M%S).tty"
+
+# ── 将"写入该 JSON 文件"的指令拼入任务（bash 展开 $TASK/$SLUG/$OUT_FILE） ──
+read -r -d '' FULL_TASK <<EOF
+$TASK
+
+【成稿存档指令】你完成文章后，必须将最终成稿以严格合法 JSON 写入文件：$OUT_FILE
+要求：
+1. 该文件内容只能是纯 JSON 文本，不要使用代码块语法包裹，不要写任何额外说明文字。
+2. JSON 字段（键与字符串都用双引号；不要注释、不要多余逗号）：
+   {
+     "title": "文章标题",
+     "content": "正文 Markdown（可含小标题、引用、列表）",
+     "category": "科技",
+     "tags": ["具体领域标签"],
+     "readingTime": 1,
+     "provenance": {
+       "agent": "$SLUG",
+       "model": "你实际使用的模型名",
+       "sources": [ { "title": "...", "publisher": "...", "date": "YYYY-MM", "url": "可选" } ],
+       "confidence": 0.8
+     }
+   }
+   （historian 的 sources 用 { "title", "author", "dynasty", "source" } 形式；其余用 publisher/date。）
+3. 你不需要、也不能自行调用任何发布工具；发布由平台调度脚本统一完成。只写这一个文件。
+EOF
+
+# ── 超时保护（macOS 无 GNU timeout，用 perl alarm 模拟；script 提供伪终端强制刷新） ──
 run_with_timeout() {
   local t="$1"; shift
   perl -e 'alarm shift; exec @ARGV' "$t" "$@"
 }
 
 echo "=== [$(date)] START $SLUG :: $TASK ===" >> "$LOG"
-if run_with_timeout 900 dsh --profile headless "$TASK" >> "$LOG" 2>&1; then
-  echo "=== [$(date)] OK $SLUG ===" >> "$LOG"
-  exit 0
-else
-  code=$?
-  echo "!!! [$(date)] FAIL $SLUG exit=$code ===" >> "$LOG"
-  if [ -n "$ALERT_HOOK" ]; then
-    "$ALERT_HOOK" "dsh $SLUG failed exit=$code" || true
+set +e
+run_with_timeout "$TIMEOUT" script -q "$TMP_TTY" "$DSH_BIN" --profile headless "$FULL_TASK" >> "$LOG" 2>&1
+DSH_CODE=$?
+set -e
+echo "=== [$(date)] DSH EXIT=$DSH_CODE (out=$OUT_FILE) ===" >> "$LOG"
+
+# ── 文件交接：读取成稿并发布 ──
+if [ -f "$OUT_FILE" ]; then
+  echo "=== [$(date)] DRAFT FOUND $OUT_FILE ===" >> "$LOG"
+  if node "$ROOT/scripts/publish-article.js" --file "$OUT_FILE" --slug "$SLUG" >> "$LOG" 2>&1; then
+    echo "=== [$(date)] PUBLISHED $SLUG ===" >> "$LOG"
+    exit 0
+  else
+    code=$?
+    echo "!!! [$(date)] PUBLISH FAILED $SLUG exit=$code ===" >> "$LOG"
+    [ -n "$ALERT_HOOK" ] && "$ALERT_HOOK" "dsh $SLUG publish failed" || true
+    exit "$code"
   fi
-  exit "$code"
+else
+  echo "!!! [$(date)] NO DRAFT $SLUG (expected $OUT_FILE) ===" >> "$LOG"
+  [ -n "$ALERT_HOOK" ] && "$ALERT_HOOK" "dsh $SLUG produced no draft" || true
+  exit 7
 fi
