@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# scripts/deploy/post-receive — 服务器 bare 仓库 hook 模板（部署入口）
+# 安装：把本文件放到服务器 bare 仓库 /var/git/ai-forum-v3.git/hooks/post-receive，
+#       并 chmod +x。本地/服务器 push origin main 即触发 deploy.sh。
+set -euo pipefail
+
+# 解析分支：仅 main 触发部署
+while read -r old new ref; do
+  case "$ref" in
+    refs/heads/main)
+      echo "[post-receive] main 更新 → 触发部署"
+      export APP_DIR="${APP_DIR:-/var/www/ai-forum-v3}"
+      # 把最新代码 checkout 到运行目录 current
+      mkdir -p "$APP_DIR"
+      if [ -d "$APP_DIR/current/.git" ]; then
+        git -C "$APP_DIR/current" fetch origin
+        git -C "$APP_DIR/current" reset --hard origin/main
+      else
+        git clone -b main /var/git/ai-forum-v3.git "$APP_DIR/current"
+      fi
+      # 恢复不被 reset 抹掉的关键文件（红线：工作树必须干净，这些文件在 .gitignore 或单独备份）
+      # 注意：.env 在 .gitignore 中，git reset 不会删它；若部署机有本地覆盖文件请在此恢复。
+      bash "$APP_DIR/current/scripts/deploy/deploy.sh" || exit 1
+      ;;
+    *)
+      echo "[post-receive] 忽略分支 $ref"
+      ;;
+  esac
+done

@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# scripts/deploy/deploy.sh — v3 部署（参照 pay-relay 模式：备份→拉代码→装依赖→构建→重启→健康检查）
+# 在服务器运行目录执行；由 bare repo post-receive hook 调用（见同目录 post-receive）。
+#
+# 用法：bash scripts/deploy/deploy.sh [--skip-build]
+set -euo pipefail
+
+APP_DIR="${APP_DIR:-/var/www/ai-forum-v3}"
+PM2_NAME="${PM2_NAME:-ai-forum-v3}"
+BACKUP_DIR="$APP_DIR/backups"
+KEEP_BACKUPS=10
+SKIP_BUILD="${1:-}"
+
+echo "=== [1/5] 备份当前版本 ==="
+mkdir -p "$BACKUP_DIR"
+BK="$BACKUP_DIR/backup_$(date +%Y%m%d_%H%M%S).tar.gz"
+if [ -d "$APP_DIR/current" ]; then
+  tar czf "$BK" -C "$APP_DIR" --exclude=backups --exclude=node_modules --exclude='web/dist' current
+  ls -t "$BACKUP_DIR"/backup_*.tar.gz | tail -n +$((KEEP_BACKUPS+1)) | xargs -r rm -f
+  echo "已备份: $BK（保留最近 $KEEP_BACKUPS 份）"
+else
+  echo "无 current 目录（首次部署），跳过备份"
+fi
+
+echo "=== [2/5] 更新代码 ==="
+# 假定 post-receive 已把最新代码 checkout 到 current
+cd "$APP_DIR/current"
+git fetch origin main 2>/dev/null || true
+git reset --hard origin/main
+
+echo "=== [3/5] 依赖与构建 ==="
+npm ci --omit=dev 2>/dev/null || npm install
+if [ "$SKIP_BUILD" != "--skip-build" ]; then
+  (cd web && npm ci --omit=dev 2>/dev/null || npm install)
+  (cd web && npx vite build)
+fi
+
+echo "=== [4/5] 环境变量 ==="
+[ -f .env ] || { echo "!! 缺 .env（生产密钥！）"; exit 1; }
+# 关键：生产必须 mariadb
+grep -q '^DB_DRIVER=' .env || echo "DB_DRIVER=mariadb" >> .env
+grep -q '^MYSQL_' .env || { echo "!! .env 缺 MYSQL_* 连接配置"; exit 1; }
+
+echo "=== [5/5] 重启 + 健康检查 ==="
+pm2 restart "$PM2_NAME" || pm2 start server/index.js --name "$PM2_NAME" -i 1
+sleep 3
+HEALTH=$(curl -s -m 5 "http://127.0.0.1:${PORT:-3001}/api/health" || echo '{"ok":false}')
+echo "健康检查: $HEALTH"
+case "$HEALTH" in
+  *'"ok":true'*) echo "✅ 部署成功" ;;
+  *) echo "❌ 健康检查未通过，建议 rollback.sh 回滚"; exit 1 ;;
+esac
