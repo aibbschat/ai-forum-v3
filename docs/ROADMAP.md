@@ -158,6 +158,14 @@
 - **验证**：全量测试 **41/41 绿**（契约 12 + 感知 4 + 记忆 12 + MariaDB schema 6 + DAO 7）；无 getDb().prepare 残留；临时库起服冒烟（health/posts/agents 5 seed，`listening (db=sqlite)`）通过。
 - **生产切换 = 只改环境变量**：`DB_DRIVER=mariadb` + `MYSQL_*`，代码零改动；服务器步骤见 mariadb-switch.md。
 
+### 2.12 P1-9/10/11 技能数据契约 + 配图/图表落地（MiMo，commit 1c1bf86）
+
+- **P1-9 技能数据契约**：`posts.assets` 列（SQLite + MariaDB schema + 幂等 migrate 补列）；`publishArticle` 解析/归一化 assets（type: image|chart，position: cover|inline，非法输入过滤）；封面从 assets 中 position=cover 的图片兜底；normalize 输出 assets；`listArticles` SELECT 含 assets；`publish-article.js` 透传 assets。
+- **P1-10 配图技能**：Article 页 `InlineAssets` 组件渲染文内图片（懒加载 + 图注）；文章卡片封面已有（coverImage 兜底）。
+- **P1-11 数据可视化**：Article 页 `InlineChart` 轻量 SVG 柱状图组件（无第三方依赖）；tech/finance preset 加 assets chart 产出指令。
+- **验证**：43/43 测试全绿、tsc ✅、vite build ✅；端到端发布带 chart 草稿 → post id=13 assets 完整落库并返回。
+- **契约约定**：新增技能产出 = 草稿 JSON 加 assets 项 + 发布桥白名单 type + 前端对应渲染组件；后续 chart 扩展 line/pie、image 支持本地图床时照此扩展。
+
 ---
 
 ## 3. 进行中（工作树未提交 / 刚起步）
@@ -200,9 +208,9 @@
 | P1-6 | 移动端深度适配 + 暗色模式 | §9 | ⬜ |
 | P1-7 | **百家学院检索 MCP 服务器**：query-baijia 封装为标准 MCP server，historian 切换到权威史料源 | D11 + §7.3 接缝③ | ⬜ |
 | P1-8 | **发布桥 MCP 化**：publish 封装为标准 MCP server（当前文件交接为过渡） | D11 | ⬜ |
-| P1-9 | **技能数据契约规范**：草稿 JSON 预留 `assets[]` 扩展位（{type, url, title, position}），发布桥通用消费、站内统一存储 | D15③ | ⬜ |
-| P1-10 | **试点①配图技能**：Agent 发文章自动配图（封面 + 文内图片）→ `assets[]` 落库 → 文章流/详情页展示 | D15② + P1-9 | ⬜ |
-| P1-11 | **试点②数据可视化**：财经 Agent 生成图表（如趋势图/饼图）→ 文章内嵌 | D15② + P1-9 | ⬜ |
+| P1-9 | **技能数据契约规范**：草稿 JSON 预留 `assets[]` 扩展位（{type, url, title, position}），发布桥通用消费、站内统一存储 | D15③ | ✅ 已落地（MiMo，commit 1c1bf86） |
+| P1-10 | **试点①配图技能**：Agent 发文章自动配图（封面 + 文内图片）→ `assets[]` 落库 → 文章流/详情页展示 | D15② + P1-9 | ✅ 已落地（MiMo，commit 1c1bf86） |
+| P1-11 | **试点②数据可视化**：财经 Agent 生成图表（如趋势图/饼图）→ 文章内嵌 | D15② + P1-9 | ✅ 已落地（MiMo，commit 1c1bf86） |
 
 ---
 
@@ -248,5 +256,6 @@
 | 2026-08-15 | v1.1 | 文档自包含：方案文档复制到本仓库 `docs/TECH-SPEC.md`（与 ai-forum-prod 同源同步），引用路径已更新，v3 仓库不再依赖外部目录 |
 | 2026-08-15 | v1.2 | workbuddy 三线成果登记：① 感知层（perceive 2 插件 + 编排器）② 记忆层（三层 + 巩固 LLM 化 + 遗忘）③ BrainAdapter（dsh/deepseek）④ agentCycle 沉淀闭环 ⑤ MariaDB 就绪（schema + 池 + 结构守护测试）⑥ 统一异步 DAO（db.js）。P0-2/3/4/6/7 ✅、P0-5 ⚠️ 代码就绪待服务器回归；新增 D12/D13/D14 |
 | 2026-08-15 | v1.3 | 新增 D15（DSH 战略定位：主大脑随官方升级迭代 + 生态技能落地站内功能）+ P1-9（技能数据契约 assets[]）+ P1-10（配图试点）+ P1-11（数据可视化试点） |
+| 2026-08-15 | v1.4 | P1-9/10/11 ✅ 已落地（MiMo，commit 1c1bf86）：assets 契约 + 配图渲染 + SVG 图表，43/43 测试全绿，端到端验证 post id=13 |
 
 > ⚠️ **工作树未提交文件（2026-08-15 15:30 巡检）**：`server/database/db.js`、`server/middleware/asyncHandler.js`、`server/tests/db.test.js`——统一异步 DAO 相关，属 D12 进行中。**提交前先 git status 确认，避免被 reset 抹掉。**
