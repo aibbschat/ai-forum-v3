@@ -102,19 +102,118 @@ function parseEvidenceIds(raw) {
  * @param {{agentId:number, content:string, source?:string, importance?:number}} input
  * @returns {{id:number, agentId:number, source:string, importance:number}}
  */
-export async function writeEpisodic({ agentId, content, source = 'perceive', importance = 0.5 }) {
+export async function writeEpisodic({ agentId, content, source = 'perceive', importance = 0.5, status = 'pending' }) {
   const id = requireAgentId(agentId);
   const text = requireText(content, 'content');
   const src = normalizeSource(source);
   const imp = clamp01(importance, 0.5);
+  const st = ['pending', 'locked', 'used', 'void'].includes(status) ? status : 'pending';
 
   const info = await db.run(
-    `INSERT INTO memory_episodic (agent_id, content, source, importance, expires_at)
-     VALUES (?, ?, ?, ?, ${fn.nowOffsetDays(EPISODIC_TTL_DAYS)})`,
-    [id, text, src, imp]
+    `INSERT INTO memory_episodic (agent_id, content, source, importance, status, expires_at)
+     VALUES (?, ?, ?, ?, ?, ${fn.nowOffsetDays(EPISODIC_TTL_DAYS)})`,
+    [id, text, src, imp, st]
   );
 
-  return { id: Number(info.lastInsertRowid), agentId: id, source: src, importance: imp };
+  return { id: Number(info.lastInsertRowid), agentId: id, source: src, importance: imp, status: st };
+}
+
+// ════════════════════════════════════════════════════════════════
+// 素材库生命周期（P1-16，2026-08-15）
+// 素材（source='perceive'）不是"用完即弃"，而是进入素材池：
+//   pending（感知积累）→ locked（写作锁定）→ used（发布已用，防重复）
+// 配合一周整理（consolidate + sweep）：已用素材提炼进 semantic，未用素材按 TTL 淘汰。
+// ════════════════════════════════════════════════════════════════
+
+/**
+ * 查询素材池（感知素材，status 可按需过滤）。
+ * 默认只取待用（pending）素材——写作前"有把握"的依据。
+ * @param {number} agentId
+ * @param {{status?:string, limit?:number}} [opts]
+ */
+export async function listMaterialPool(agentId, { status = 'pending', limit = 50 } = {}) {
+  const id = requireAgentId(agentId);
+  const k = Math.max(1, Math.min(200, Number(limit) || 50));
+  const rows = await db.all(
+    `SELECT id, content, source, importance, status, created_at
+       FROM memory_episodic
+      WHERE agent_id = ? AND source = 'perceive'
+        AND status = ?
+        AND (expires_at IS NULL OR expires_at > ${fn.now()})
+      ORDER BY importance DESC, created_at DESC
+      LIMIT ?`,
+    [id, status, k]
+  );
+  return rows;
+}
+
+/**
+ * 素材饱和判断：待用素材（pending）按 importance 加权累计，达到阈值即"有把握可写"。
+ * @param {number} agentId
+ * @param {{minCount?:number, minScore?:number}} [opts]
+ * @returns {{saturated:boolean, count:number, score:number}}
+ */
+export async function materialSaturation(agentId, { minCount = 3, minScore = 1.5 } = {}) {
+  const pool = await listMaterialPool(agentId, { status: 'pending', limit: 100 });
+  const count = pool.length;
+  const score = pool.reduce((s, m) => s + (m.importance || 0.5), 0);
+  return {
+    saturated: count >= minCount && score >= minScore,
+    count,
+    score,
+  };
+}
+
+/**
+ * 锁定素材为写作依据（pending → locked）。
+ * 发布成功后调用 markMaterialUsed 把同一批标为 used（防重复）。
+ * @param {number} agentId
+ * @param {{count?:number}} [opts] 锁定条数
+ * @returns {Promise<number[]>} 锁定的素材 id 列表
+ */
+export async function lockMaterial(agentId, { count = 5 } = {}) {
+  const id = requireAgentId(agentId);
+  const pool = await listMaterialPool(id, { status: 'pending', limit: count });
+  if (pool.length === 0) return [];
+  const ids = pool.map((m) => m.id);
+  await db.run(
+    `UPDATE memory_episodic SET status = 'locked' WHERE agent_id = ? AND id IN (${ids.map(() => '?').join(',')})`,
+    [id, ...ids]
+  );
+  return ids;
+}
+
+/**
+ * 标记素材已用（locked → used，发布成功后调用，防下篇重复引用）。
+ * @param {number} agentId
+ * @param {number[]} ids
+ */
+export async function markMaterialUsed(agentId, ids) {
+  const id = requireAgentId(agentId);
+  const list = Array.isArray(ids) ? ids.map(Number).filter(Number.isFinite) : [];
+  if (list.length === 0) return;
+  await db.run(
+    `UPDATE memory_episodic SET status = 'used' WHERE agent_id = ? AND id IN (${list.map(() => '?').join(',')})`,
+    [id, ...list]
+  );
+}
+
+/**
+ * 素材池一周整理（配合 consolidate/sweep，P1-16）：
+ *   - 已用素材（used）→ 原文保留给 consolidate 提炼（episodic 原文由 TTL 淘汰）
+ *   - 过期未用（pending/locked 超 TTL）→ 由 sweepForgetting 统一清理
+ * 本函数返回池状态统计，供调度/日志观察。
+ */
+export async function materialPoolStats(agentId) {
+  const id = requireAgentId(agentId);
+  const rows = await db.all(
+    `SELECT status, COUNT(*) AS c FROM memory_episodic
+      WHERE agent_id = ? AND source = 'perceive' GROUP BY status`,
+    [id]
+  );
+  const stats = { pending: 0, locked: 0, used: 0, void: 0 };
+  for (const r of rows) stats[r.status] = r.c;
+  return stats;
 }
 
 /**

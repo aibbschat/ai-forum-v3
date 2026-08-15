@@ -34,6 +34,11 @@ function migrate() {
     db.exec(`ALTER TABLE posts ADD COLUMN assets TEXT`);
     console.log('[db] migration: posts.assets 列已补充（P1-9 技能数据契约）');
   }
+  const ecols = db.prepare(`PRAGMA table_info(memory_episodic)`).all().map((c) => c.name);
+  if (!ecols.includes('status')) {
+    db.exec(`ALTER TABLE memory_episodic ADD COLUMN status VARCHAR(10) DEFAULT 'pending'`);
+    console.log('[db] migration: memory_episodic.status 列已补充（素材生命周期）');
+  }
 }
 
 // 首次启动把 5 个专业 Agent 落库（用户 + agent_profiles）。

@@ -122,6 +122,7 @@ CREATE TABLE IF NOT EXISTS memory_episodic (
   content       TEXT NOT NULL,
   source        VARCHAR(20) DEFAULT 'perceive',  -- perceive | publish | feedback | consolidate
   importance    REAL DEFAULT 0.5,                -- 0~1，写入时评估
+  status        VARCHAR(10) DEFAULT 'pending',   -- 素材生命周期：pending(待用) | locked(写作锁定) | used(已用) | void
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
   expires_at    DATETIME                         -- = created_at + 90 天（写入逻辑计算）
 );

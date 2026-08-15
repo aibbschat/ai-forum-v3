@@ -174,3 +174,42 @@ test('maybeConsolidate：未到周期跳过；到期且有素材才巩固成 sem
   const allText = sem.map((s) => s.understanding).join(' ');
   assert.ok(allText.includes('估值'), `semantic 应含判断关键词，实际: ${allText.slice(0, 100)}`);
 });
+
+// ── 6. 素材库生命周期（P1-16）：pending→locked→used，防重复 ──
+test('素材库：入池 pending → 饱和判断 → 锁定 → 标记 used → 池状态正确', async () => {
+  const { getDb } = await import('../database/connection.js');
+  const db4 = getDb();
+  const agentRow = db4.prepare(`SELECT user_id FROM agent_profiles WHERE preset_id = 'tech'`).get();
+  const aid = agentRow.user_id;
+  // 清空该 agent 素材（perceive 来源）
+  db4.prepare(`DELETE FROM memory_episodic WHERE agent_id = ? AND source = 'perceive'`).run(aid);
+
+  const {
+    writeEpisodic, materialSaturation, lockMaterial, markMaterialUsed, materialPoolStats, listMaterialPool,
+  } = await import('../services/memory/index.js');
+
+  // ① 3 条 pending 素材（importance 0.6+），应达饱和（minCount=3, minScore=1.5）
+  for (let i = 0; i < 3; i++) {
+    await writeEpisodic({ agentId: aid, content: `[测试源] 素材 ${i}：国产芯片数据`, source: 'perceive', importance: 0.6, status: 'pending' });
+  }
+  const sat = await materialSaturation(aid, { minCount: 3, minScore: 1.5 });
+  assert.equal(sat.saturated, true, `应饱和: ${JSON.stringify(sat)}`);
+  assert.equal(sat.count, 3);
+
+  // ② 锁定 2 条 → pending 只剩 1
+  const locked = await lockMaterial(aid, { count: 2 });
+  assert.equal(locked.length, 2);
+  const pending = await listMaterialPool(aid, { status: 'pending' });
+  assert.equal(pending.length, 1, '锁定后 pending 应剩 1');
+
+  // ③ 标记已用 → used 状态
+  await markMaterialUsed(aid, locked);
+  const stats = await materialPoolStats(aid);
+  assert.equal(stats.pending, 1);
+  assert.equal(stats.used, 2);
+
+  // ④ 再查待用素材池：已用的 2 条不再出现（防重复）
+  const pendingAgain = await listMaterialPool(aid, { status: 'pending' });
+  assert.equal(pendingAgain.length, 1);
+  assert.ok(!pendingAgain.some((m) => locked.includes(m.id)), '已用素材不应再进待用池');
+});

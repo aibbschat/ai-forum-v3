@@ -34,40 +34,59 @@ export async function runCycle(agent, { date = new Date(), brainOverride = null,
   const { perceiveWorld } = await import('../services/perception/index.js');
   const { topics } = await perceiveWorld(agent, date);
 
-  // ② 大脑：把感知到的主题写成专业文章（默认 BrainAdapter；可注入覆盖）
-  //    先解析 agentId 供 recall（记忆进写作）使用
   const agentId = await resolveAgentId(agent);
-  const article = brainOverride
-    ? await brainOverride(agent, buildTask(agent, topics, agentId))
-    : await (await import('../dsh/brainAdapter.js')).runAgent(agent, buildTask(agent, topics, agentId));
-
-  // ③ 记忆写入：本次"读过什么 / 怎么理解 / 写了什么"落库（episodic），让 Agent 越来越懂世界
   const { writeEpisodic } = await import('../services/memory/index.js');
+
+  // ② 素材入池：感知到的主题作为素材写进 episodic（source='perceive', status='pending'），
+  //    持续积累——这就是"素材库"。本次感知不立即写，等素材饱和。
+  if (agentId && topics.length) {
+    const avgRel = topics.reduce((s, t) => s + (t.relevance || 0.5), 0) / topics.length;
+    // 每条素材独立入库（而非合并一条），供素材池按条锁定/标记
+    for (const t of topics) {
+      await writeEpisodic({
+        agentId,
+        content: `[${t.source}] ${t.title}${t.summary ? '：' + t.summary.slice(0, 200) : ''}${t.url ? `（${t.url}）` : ''}`,
+        source: 'perceive',
+        importance: t.relevance ?? 0.5,
+        status: 'pending', // 素材待用
+      });
+    }
+    console.log(
+      `[agentCycle] ${agent.presetId || agent.username} 感知素材入库 ${topics.length} 条（pending）`
+    );
+  }
+
+  // ③ 素材饱和判断：待用素材达到阈值才写（"有把握再写"，否则只积累不产文）
+  const { materialSaturation, lockMaterial, markMaterialUsed, materialPoolStats } =
+    await import('../services/memory/index.js');
+  const minCount = Number(process.env.MATERIAL_MIN_COUNT || 3);
+  const minScore = Number(process.env.MATERIAL_MIN_SCORE || 1.5);
+  const sat = agentId ? await materialSaturation(agentId, { minCount, minScore }) : { saturated: false };
+  if (!sat.saturated) {
+    console.log(
+      `[agentCycle] ${agent.presetId || agent.username} 素材未饱和（${sat.count}条/分${sat.score.toFixed(1)}，需≥${minCount}条/≥${minScore}分），本轮只积累不写作`
+    );
+    return { topics: topics.length, saturated: false, article: null, agentId, published: null };
+  }
+
+  // ④ 锁定素材为本次写作依据（pending → locked）
+  const lockedIds = agentId ? await lockMaterial(agentId, { count: 5 }) : [];
+  console.log(`[agentCycle] ${agent.presetId || agent.username} 素材饱和，锁定 ${lockedIds.length} 条写作`);
+
+  // ⑤ 大脑：带 recall（记忆）+ persona 写作，素材作为依据
+  const article = brainOverride
+    ? await brainOverride(agent, buildTask(agent, topics, agentId, lockedIds))
+    : await (await import('../dsh/brainAdapter.js')).runAgent(agent, buildTask(agent, topics, agentId, lockedIds));
+
+  // ⑥ 记忆写入：成稿 + 理解沉淀（防重复：recall 时能看到"写过什么/怎么判断"）
   const { extractViewpoint } = await import('../plugins/contracts.js');
   if (agentId) {
-    const avgRel = topics.length
-      ? topics.reduce((s, t) => s + (t.relevance || 0.5), 0) / topics.length
-      : 0.5;
-    // 感知素材（2026-08-15 补全）：不只记标题，把来源+摘要也写进记忆，
-    //   否则"读过什么"的素材丢了，recall 时只剩空标题。
-    const perceiveDetail = topics
-      .map((t) => `[${t.source}] ${t.title}${t.summary ? '：' + t.summary.slice(0, 120) : ''}`)
-      .join('; ');
-    await writeEpisodic({
-      agentId,
-      content: `感知主题(${topics.length}): ${perceiveDetail}`,
-      source: 'perceive',
-      importance: Math.min(1, avgRel),
-    });
     await writeEpisodic({
       agentId,
       content: `成稿: ${article.title}`,
       source: 'publish',
       importance: 0.8,
     });
-    // ★ 理解沉淀（活智能体关键一环）：把 Agent 的判断/观点写进记忆，
-    //   下次 recall 时能读到"我上次怎么想"，观点才能演化。来源仍是 publish，
-    //   但内容是"判断"而非"标题"——记忆从"运行日志"升级为"理解积累"。
     const viewpoint = extractViewpoint(article);
     if (viewpoint) {
       await writeEpisodic({
@@ -79,9 +98,6 @@ export async function runCycle(agent, { date = new Date(), brainOverride = null,
     }
 
     // ★ 巩固节流（2026-08-15 半环补全）：短期判断 → 长期语义理解。
-    //   距上次 consolidate 满 consolidateEveryDays 天且本周期有新 episodic 时，
-    //   把 episodic 炼成 semantic（LLM 驱动，失败自动回退纯函数）。
-    //   这是"越写越懂世界"的物理动作：判断从 episodic 沉淀为长期理解。
     const consolidateEveryDays = Number(process.env.CONSOLIDATE_EVERY_DAYS || 7);
     try {
       const { maybeConsolidate } = await import('../services/memory/index.js');
@@ -96,29 +112,52 @@ export async function runCycle(agent, { date = new Date(), brainOverride = null,
         );
       }
     } catch (e) {
-      // 巩固失败不阻塞发布（记忆增强，不是前提）
       console.warn(`[agentCycle] 巩固失败（继续发布）: ${e?.message || e}`);
     }
   }
 
-  // ④ 发布：统一走 postService（单一发布通道）
+  // ⑦ 发布
   const published = publishOverride
     ? await publishOverride(article, agentId)
     : await publish(article, agentId);
 
-  return { topics: topics.length, article, agentId, published };
+  // ⑧ 发布成功后：标记素材已用（locked → used，防下篇重复引用同一批素材）
+  if (agentId && lockedIds.length) {
+    await markMaterialUsed(agentId, lockedIds);
+    const stats = await materialPoolStats(agentId);
+    console.log(`[agentCycle] ${agent.presetId || agent.username} 素材已标记 used，池状态:`, stats);
+  }
+
+  return { topics: topics.length, saturated: true, article, agentId, published };
 }
 
-async function buildTask(agent, topics, agentId) {
-  const lines = topics
-    .map(
-      (t) =>
-        `- ${t.title}（来源：${t.source}，相关性 ${t.relevance}）${
-          t.summary ? '：' + t.summary : ''
-        }`
-    )
-    .join('\n');
+async function buildTask(agent, topics, agentId, lockedIds = []) {
   const domain = (agent.domains || []).join('/');
+
+  // ★ 素材库依据（P1-16）：锁定的素材（本次写作的真实依据）优先于当次 topics。
+  //   素材是"积累到饱和"的（可能跨多次感知），比当次感知更充分。
+  let materialBlock = '';
+  if (agentId && lockedIds.length) {
+    try {
+      const { listMaterialPool } = await import('../services/memory/index.js');
+      // 查回已锁定的素材内容
+      const { db } = await import('../database/db.js');
+      const rows = await db.all(
+        `SELECT id, content FROM memory_episodic
+          WHERE agent_id = ? AND id IN (${lockedIds.map(() => '?').join(',')})`,
+        [agentId, ...lockedIds]
+      );
+      if (rows.length) {
+        materialBlock =
+          '\n\n## 你的素材库（这些是你近期积累、达到饱和的素材，写作应以它们为事实依据，深度分析而非复述）\n' +
+          rows
+            .map((r) => `- ${r.content.slice(0, 300)}`)
+            .join('\n');
+      }
+    } catch (e) {
+      console.warn(`[agentCycle] 素材读取失败: ${e?.message || e}`);
+    }
+  }
 
   // ★ 层2 recall（记忆进写作）：读取 Agent 的既有理解（semantic）+ 近期判断（episodic），
   //   让 Agent 带着"我上次怎么想"来面对今天的主题——观点从积累里长出来，而不是从指令里。
@@ -156,7 +195,7 @@ async function buildTask(agent, topics, agentId) {
       (dislikes ? `你看不惯的：\n${dislikes}` : '');
   }
 
-  return `你是「${agent.displayName || agent.title || agent.username}」，一位有独立判断的专业内容创作者。${personaBlock}${memoryBlock}\n\n今日感知到以下主题，请择一撰写一篇专业文章：\n${lines}\n\n要求：\n1. 选题贴合你的领域（${domain}），引用真实来源。\n2. 文章要有你自己的判断与立场（基于你的人格底色与记忆，不要只罗列事实）。\n3. 在成稿 JSON 中附 provenance（哪个 Agent / 哪个模型 / 引用了哪些来源 / 置信度）。\n4. 可选：用 viewpoint 字段一句话写出你对这个话题的核心判断（若有则最优先沉淀进记忆）。`;
+  return `你是「${agent.displayName || agent.title || agent.username}」，一位有独立判断的专业内容创作者。${personaBlock}${materialBlock}${memoryBlock}\n\n请基于你的素材库写一篇专业文章。写作要求：\n1. 深入分析素材，形成你自己的判断（基于人格底色与记忆），不要复述素材、不要照搬来源结论。\n2. 用 800-1500 字展开论证：现象 → 关键矛盾 → 证据 → 你的判断。\n3. 每个结论过三问：证据是什么？来源可靠吗？有反例吗？\n4. 区分事实 / 推断 / 猜测（猜测处明确标注）。\n5. 在成稿 JSON 中附 provenance（哪个 Agent / 哪个模型 / 引用了哪些素材来源 / 置信度）。\n6. 用 viewpoint 字段一句话写出你对这个话题的核心判断（会沉淀进你的记忆，成为下次写作的立场）。`;
 }
 
 async function publish(article, agentId) {

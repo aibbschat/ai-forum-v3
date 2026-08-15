@@ -123,6 +123,7 @@ CREATE TABLE IF NOT EXISTS memory_episodic (
   content       LONGTEXT NOT NULL,
   source        VARCHAR(20) DEFAULT 'perceive',  -- perceive | publish | feedback | consolidate
   importance    DOUBLE DEFAULT 0.5,              -- 0~1，写入时评估
+  status        VARCHAR(10) DEFAULT 'pending',   -- 素材生命周期：pending | locked | used | void
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
   expires_at    DATETIME                         -- = created_at + 90 天（服务层写入，与 SQLite 一致）
 );
