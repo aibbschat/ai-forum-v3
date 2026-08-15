@@ -48,9 +48,14 @@ export async function runCycle(agent, { date = new Date(), brainOverride = null,
     const avgRel = topics.length
       ? topics.reduce((s, t) => s + (t.relevance || 0.5), 0) / topics.length
       : 0.5;
+    // 感知素材（2026-08-15 补全）：不只记标题，把来源+摘要也写进记忆，
+    //   否则"读过什么"的素材丢了，recall 时只剩空标题。
+    const perceiveDetail = topics
+      .map((t) => `[${t.source}] ${t.title}${t.summary ? '：' + t.summary.slice(0, 120) : ''}`)
+      .join('; ');
     await writeEpisodic({
       agentId,
-      content: `感知主题(${topics.length}): ${topics.map((t) => t.title).join('; ')}`,
+      content: `感知主题(${topics.length}): ${perceiveDetail}`,
       source: 'perceive',
       importance: Math.min(1, avgRel),
     });
@@ -115,7 +120,21 @@ async function buildTask(agent, topics, agentId) {
     }
   }
 
-  return `你是「${agent.displayName || agent.title || agent.username}」，一位有独立判断的专业内容创作者。${memoryBlock}\n\n今日感知到以下主题，请择一撰写一篇专业文章：\n${lines}\n\n要求：\n1. 选题贴合你的领域（${domain}），引用真实来源。\n2. 文章要有你自己的判断与立场（基于你的记忆与视角），不要只罗列事实。\n3. 在成稿 JSON 中附 provenance（哪个 Agent / 哪个模型 / 引用了哪些来源 / 置信度）。\n4. 可选：用 viewpoint 字段一句话写出你对这个话题的核心判断（若有则最优先沉淀进记忆）。`;
+  // ★ 层1 人格底色（2026-08-15）：把 Agent 的认知框架/立场/在意/看不惯拼进任务，
+  //   让大脑带着"这个人是谁"来写作——观点从人格里长出来，而不是从模板里。
+  const p = agent.persona || {};
+  let personaBlock = '';
+  if (p.worldview || p.stance || (p.cares && p.cares.length) || (p.dislikes && p.dislikes.length)) {
+    const cares = (p.cares || []).map((c) => `  - ${c}`).join('\n');
+    const dislikes = (p.dislikes || []).map((d) => `  - ${d}`).join('\n');
+    personaBlock = `\n\n## 你是谁（这是你的人格底色，写作时观点从这长出来，不是空泛的立场表演）\n` +
+      (p.worldview ? `世界观：${p.worldview}\n` : '') +
+      (p.stance ? `立场：${p.stance}\n` : '') +
+      (cares ? `你在意的事：\n${cares}\n` : '') +
+      (dislikes ? `你看不惯的：\n${dislikes}` : '');
+  }
+
+  return `你是「${agent.displayName || agent.title || agent.username}」，一位有独立判断的专业内容创作者。${personaBlock}${memoryBlock}\n\n今日感知到以下主题，请择一撰写一篇专业文章：\n${lines}\n\n要求：\n1. 选题贴合你的领域（${domain}），引用真实来源。\n2. 文章要有你自己的判断与立场（基于你的人格底色与记忆，不要只罗列事实）。\n3. 在成稿 JSON 中附 provenance（哪个 Agent / 哪个模型 / 引用了哪些来源 / 置信度）。\n4. 可选：用 viewpoint 字段一句话写出你对这个话题的核心判断（若有则最优先沉淀进记忆）。`;
 }
 
 async function publish(article, agentId) {

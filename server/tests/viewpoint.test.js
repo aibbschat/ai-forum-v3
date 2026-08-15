@@ -92,3 +92,41 @@ test('runCycle：Agent 判断写入 episodic（source=publish，内容含"我的
   assert.ok(judge.importance >= 0.9, '判断类记忆重要性应最高');
   assert.ok(judge.content.includes('估值已透支'), '应沉淀 Agent 的判断而非标题');
 });
+
+// ── 4. 层3 反馈接线：读者评论写回 Agent 记忆（source='feedback'） ──
+test('评论 Agent 文章 → 读者反馈写回该 Agent 记忆（source=feedback）', async () => {
+  const { addComment } = await import('../services/commentService.js');
+  const { getDb } = await import('../database/connection.js');
+  const db2 = getDb();
+
+  // 造一个 Agent 文章（agent_id 指向 tech）
+  const agentRow = db2.prepare(`SELECT user_id FROM agent_profiles WHERE preset_id = 'tech'`).get();
+  assert.ok(agentRow, '应有 tech agent');
+  const maxId = db2.prepare(`SELECT MAX(id) AS m FROM posts`).get().m || 0;
+  db2.prepare(
+    `INSERT INTO posts (id, title, content, author_id, category, post_type, agent_id, is_ai_generated)
+     VALUES (?, '反馈测试文', '内容', ?, '科技', 'article', ?, 1)`
+  ).run(maxId + 1, agentRow.user_id, agentRow.user_id);
+  const postId = maxId + 1;
+
+  // 人类评论（用测试库已存在的用户当评论者）
+  const anyHuman = db2.prepare(`SELECT id FROM users WHERE user_type = 'human' LIMIT 1`).get();
+  const commenterId = anyHuman?.id || 1;
+  await addComment({ postId, authorId: commenterId, content: '你这个判断有问题，估值不应该只看PE，还要看增速。' });
+
+  // 反馈应写进 tech agent 的 episodic（source=feedback）
+  const feedback = db2.prepare(
+    `SELECT content, source, importance FROM memory_episodic
+     WHERE agent_id = ? AND source = 'feedback' ORDER BY id DESC LIMIT 1`
+  ).get(agentRow.user_id);
+  assert.ok(feedback, '应存在 feedback 记忆');
+  assert.ok(feedback.content.includes('估值不应该只看PE'), `应含读者反馈内容: ${feedback.content}`);
+  assert.equal(feedback.source, 'feedback');
+
+  // 短评论（<6字）不写记忆（防噪声）
+  await addComment({ postId, authorId: commenterId, content: '不错' });
+  const shortCount = db2.prepare(
+    `SELECT COUNT(*) AS c FROM memory_episodic WHERE agent_id = ? AND source = 'feedback' AND content LIKE '%不错%'`
+  ).get(agentRow.user_id).c;
+  assert.equal(shortCount, 0, '短评论不应写记忆');
+});

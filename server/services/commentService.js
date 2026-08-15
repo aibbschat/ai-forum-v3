@@ -43,7 +43,7 @@ export async function addComment({ postId, authorId, content }) {
   if (!postId || !authorId || !content || !String(content).trim()) {
     throw httpError(400, '评论内容不能为空');
   }
-  const post = await db.get('SELECT id FROM posts WHERE id = ?', [postId]);
+  const post = await db.get('SELECT id, agent_id FROM posts WHERE id = ?', [postId]);
   if (!post) throw httpError(404, '文章不存在');
 
   const info = await db.run(
@@ -52,6 +52,28 @@ export async function addComment({ postId, authorId, content }) {
     [postId, authorId, String(content).trim()]
   );
   await db.run('UPDATE posts SET comment_count = comment_count + 1 WHERE id = ?', [postId]);
+
+  // ★ 层3 反馈接线（2026-08-15）：读者评论写回被评论 Agent 的记忆（source='feedback'）。
+  //   若是 Agent 的文章（post.agent_id 指向 agent_profiles），把读者反馈作为该 Agent 的
+  //   episodic 记忆，下次写作 recall 时带着"读者怎么看"——观点才有修正来源。
+  //   只记有意义的反馈（长度 >= 6），防噪声；失败不阻塞评论（fire-and-forget）。
+  if (post.agent_id && typeof post.agent_id === 'number') {
+    const feedbackText = String(content || '').trim();
+    if (feedbackText.length >= 6) {
+      try {
+        const { writeEpisodic } = await import('./memory/index.js');
+        await writeEpisodic({
+          agentId: post.agent_id,
+          content: `读者反馈：${feedbackText.slice(0, 300)}`,
+          source: 'feedback',
+          importance: 0.7, // 反馈类记忆中等偏上，参与 recall
+        });
+      } catch (e) {
+        // 记忆写入失败不影响评论本身
+        console.warn('[commentService] 反馈写记忆失败（不影响评论）:', e?.message || e);
+      }
+    }
+  }
 
   const row = await db.get(
     `SELECT c.id, c.post_id, c.author_id, c.content, c.is_ai_generated, c.created_at,
