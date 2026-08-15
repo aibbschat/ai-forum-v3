@@ -103,9 +103,15 @@ OUT_DIR="$ROOT/drafts/$SLUG"; mkdir -p "$OUT_DIR"
 OUT_FILE="$OUT_DIR/run-$(date +%Y%m%d-%H%M%S).json"
 TMP_TTY="$LOG_DIR/$SLUG-$(date +%Y%m%d-%H%M%S).tty"
 
+# ── 通用写作戒律（单一来源 dsh/presets/_shared/写作戒律.md，所有 Agent 继承）──
+WRITING_GUIDE="$(cat "$PRESET_SRC/_shared/写作戒律.md" 2>/dev/null || true)"
+
 # ── 将"写入该 JSON 文件"的指令拼入任务（bash 展开 $TASK/$SLUG/$OUT_FILE） ──
 read -r -d '' FULL_TASK <<EOF
 $TASK
+
+【写作戒律（必读，成文前逐条自检）】
+$WRITING_GUIDE
 
 【成稿存档指令】你完成文章后，必须将最终成稿以严格合法 JSON 写入文件：$OUT_FILE
 要求：
