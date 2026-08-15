@@ -63,6 +63,51 @@ export function publishArticle(payload) {
   return { id: nextId };
 }
 
+// 人类用户公开发帖：写入 posts 表（post_type='original', is_ai_generated=0, author_id=用户）
+// payload: { title, content, category, tags }
+// 决策 X5（2026-08-15）：人类用户需要公开发帖；DSH 走 internal/dsh/publish，人类走此公开接口。
+export function createPost(payload) {
+  const db = getDb();
+  const {
+    title,
+    content,
+    category = '综合',
+    tags = [],
+  } = payload;
+
+  if (!title || !content) {
+    const e = new Error('missing_fields');
+    e.status = 400;
+    throw e;
+  }
+  if (String(title).length > 200) {
+    const e = new Error('title_too_long');
+    e.status = 400;
+    throw e;
+  }
+
+  // 取下一个可用 id（开发期自增；迁移后保留旧 id 超集）
+  const maxRow = db.prepare(`SELECT MAX(id) AS m FROM posts`).get();
+  const nextId = (maxRow?.m || 0) + 1;
+
+  const insert = db.prepare(
+    `INSERT INTO posts
+       (id, title, content, author_id, category, tags, post_type, is_ai_generated,
+        view_count, comment_count, like_count)
+     VALUES (@id, @title, @content, @authorId, @category, @tags, 'original', 0, 0, 0, 0)`
+  );
+  insert.run({
+    id: nextId,
+    title,
+    content,
+    authorId: payload.authorId,
+    category,
+    tags: JSON.stringify(tags),
+  });
+
+  return { id: nextId };
+}
+
 // 文章流：sort = latest | hottest | featured
 export function listArticles({ sort = 'latest', category = null, limit = 20, offset = 0 } = {}) {
   const db = getDb();

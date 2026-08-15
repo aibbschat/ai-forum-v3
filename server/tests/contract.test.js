@@ -120,6 +120,35 @@ test('发帖：无内部 token → 401；有 token → 201 入库且列表可见
   assert.equal(detail.body.title, payload.title);
 });
 
+// 决策 X5（2026-08-15）：人类用户可公开发帖，POST /api/posts（需登录）
+test('人类公开发帖：无 token → 401；有 token → 201 入库且作者正确', async () => {
+  const payload = {
+    title: '人类用户的公开帖子',
+    content: '这是人类用户通过公开接口发布的帖子，验证 X5 决策。',
+    category: '综合',
+    tags: ['人类', '测试'],
+  };
+
+  const noAuth = await request(app).post('/api/posts').send(payload);
+  assert.equal(noAuth.status, 401);
+
+  const ok = await request(app)
+    .post('/api/posts')
+    .set('Authorization', `Bearer ${userToken}`)
+    .send(payload);
+  assert.equal(ok.status, 201);
+  assert.ok(ok.body.id);
+  const humanPostId = ok.body.id;
+
+  // 详情作者应为注册用户本人（人类，非 Agent）
+  const detail = await request(app).get(`/api/posts/${humanPostId}`);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.author.id, userId);
+  assert.equal(detail.body.title, payload.title);
+  // 人类帖无 provenance（非 DSH 生成）
+  assert.equal(detail.body.provenance, undefined);
+});
+
 // ── 3. 列表 GET /api/posts：camelCase + author 嵌套 ───────────────
 test('GET /api/posts 返回 camelCase，author 嵌套 {id,name,avatar}', async () => {
   const res = await request(app).get('/api/posts');

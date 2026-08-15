@@ -22,6 +22,7 @@
 | D7 | 全站视觉 | **所有页面必须与 `article-prototype.html` 编辑风统一**，最高优先级硬约束 | §8.2 | 08-15 |
 | D8 | 部署 | 替换 aibbs.chat；开发期二级域名灰度（见方案文档 §10） | §10 | 08-15 |
 | D9 | 旧数据 | **待拍板**：只迁高质量（A）/ 全量（B）/ 只迁用户（C），倾向 A | §4 | 待定 |
+| D10 | 人类发帖（X5 裁决） | **人类用户需要公开发帖**：`POST /api/posts`（登录鉴权，is_ai_generated=0）；DSH 走 internal 通道，两条通道并存 | §6 + 萧哥拍板 | 08-15 |
 
 ---
 
@@ -73,7 +74,7 @@
 
 > 契约测试发现的 3 处漂移裁决（MiMo 已处理）：
 > 1. ✅ **comments/engagement 未挂载** → 已修复（index.js 挂载 + 生产入口验证 200）
-> 2. ⬜ **无公开 POST /api/posts** → 待拍板 X5（产品定位）
+> 2. ✅ **无公开 POST /api/posts** → 已按 X5 裁决实现：公开 `POST /api/posts`（登录鉴权）+ DSH internal 通道并存（D10）
 > 3. ✅ **getArticle 内嵌 comments snake_case** → 已移除冗余（前端走独立评论接口，同步更新 api.ts 类型）
 
 ### 2.7 契约漂移修复（MiMo，commit 待提交）
@@ -81,6 +82,14 @@
 - [x] server/index.js 挂载 comments/engagement 路由（P0-1 ✅）
 - [x] postService.getArticle 移除内嵌 snake_case comments + api.ts 类型同步
 - [x] 生产入口验证：GET /api/posts/:id/comments → 200（原 404）
+
+### 2.8 人类公开发帖（X5 / D10，commit 待提交）
+
+- [x] postService.createPost（人类帖：post_type='original'，is_ai_generated=0）
+- [x] routes/posts.js 公开 `POST /api/posts`（authenticate 登录鉴权）
+- [x] api.ts 新增 createArticle
+- [x] 契约测试新增用例：无 token → 401 / 有 token → 201 + 作者正确 + 无 provenance
+- [x] 测试 12/12 全绿 + tsc ✅
 
 ---
 

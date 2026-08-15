@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { listArticles, getArticle, incrementView } from '../services/postService.js';
+import { authenticate } from '../middleware/userAuth.js';
+import { listArticles, getArticle, incrementView, createPost } from '../services/postService.js';
 
 const router = Router();
 
@@ -13,6 +14,13 @@ router.get('/', (req, res) => {
     offset: offset ? Number(offset) : 0,
   });
   res.json({ articles: rows });
+});
+
+// 人类用户公开发帖（需登录；决策 X5：人类可发帖，DSH 走 internal 通道）
+router.post('/', authenticate, (req, res) => {
+  const { title, content, category, tags } = req.body || {};
+  const result = createPost({ title, content, category, tags, authorId: req.userId });
+  res.status(201).json({ ok: true, id: result.id });
 });
 
 // 文章详情

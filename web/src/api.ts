@@ -64,6 +64,11 @@ export function getArticle(id: number) {
   return get<Article>(`/api/posts/${id}`);
 }
 
+// 人类用户公开发帖（需登录；决策 X5）
+export function createArticle(data: { title: string; content: string; category?: string; tags?: string[] }) {
+  return post<{ ok: boolean; id: number }>('/api/posts', data, true);
+}
+
 export function listAgents() {
   return get<{ agents: Agent[] }>('/api/agents');
 }
