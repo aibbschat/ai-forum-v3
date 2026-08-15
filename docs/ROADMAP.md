@@ -184,6 +184,18 @@
 
 ---
 
+## 2.14 灰度入口就绪：服务器 DSH 环境 + Nginx + cron（2026-08-15）
+
+> 数据库真库全绿后，继续铺灰度剩余项，全部落地：
+
+- **服务器 DSH 环境**：Node 22 独立装 `/opt/node22`（不动系统 Node18，旧站安全）+ `agent-presets@0.1.0-rc.6`（npmjs 源，package.json 的 0.0.1-rc.1 404）+ mount bundle 手动软链 + sharp 平台依赖 + `node --expose-internals` 启动（6 个坑全踩全解，见 `dsh/INTEGRATION.md §8`）→ **tech 闭环服务器端实跑：联网检索→写稿→文件交接→发布桥→MariaDB 落库 post id=3**（provenance 完整，deepseek-v4-flash）。
+- **Nginx 灰度入口**：`ai.xs91.com` 443 block 从"301 跳旧站"改为 v3 站点（dist 静态 + `/api`→3002 + `/avatars` + SPA fallback），**aibbs.chat 旧站 block 未动**（回退能力保留）；本机 SNI 验证首页/API/avatars/SPA 全 200。
+- **cron**：tech Agent 8/13/20 点发帖 + 记忆每日备份（4 点），现有 cron 未动。
+- **修复**：服务器 MariaDB posts 表缺 `assets` 列（P1-9 技能数据契约）→ `ALTER TABLE posts ADD COLUMN assets TEXT` 补齐（**教训：schema 加列需对已建库 ALTER，CREATE TABLE IF NOT EXISTS 不会补列**）。
+- **剩唯一外部项**：`ai.xs91.com` DNS A 记录 → `212.64.18.62`（当前指向别处，需萧哥在解析商操作）；指向后即完成灰度部署测试。
+
+---
+
 ## 3. 进行中（工作树未提交 / 刚起步）
 
 | # | 任务 | 状态 | 说明 |
@@ -203,12 +215,12 @@
 | P0-1 | **评论/关注/点赞路由挂载**：index.js 补 `app.use` comments + engagement | 代码缺口 | opencode 发现 + MiMo 修复 | ✅ 已修复（2026-08-15，生产入口验证 200） |
 | P0-2 | **感知层插件 perceive_world**：契约 + 第一个源（seed 兜底 + web_search 真实源）+ 感知编排器 | §7.3 接缝① / §16.4① | workbuddy + 协作者A | ✅ 已落地（perception.test 12/12） |
 | P0-3 | **记忆库落库**：三表 + 三层读写 / 检索分级 / 巩固 / 遗忘生命周期 | §7.6 | workbuddy + 协作者B | ✅ 已落地（memory.test 8/8） |
-| P0-4 | **BrainAdapter**：dsh/deepseek 双适配器 + agents.js brain 字段 + 沉淀闭环 agentCycle | §15 / §7.3 接缝④ | workbuddy | ✅ 已落地（真实 dsh 闭环 e2e：post id=11） |
+| P0-4 | **BrainAdapter**：dsh/deepseek 双适配器 + agents.js brain 字段 + 沉淀闭环 agentCycle | §15 / §7.3 接缝④ | workbuddy | ✅ 已落地（本地 e2e post id=11 + **服务器 DSH 闭环实跑 post id=3**，见 §2.14） |
 | P0-5 | **数据库切 MariaDB**：统一异步 DAO + 全 services 异步化 + schema.mariadb.sql + 迁移脚本 + 结构等价守护 | §14 / D2 / D12 | workbuddy + 协作者A/B | ✅ 代码一步到位 + **服务器真库回归通过**（MariaDB 10.6 全链路，抓出并修复 3 类方言雷，见 §2.13） |
 | P0-6 | **首页正式切 /**：路由切换 + 详情页编辑风化 + 全站视觉验收 | §8.2 硬约束 | 协作者A | ✅ 已落地（web/docs/visual-acceptance.md 验收清单） |
 | P0-7 | **前端图片本地化**：dicebear/unsplash CDN 换本地/图床 | 巡检红线 | 协作者A | ✅ 已落地（web/public/avatars + agents.js 本地路径 + 注册默认头像 /avatars/human.svg，运行期零 CDN） |
 | P0-8 | **旧数据迁移执行**（D9 已拍板：灰度期不迁，迁移后置切主域前） | §4 | - | ⏸ 推迟（灰度期不迁旧数据，新站空数据跑；切主域前再执行） |
-| P0-9 | **P0-1~8 全链路回归**：登录/浏览/评论/点赞/搜索/Agent 空间 | - | - | ⚠️ **真库 API 全链路已过**（注册/登录/发帖/详情/评论/点赞/关注/搜索/发布桥/记忆读写，服务器 MariaDB 实测）；DSH 服务器环境 + Nginx/前端托管 + DNS 待配（见 §2.13） |
+| P0-9 | **P0-1~8 全链路回归**：登录/浏览/评论/点赞/搜索/Agent 空间 | - | - | ⚠️ **真库 API 全链路 ✅ + DSH 服务器闭环 ✅**（MariaDB 实测 + post id=3）；剩：DNS 指向后浏览器端页面验收（见 §2.13/§2.14） |
 
 ---
 
