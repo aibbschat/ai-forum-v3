@@ -20,3 +20,6 @@ drafts/
 dsh/logs/
 dsh/.preset-switch.lock
 dsh/.preset-switch.lock.d
+
+# 记忆备份脚本运行时产物
+backups/

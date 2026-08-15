@@ -29,7 +29,7 @@ Agent「越来越懂世界」的物理载体。实现依据 `docs/TECH-SPEC.md` 
 ```js
 import {
   writeEpisodic, writeSemantic, writeProcedural,
-  readMemory, sweepForgetting, consolidate, summarizeEpisodics,
+  readMemory, sweepForgetting, consolidate, summarizeEpisodics, createLlmSummarizer,
 } from './server/services/memory/index.js';
 
 writeEpisodic({ agentId: 1, content: '[宋代市舶司] 读到《宋会要》市舶条…', source: 'perceive', importance: 0.8 });
@@ -37,8 +37,8 @@ writeSemantic({ agentId: 1, domain: '宋代市舶司', understanding: '制度要
 writeProcedural({ agentId: 1, skill: 'how_to_cite', procedure: '引用必带出处，存疑必明说…' }); // 重复写入 → version+1
 
 const { semantic, episodic } = readMemory(1, { domain: '宋代市舶司', limit: 20 });
-consolidate(1, { days: 7 });   // 巩固：episodic → semantic
-sweepForgetting(1);            // 遗忘：TTL / 容量淘汰 / 低置信标疑
+await consolidate(1, { days: 7 });   // 巩固：episodic → semantic（LLM 驱动，§7.6.3）
+sweepForgetting(1);                  // 遗忘：TTL / 容量淘汰 / 低置信标疑
 ```
 
 - **写入来源枚举**：`perceive | publish | feedback | consolidate`（非法值回退 `perceive`）。
@@ -48,6 +48,18 @@ sweepForgetting(1);            // 遗忘：TTL / 容量淘汰 / 低置信标疑
 - **domain 推断**：episodic 表按 §7.6.6 无 `domain` 列，`consolidate` 从 content 提取——
   ① content 为 JSON 且含 `domain`/`topic` 字段；② content 以 `[领域] 正文` 开头；③ 否则归入 `general`。
   **写入方（感知层 / 发布桥）请遵循 ① 或 ② 的约定**，否则全部聚到 `general`。
+
+## 巩固（§7.6.3）：LLM 驱动 + 降级
+
+`consolidate` 按 domain 分组，**每组一次 DeepSeek `/chat/completions` 总结**（模型 `deepseek-v4-flash`，
+`response_format: json_object`，key 读 `DEEPSEEK_API_KEY`），产出结构化 JSON（要点 / 置信度自评 / 存疑点）后
+`writeSemantic` 沉淀；`evidence_ids` 恒为该组全部 episodic id（出处不丢）。`confidence` 用 LLM 自评并夹到 `[0,1]`。
+
+**降级铁律**：无 `DEEPSEEK_API_KEY` 或 LLM 调用 / 解析失败 → 该组自动回退 `summarizeEpisodics` 纯函数聚合并
+`console.warn`，绝不中断、不烧钱、不抛错。
+
+**可测性**：`consolidate` 第三个参数 `llmSummarizer(rows)` 可注入（默认 `createLlmSummarizer()`），测试注入 mock
+不真调 API；生产也可自建总结器（如换 `brain` 插件，§7.6.3 契约）。
 
 ## 检索分级（§7.6.5）
 
@@ -86,16 +98,18 @@ sweepForgetting(1);            // 遗忘：TTL / 容量淘汰 / 低置信标疑
 
 ## 运维要求（§7.6.7）
 
-- **可备份可恢复**：三张 memory 表是 Agent 的「灵魂」，必须与文章库同策略纳入每日备份；
-  恢复演练按 Agent 粒度导出/导入（`sqlite3 .dump` 过滤 `memory_*` 表，生产走 mysqldump）。
+- **可备份可恢复**：三张 memory 表是 Agent 的「灵魂」，必须与文章库同策略纳入每日备份。
+  一键导出脚本：`node scripts/memory-backup.js [--agent <id>]`（见脚本头注），输出
+  `backups/memory-YYYYMMDD-HHMMSS.json`；恢复时按该 JSON 逐 Agent 回灌三表。
 - **监控**：每 Agent 的 episodic / semantic / procedural 行数与体积纳入看板，
   接近上限（episodic 8 万 / semantic 8 千 / procedural 800）即告警；
   同时监控 `status='suspect'` 数量突增（读者纠错异常信号）。
 - **审计**：任何写入 / 修改 / 作废都要可追溯——episodic 用 `source` 标记来源，
   semantic 用 `evidence_ids` + `last_verified_at` 留证据链，procedural 用 `version` 留版本轨迹。
   **`consolidate` 落库时把证据 id 全量写入 `evidence_ids`，保证「出处不丢」。**
-- **隔离失败**：本模块只做 DB 读写、不调外部 API，异常向上抛出即可；
-  调用方（BrainAdapter / 定时任务）须 try/catch 兜住，确保单个 Agent 的记忆故障不拖垮核心服务。
+- **隔离失败**：本模块 LLM 调用失败只会触发**降级**（回退纯函数聚合），不向调用方抛错；
+  其余 DB 异常仍向上抛出，调用方（BrainAdapter / 定时任务）须 try/catch 兜住，
+  确保单个 Agent 的记忆故障不拖垮核心服务。
 
 ## 定时任务接线（待 P0-4）
 
@@ -103,8 +117,8 @@ sweepForgetting(1);            // 遗忘：TTL / 容量淘汰 / 低置信标疑
 // 建议每周一次（或每日增量），按 Agent 串行执行
 for (const agentId of activeAgentIds) {
   try {
-    consolidate(agentId, { days: 7 });  // 先炼理解
-    sweepForgetting(agentId);           // 再清原文
+    await consolidate(agentId, { days: 7 });  // 先炼理解（LLM 驱动，自动降级）
+    sweepForgetting(agentId);                 // 再清原文
   } catch (e) {
     console.error(`[memory] agent=${agentId} 维护失败：${e.message}`); // 隔离失败
   }
