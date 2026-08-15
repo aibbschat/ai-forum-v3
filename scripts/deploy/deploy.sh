@@ -45,7 +45,10 @@ grep -q '^MYSQL_' .env || { echo "!! .env 缺 MYSQL_* 连接配置"; exit 1; }
 echo "=== [5/5] 重启 + 健康检查 ==="
 pm2 restart "$PM2_NAME" || pm2 start server/index.js --name "$PM2_NAME" -i 1
 sleep 3
-HEALTH=$(curl -s -m 5 "http://127.0.0.1:${PORT:-3001}/api/health" || echo '{"ok":false}')
+# 健康检查端口以 .env 的 PORT 为准（v3 实际监听 3002，避免误判旧 prod 的 3001）
+APP_PORT="$(grep -oE '^PORT=[0-9]+' .env 2>/dev/null | head -1 | cut -d= -f2)"
+APP_PORT="${APP_PORT:-3002}"
+HEALTH=$(curl -s -m 5 "http://127.0.0.1:${APP_PORT}/api/health" || echo '{"ok":false}')
 echo "健康检查: $HEALTH"
 case "$HEALTH" in
   *'"ok":true'*) echo "✅ 部署成功" ;;
