@@ -26,6 +26,9 @@ export function getConfig(overrides = {}) {
       process.env.DEEPSEEK_ENDPOINT ??
       'https://api.deepseek.com/anthropic',
     maxTokens: overrides.maxTokens ?? envNumber('PERCEIVE_WEB_SEARCH_MAX_TOKENS', 1024),
+    // 素材库全文抓取（2026-08-15）：每个 topic 抓正文前 N 字；抓取超时
+    fullTextMaxChars: overrides.fullTextMaxChars ?? envNumber('PERCEIVE_FULLTEXT_MAX_CHARS', 2000),
+    fetchTimeoutMs: overrides.fetchTimeoutMs ?? envNumber('PERCEIVE_FETCH_TIMEOUT_MS', 8000),
   };
 }
 

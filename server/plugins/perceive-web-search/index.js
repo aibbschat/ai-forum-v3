@@ -38,14 +38,57 @@ function toTopic(raw, fallbackRelevance) {
     Number.isFinite(Number(raw?.relevance)) && raw.relevance >= 0 && raw.relevance <= 1
       ? Number(raw.relevance)
       : fallbackRelevance;
+  // 2026-08-15：概括从 280 放宽到 1200（素材库要"够分析"的素材，不能只给一句话）
   const summary = raw?.summary ?? raw?.snippet ?? raw?.text ?? raw?.content;
   return {
     title: String(title),
     source: SOURCE,
     url: raw?.url ?? raw?.link ? String(raw.url ?? raw.link) : undefined,
     relevance,
-    summary: summary ? String(summary).slice(0, 280) : undefined,
+    summary: summary ? String(summary).slice(0, 1200) : undefined,
   };
+}
+
+/**
+ * 抓取页面正文（素材库升级：概括 → 全文）。
+ * 对每个有 url 的 topic，尽力 fetch 正文前 maxChars 字作为素材；
+ * 失败/超时/反爬则退回摘要。绝不抛错（感知铁律）。
+ */
+async function enrichWithFullText(topic, { maxChars = 2000, timeoutMs = 8000 } = {}) {
+  if (!topic?.url) return topic;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const resp = await fetch(topic.url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+        Accept: 'text/html,text/plain,*/*',
+      },
+      redirect: 'follow',
+    });
+    clearTimeout(timer);
+    if (!resp.ok) return topic;
+    const html = await resp.text();
+    // 剥 HTML 标签 → 纯文本（简单正则，够素材用）
+    const text = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (text.length > 100) {
+      topic.fullText = text.slice(0, maxChars);
+    }
+  } catch {
+    // 抓取失败退回摘要（不中断）
+  }
+  return topic;
 }
 
 async function callDeepSeekSearch(agent, date, cfg) {
@@ -84,7 +127,8 @@ async function callDeepSeekSearch(agent, date, cfg) {
   const text = blocks.filter((b) => b?.type === 'text').map((b) => b.text).join('\n');
   const parsed = extractJsonArray(text);
   if (parsed && parsed.length) {
-    return parsed.map((t, i) => toTopic(t, 0.9 - i * 0.1)).filter(Boolean);
+    const topics = parsed.map((t, i) => toTopic(t, 0.9 - i * 0.1)).filter(Boolean);
+    return await enrichTopics(topics, cfg); // 素材库：抓全文
   }
 
   // 路径 B：从 web_search_tool_result 块抽取原始检索结果（去重、截取 maxTopics）
@@ -97,7 +141,25 @@ async function callDeepSeekSearch(agent, date, cfg) {
       }
     }
   }
-  return results.slice(0, cfg.maxTopics);
+  const topics = results.slice(0, cfg.maxTopics);
+  return await enrichTopics(topics, cfg); // 素材库：抓全文
+}
+
+/**
+ * 素材库全文增强（2026-08-15）：对每个有 url 的 topic 抓正文（enrichWithFullText）。
+ * 并行抓取，失败逐个退回摘要；整体失败返回原 topics（绝不中断）。
+ */
+async function enrichTopics(topics, cfg) {
+  if (!Array.isArray(topics) || !topics.length) return topics;
+  const enriched = await Promise.all(
+    topics.map((t) =>
+      enrichWithFullText(t, {
+        maxChars: cfg.fullTextMaxChars,
+        timeoutMs: cfg.fetchTimeoutMs,
+      }).catch(() => t)
+    )
+  );
+  return enriched;
 }
 
 const plugin = {

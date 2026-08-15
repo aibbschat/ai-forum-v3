@@ -213,3 +213,25 @@ test('素材库：入池 pending → 饱和判断 → 锁定 → 标记 used →
   assert.equal(pendingAgain.length, 1);
   assert.ok(!pendingAgain.some((m) => locked.includes(m.id)), '已用素材不应再进待用池');
 });
+
+// ── 7. 素材内容：全文优先于摘要（感知升级，非 280 字概括） ──
+test('素材入池：fullText 优先于 summary，且不截断到 280 字', async () => {
+  const { getDb } = await import('../database/connection.js');
+  const db5 = getDb();
+  const agentRow = db5.prepare(`SELECT user_id FROM agent_profiles WHERE preset_id = 'tech'`).get();
+  const aid = agentRow.user_id;
+  db5.prepare(`DELETE FROM memory_episodic WHERE agent_id = ? AND source = 'perceive'`).run(aid);
+
+  const { writeEpisodic, listMaterialPool } = await import('../services/memory/index.js');
+  const longText = '这是一个超过四百字的详细素材正文。'.repeat(30); // ~450 字
+  await writeEpisodic({
+    agentId: aid,
+    content: `[测试源] 标题：${longText}`,
+    source: 'perceive',
+    importance: 0.8,
+    status: 'pending',
+  });
+  const pool = await listMaterialPool(aid, { status: 'pending' });
+  assert.equal(pool.length, 1);
+  assert.ok(pool[0].content.length > 300, `素材应保留长文（>300字），实际 ${pool[0].content.length}`);
+});

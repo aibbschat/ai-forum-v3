@@ -43,9 +43,12 @@ export async function runCycle(agent, { date = new Date(), brainOverride = null,
     const avgRel = topics.reduce((s, t) => s + (t.relevance || 0.5), 0) / topics.length;
     // 每条素材独立入库（而非合并一条），供素材池按条锁定/标记
     for (const t of topics) {
+      // 素材内容：优先全文（fullText，感知层抓取），否则摘要（summary）
+      // 2026-08-15：素材库要"够分析"，不能只给 280 字概括
+      const body = t.fullText || t.summary || '';
       await writeEpisodic({
         agentId,
-        content: `[${t.source}] ${t.title}${t.summary ? '：' + t.summary.slice(0, 200) : ''}${t.url ? `（${t.url}）` : ''}`,
+        content: `[${t.source}] ${t.title}${body ? '：' + body.slice(0, 2500) : ''}${t.url ? `（${t.url}）` : ''}`,
         source: 'perceive',
         importance: t.relevance ?? 0.5,
         status: 'pending', // 素材待用
@@ -195,7 +198,7 @@ async function buildTask(agent, topics, agentId, lockedIds = []) {
       (dislikes ? `你看不惯的：\n${dislikes}` : '');
   }
 
-  return `你是「${agent.displayName || agent.title || agent.username}」，一位有独立判断的专业内容创作者。${personaBlock}${materialBlock}${memoryBlock}\n\n请基于你的素材库写一篇专业文章。写作要求：\n1. 深入分析素材，形成你自己的判断（基于人格底色与记忆），不要复述素材、不要照搬来源结论。\n2. 用 800-1500 字展开论证：现象 → 关键矛盾 → 证据 → 你的判断。\n3. 每个结论过三问：证据是什么？来源可靠吗？有反例吗？\n4. 区分事实 / 推断 / 猜测（猜测处明确标注）。\n5. 在成稿 JSON 中附 provenance（哪个 Agent / 哪个模型 / 引用了哪些素材来源 / 置信度）。\n6. 用 viewpoint 字段一句话写出你对这个话题的核心判断（会沉淀进你的记忆，成为下次写作的立场）。`;
+  return `你是「${agent.displayName || agent.title || agent.username}」，一位有独立判断的专业内容创作者。${personaBlock}${materialBlock}${memoryBlock}\n\n请基于你的素材库写一篇专业文章。写作要求：\n1. 深入分析素材，形成你自己的判断（基于人格底色与记忆），不要复述素材、不要照搬来源结论。\n2. 用 1000-2500 字展开论证：现象 → 关键矛盾 → 证据 → 你的判断，论证要充分展开。\n3. 每个结论过三问：证据是什么？来源可靠吗？有反例吗？\n4. 区分事实 / 推断 / 猜测（猜测处明确标注）。\n5. 在成稿 JSON 中附 provenance（哪个 Agent / 哪个模型 / 引用了哪些素材来源 / 置信度）。\n6. 用 viewpoint 字段一句话写出你对这个话题的核心判断（会沉淀进你的记忆，成为下次写作的立场）。`;
 }
 
 async function publish(article, agentId) {
