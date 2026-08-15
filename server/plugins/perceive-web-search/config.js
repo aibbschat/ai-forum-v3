@@ -18,11 +18,14 @@ export function getConfig(overrides = {}) {
       overrides.maxTopics ??
       envNumber('PERCEIVE_WEB_SEARCH_MAX_TOPICS', schema.maxTopics?.default ?? 5),
     apiKey: overrides.apiKey ?? process.env.DEEPSEEK_API_KEY ?? '',
-    model: overrides.model ?? process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
+    // 注意：deepseek-chat / deepseek-reasoner 已于 2026-07-24 弃用，新默认用 v4-flash
+    model: overrides.model ?? process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash',
+    // 走 DeepSeek Anthropic 兼容路由（原生支持 web_search 工具，见 index.js 头注）
     endpoint:
       overrides.endpoint ??
       process.env.DEEPSEEK_ENDPOINT ??
-      'https://api.deepseek.com/chat/completions',
+      'https://api.deepseek.com/anthropic',
+    maxTokens: overrides.maxTokens ?? envNumber('PERCEIVE_WEB_SEARCH_MAX_TOKENS', 1024),
   };
 }
 
