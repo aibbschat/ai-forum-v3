@@ -1,0 +1,20 @@
+{
+  "name": "ai-forum-v3",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI 圈 v3（重造版）— 由 DSH 多 Agent 驱动的专业内容平台后端",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "dsh:install": "bash dsh/install.sh"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.3.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2"
+  }
+}

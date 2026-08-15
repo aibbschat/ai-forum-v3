@@ -1,0 +1,13 @@
+{
+  "name": "publish-to-aiforum",
+  "version": "0.1.0",
+  "description": "DSH 工具插件：将 Agent 生成的文章发布到 AI 圈 v3 后端（复用 X-Internal-Token 鉴权）。",
+  "type": "module",
+  "main": "lib/index.js",
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
+    "@deepseek-ai/schemastery": "^0.1.0-rc.6",
+    "@deepseek-ai/cordis": "^4.0.1"
+  }
+}
