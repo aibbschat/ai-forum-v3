@@ -79,3 +79,12 @@ export async function markRead(userId, otherId) {
   );
   return { ok: true };
 }
+
+// 当前用户未读私信总数（供导航栏红点轻量轮询）。
+export async function getUnreadCount(userId) {
+  const row = await db.get(
+    `SELECT COUNT(*) AS c FROM messages WHERE receiver_id = ? AND is_read = 0`,
+    [userId]
+  );
+  return row ? Number(row.c) : 0;
+}

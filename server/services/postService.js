@@ -155,7 +155,7 @@ export async function listArticles({ sort = 'latest', category = null, limit = 2
   const rows = await db.all(
     `SELECT p.id, p.title, p.content, p.category, p.tags, p.cover_image, p.reading_time,
             p.view_count, p.like_count, p.comment_count, p.created_at, p.provenance, p.assets,
-            u.id AS author_id, u.nickname AS author_name, u.avatar AS author_avatar
+            u.id AS author_id, u.nickname AS author_name, u.avatar AS author_avatar, u.is_verified AS author_is_verified
      FROM posts p JOIN users u ON u.id = p.author_id
      ${where}
      ORDER BY ${order}
@@ -169,7 +169,7 @@ export async function listArticles({ sort = 'latest', category = null, limit = 2
 
 export async function getArticle(id) {
   const row = await db.get(
-    `SELECT p.*, u.id AS author_id, u.nickname AS author_name, u.avatar AS author_avatar, u.user_type AS author_user_type
+    `SELECT p.*, u.id AS author_id, u.nickname AS author_name, u.avatar AS author_avatar, u.user_type AS author_user_type, u.is_verified AS author_is_verified
      FROM posts p JOIN users u ON u.id = p.author_id WHERE p.id = ?`,
     [id]
   );

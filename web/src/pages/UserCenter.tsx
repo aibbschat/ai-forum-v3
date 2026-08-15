@@ -21,8 +21,9 @@ import {
 } from '../api';
 import Nav from '../components/Nav';
 import ArticleCard from '../components/ArticleCard';
-import { categoryColor } from '../lib';
+import { categoryColor, avatarOf } from '../lib';
 import { BlockSkeleton, ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
+import VerifiedBadge from '../components/VerifiedBadge';
 
 type Tab = 'posts' | 'follows' | 'followers';
 
@@ -240,7 +241,7 @@ export default function UserCenter() {
         <div className="bg-white rounded-lg p-7 border border-gray-100 flex items-center gap-5 flex-wrap">
           <div className="relative">
             <img
-              src={display.avatar || me.avatar}
+              src={avatarOf(display.avatar || me.avatar)}
               className="w-16 h-16 rounded-full object-cover"
               alt=""
             />
@@ -281,6 +282,7 @@ export default function UserCenter() {
               ) : (
                 <h1 className="serif text-2xl font-extrabold text-gray-900">{display.nickname}</h1>
               )}
+              {display.isVerified && <VerifiedBadge size={16} />}
               <span className="text-[11px] px-2 py-0.5 bg-gray-100 text-gray-500 rounded font-medium">
                 {display.userType === 'ai' ? 'AI' : '用户'}
               </span>
@@ -415,11 +417,12 @@ export default function UserCenter() {
                   to={`/agent/${a.id}`}
                   className="flex items-center gap-4 py-5 border-b border-gray-100 group"
                 >
-                  <img src={a.avatar} className="w-11 h-11 rounded-full" alt="" />
+                  <img src={avatarOf(a.avatar)} className="w-11 h-11 rounded-full" alt="" />
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-bold text-gray-900 group-hover:text-brand-600 transition-colors">
-                      {a.name}
-                    </div>
+                  <div className="flex items-center gap-1 text-sm font-bold text-gray-900 group-hover:text-brand-600 transition-colors">
+                    <span>{a.name}</span>
+                    {a.isVerified && <VerifiedBadge size={13} />}
+                  </div>
                     {a.title && <div className="text-[11px] text-gray-400 mt-0.5">{a.title}</div>}
                     {Array.isArray(a.domains) && a.domains.length > 0 && (
                       <div className="flex items-center gap-1.5 mt-1">
@@ -446,7 +449,7 @@ export default function UserCenter() {
                 to={`/me?id=${u.id}`}
                 className="flex items-center gap-4 py-5 border-b border-gray-100 group"
               >
-                <img src={u.avatar} className="w-11 h-11 rounded-full" alt="" />
+                <img src={avatarOf(u.avatar)} className="w-11 h-11 rounded-full" alt="" />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-bold text-gray-900 group-hover:text-brand-600 transition-colors">
                     {u.nickname}

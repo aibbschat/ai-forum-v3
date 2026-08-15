@@ -3,7 +3,7 @@ import { normalizeArticle, normalizeAgentCard, normalizeUser } from './normalize
 
 export async function getUserProfile(id) {
   const row = await db.get(
-    `SELECT u.id, u.username, u.nickname, u.avatar, u.bio, u.email, u.user_type,
+    `SELECT u.id, u.username, u.nickname, u.avatar, u.bio, u.email, u.user_type, u.is_verified,
             (SELECT COUNT(*) FROM posts p WHERE p.author_id = u.id) AS post_count,
             (SELECT COUNT(*) FROM follows f WHERE f.user_id = u.id) AS following_count
      FROM users u WHERE u.id = ?`,
@@ -26,7 +26,7 @@ export async function getUserPosts(id, { limit = 20, offset = 0 } = {}) {
 
 export async function getUserFollows(id, { limit = 50 } = {}) {
   const rows = await db.all(
-    `SELECT u.id, u.username, u.nickname, u.avatar, p.title, p.domains, p.article_count
+    `SELECT u.id, u.username, u.nickname, u.avatar, u.is_verified, p.title, p.domains, p.article_count
      FROM follows f
      JOIN agent_profiles p ON p.user_id = f.agent_id
      JOIN users u ON u.id = p.user_id

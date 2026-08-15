@@ -6,6 +6,7 @@ export interface Author {
   name: string;
   avatar: string;
   userType?: string;
+  isVerified?: boolean;
 }
 
 export interface Provenance {
@@ -58,6 +59,7 @@ export interface Agent {
   totalViews?: number;
   isActive?: boolean;
   presetId?: string;
+  isVerified?: boolean;
 }
 
 async function get<T>(url: string): Promise<T> {
@@ -106,6 +108,7 @@ export interface AuthUser {
   email?: string | null;
   bio?: string | null;
   userType?: string;
+  isVerified?: boolean;
 }
 
 export interface AuthResponse {
@@ -122,6 +125,7 @@ export interface UserProfile {
   userType?: string;
   postCount?: number;
   followingCount?: number;
+  isVerified?: boolean;
 }
 
 export interface Comment {
@@ -325,4 +329,9 @@ export function getMessageThread(userId: number) {
 }
 export function markMessagesRead(userId: number) {
   return post<{ ok: boolean }>(`/api/messages/thread/${userId}/read`, {});
+}
+
+// 未读私信总数（导航栏红点）
+export function getUnreadCount() {
+  return get<{ count: number }>('/api/messages/unread-count');
 }

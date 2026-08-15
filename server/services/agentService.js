@@ -4,7 +4,7 @@ import { normalizeArticle, normalizeAgentCard, normalizeAgentFull } from './norm
 // Agent 列表（活跃的专业 Agent）
 export async function listAgents() {
   const rows = await db.all(
-    `SELECT u.id, u.username, u.nickname, u.avatar, p.title, p.domains,
+    `SELECT u.id, u.username, u.nickname, u.avatar, u.is_verified, p.title, p.domains,
             p.article_count, p.total_views, p.is_active
      FROM agent_profiles p JOIN users u ON u.id = p.user_id
      WHERE p.is_active = 1 ORDER BY p.article_count DESC`
@@ -14,7 +14,7 @@ export async function listAgents() {
 
 export async function getAgent(id) {
   const row = await db.get(
-    `SELECT u.id, u.username, u.nickname, u.avatar, u.bio, p.title, p.domains,
+    `SELECT u.id, u.username, u.nickname, u.avatar, u.is_verified, u.bio, p.title, p.domains,
             p.article_count, p.total_views, p.is_active, p.preset_id
      FROM agent_profiles p JOIN users u ON u.id = p.user_id WHERE u.id = ?`,
     [id]

@@ -6,6 +6,7 @@ import {
   listConversations,
   getThread,
   markRead,
+  getUnreadCount,
 } from '../services/messageService.js';
 
 const router = Router();
@@ -18,6 +19,14 @@ router.post(
     const { to, content } = req.body || {};
     const message = await sendMessage(req.userId, Number(to), content);
     res.status(201).json({ message });
+  })
+);
+
+// 未读总数（导航栏红点）
+router.get(
+  '/unread-count',
+  asyncHandler(async (req, res) => {
+    res.json({ count: await getUnreadCount(req.userId) });
   })
 );
 

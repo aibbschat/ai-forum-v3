@@ -40,6 +40,7 @@ export function normalizeArticle(r, { includeContent = false } = {}) {
       name: r.author_name,
       avatar: r.author_avatar,
       userType: r.author_user_type || 'human',
+      isVerified: !!r.author_is_verified,
     };
   }
   return out;
@@ -56,6 +57,7 @@ export function normalizeAgentCard(r) {
     avatar: r.avatar,
     title: r.title,
     domains: safeJson(r.domains),
+    isVerified: !!r.is_verified,
     articleCount: r.article_count || 0,
   };
 }
@@ -82,6 +84,7 @@ export function normalizeUser(r) {
     bio: r.bio || '',
     email: r.email ?? null,
     userType: r.user_type || 'human',
+    isVerified: !!r.is_verified,
     postCount: r.post_count || 0,
     followingCount: r.following_count || 0,
   };

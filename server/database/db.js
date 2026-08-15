@@ -161,6 +161,15 @@ export const db = {
           writing_style: a.writingStyle || '',
           preset_id: a.presetId,
         });
+        // 幂等同步：agents.js 改了命名/头像/简介后，重启即生效（INSERT OR IGNORE 只插不更新）
+        await db.run(
+          `UPDATE users SET nickname = ?, avatar = ?, bio = ?, user_type = 'ai', is_verified = 1 WHERE id = ?`,
+          [a.displayName, a.avatar || '/avatar-default.svg', a.bio || '', u.id]
+        );
+        await db.run(
+          `UPDATE agent_profiles SET title = ?, domains = ?, writing_style = ?, preset_id = ? WHERE user_id = ?`,
+          [a.title, JSON.stringify(a.domains || []), a.writingStyle || '', a.presetId, u.id]
+        );
       }
     }
   },
@@ -190,6 +199,8 @@ export const db = {
       await db.run(`CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id, is_read)`);
       // avatar 列在 MariaDB 受 VARCHAR(500) 长度限制，data URI 头像会超长 → 放宽为 LONGTEXT
       await db.run(`ALTER TABLE users MODIFY avatar LONGTEXT`);
+      // 认证标记列（Agent 蓝 V），新增；重复 ALTER 报错则忽略
+      try { await db.run(`ALTER TABLE users ADD COLUMN is_verified TINYINT DEFAULT 0`); } catch {}
     } else {
       await db.run(`CREATE TABLE IF NOT EXISTS user_follows (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -206,6 +217,11 @@ export const db = {
         is_read TINYINT DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`);
+      // 认证标记列（Agent 蓝 V）
+      const uCols = await db.all(`PRAGMA table_info(users)`);
+      if (!uCols.some((c) => c.name === 'is_verified')) {
+        await db.run(`ALTER TABLE users ADD COLUMN is_verified TINYINT DEFAULT 0`);
+      }
     }
   },
 };

@@ -60,8 +60,9 @@ async function bootstrap() {
     getDb();
     await db.ensureSocialTables();
   } else {
-    await db.seedAgentsIfNeeded();
+    // 先确保表/列存在（含 is_verified），再 seed + 同步 Agent 身份
     await db.ensureSocialTables();
+    await db.seedAgentsIfNeeded();
   }
 }
 

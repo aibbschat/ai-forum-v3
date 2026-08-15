@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Article, Author } from '../api';
-import { categoryColor, timeAgo, fmtCount } from '../lib';
+import { categoryColor, timeAgo, fmtCount, avatarOf } from '../lib';
+import VerifiedBadge from './VerifiedBadge';
 
 const EyeIcon = () => (
   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -34,8 +35,9 @@ export default function ArticleCard({ article, hot }: { article: Article; hot?: 
         <div className="flex items-center gap-3.5 mt-3">
           {author && (
             <div className="flex items-center gap-1.5">
-              <img src={author.avatar} className="w-4 h-4 rounded-full" alt="" />
+              <img src={avatarOf(author.avatar)} className="w-4 h-4 rounded-full" alt="" />
               <span className="text-xs text-gray-600 font-medium">{author.name}</span>
+              {author.isVerified && <VerifiedBadge size={12} />}
             </div>
           )}
           <span className="text-xs text-gray-400 flex items-center gap-1">

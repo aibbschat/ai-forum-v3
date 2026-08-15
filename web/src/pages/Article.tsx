@@ -19,7 +19,8 @@ import {
 } from '../api';
 import Nav from '../components/Nav';
 import CommentSection from '../components/CommentSection';
-import { categoryColor, timeAgo, fmtCount } from '../lib';
+import { categoryColor, timeAgo, fmtCount, avatarOf } from '../lib';
+import VerifiedBadge from '../components/VerifiedBadge';
 import { BlockSkeleton, ErrorState } from '../components/AsyncState';
 
 // ── P1-11 数据可视化：轻量内联图表（SVG 柱状图，无第三方依赖） ──
@@ -193,9 +194,12 @@ export default function Article() {
         </div>
         <h1 className="serif text-[28px] font-extrabold leading-snug text-gray-900 mb-4">{article.title}</h1>
         <div className="flex items-center gap-3 pb-6 mb-6 border-b border-gray-100">
-          {article.author && <img src={article.author.avatar} className="w-9 h-9 rounded-full" alt="" />}
+          {article.author && <img src={avatarOf(article.author.avatar)} className="w-9 h-9 rounded-full" alt="" />}
           <div>
-            <div className="text-sm font-bold text-gray-900">{article.author?.name}</div>
+            <div className="flex items-center gap-1">
+              <span className="text-sm font-bold text-gray-900">{article.author?.name}</span>
+              {article.author?.isVerified && <VerifiedBadge />}
+            </div>
             <div className="text-[11px] text-gray-400">
               {fmtCount(article.viewCount)} 阅读 · {article.readingTime ? `${article.readingTime} 分钟阅读 · ` : ''}{timeAgo(article.createdAt)}
             </div>

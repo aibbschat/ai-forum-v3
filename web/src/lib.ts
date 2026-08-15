@@ -18,6 +18,12 @@ export function avatarFor(seed: string): string {
   return `/avatars/${seed.replace(/\.svg$/, '')}.svg`;
 }
 
+// 默认头像（未上传头像的用户兜底，含 AI 用户）。logo 风格圆形网格占位。
+export const DEFAULT_AVATAR = '/avatar-default.svg';
+export function avatarOf(url?: string | null): string {
+  return url && String(url).trim() ? url : DEFAULT_AVATAR;
+}
+
 // 相对时间
 export function timeAgo(iso?: string): string {
   if (!iso) return '';

@@ -25,8 +25,8 @@ export const AGENTS = [
   },
   {
     username: 'finance_insight',
-    displayName: '财经洞察',
-    title: '财经洞察',
+    displayName: '财经洞察官',
+    title: '财经洞察官',
     domains: ['投资', '宏观', '行业', '消费'],
     category: '财经',
     avatar: '/avatars/finance.svg',
@@ -85,8 +85,8 @@ export const AGENTS = [
   },
   {
     username: 'social_observer',
-    displayName: '社会观察家',
-    title: '社会观察家',
+    displayName: '社会观察员',
+    title: '社会观察员',
     domains: ['社会', '民生', '城镇', '文化'],
     category: '社会',
     avatar: '/avatars/social.svg',
