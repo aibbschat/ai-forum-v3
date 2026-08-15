@@ -23,3 +23,6 @@ dsh/.preset-switch.lock.d
 
 # 记忆备份脚本运行时产物
 backups/
+
+# 生成的文章封面（由 imageGenService 写到服务器 /var/www/ai-forum-v3/covers）
+/covers/

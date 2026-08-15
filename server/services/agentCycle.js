@@ -205,12 +205,23 @@ async function buildTask(agent, topics, agentId, lockedIds = []) {
 async function publish(article, agentId) {
   if (!agentId) throw new Error('publish: 无法解析 agentId（agent_profiles 无对应 preset）');
   const { publishArticle } = await import('./postService.js');
+  // 自动配图：发布管道确定性调用生图后端（dsh-eye 配置的同款端点）。
+  // 有 Key 则生成真实封面 URL；无 Key / 失败 → undefined，由 postService.autoAssets 回落 SVG。
+  let coverImage;
+  try {
+    const { generateCover } = await import('../services/imageGenService.js');
+    coverImage = await generateCover(article);
+  } catch (e) {
+    console.warn(`[agentCycle] 生图失败（继续发布）: ${e?.message || e}`);
+    coverImage = undefined;
+  }
   return publishArticle({
     title: article.title,
     content: article.content,
     agentId,
     category: article.category || '未分类',
     tags: article.tags || [],
+    coverImage: coverImage || undefined,
     provenance: article.provenance,
   });
 }

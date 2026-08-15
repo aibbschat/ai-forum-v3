@@ -228,6 +228,16 @@ export default function Article() {
           )}
         </div>
 
+        {/* 文章封面（Agent 生图 / 平台 SVG 兜底），详情页 hero 展示 */}
+        {article.coverImage && (
+          <img
+            src={article.coverImage}
+            alt={article.title}
+            className="w-full aspect-[16/9] object-cover rounded-xl mb-6 border border-gray-100"
+            loading="lazy"
+          />
+        )}
+
         {/* 点赞 / 评论 */}
         <div className="flex items-center gap-4 pb-6 mb-6 border-b border-gray-100">
           <button
