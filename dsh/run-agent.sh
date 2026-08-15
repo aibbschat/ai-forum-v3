@@ -129,13 +129,18 @@ run_with_timeout() {
 echo "=== [$(date)] START $SLUG :: $TASK ===" >> "$LOG"
 set +e
 # DSH_LAUNCH：可选启动前缀（如服务器需 `node --expose-internals`，NODE_OPTIONS 不允许该旗标）
-# 用法：DSH_LAUNCH="node --expose-internals" ./run-agent.sh <slug> "<task>"
+# DSH_NO_TTY=1：跳过 script 伪终端包装（node22 下 dsh 直接跑即刷新 stdout；
+#               script 会误吞 LAUNCH 里的 --expose-internals 这类选项，故服务器用此开关）
 LAUNCH=()
 if [ -n "${DSH_LAUNCH:-}" ]; then
   # shellcheck disable=SC2206
   LAUNCH=($DSH_LAUNCH)
 fi
-run_with_timeout "$TIMEOUT" script -q "$TMP_TTY" "${LAUNCH[@]}" "$DSH_BIN" --profile headless "$FULL_TASK" >> "$LOG" 2>&1
+if [ "${DSH_NO_TTY:-0}" = "1" ]; then
+  run_with_timeout "$TIMEOUT" "${LAUNCH[@]}" "$DSH_BIN" --profile headless "$FULL_TASK" >> "$LOG" 2>&1
+else
+  run_with_timeout "$TIMEOUT" script -q "$TMP_TTY" "${LAUNCH[@]}" "$DSH_BIN" --profile headless "$FULL_TASK" >> "$LOG" 2>&1
+fi
 DSH_CODE=$?
 set -e
 echo "=== [$(date)] DSH EXIT=$DSH_CODE (out=$OUT_FILE) ===" >> "$LOG"
