@@ -61,7 +61,7 @@ export function listArticles(opts: { sort?: string; category?: string; limit?: n
 }
 
 export function getArticle(id: number) {
-  return get<Article & { comments: any[] }>(`/api/posts/${id}`);
+  return get<Article>(`/api/posts/${id}`);
 }
 
 export function listAgents() {

@@ -1,6 +1,6 @@
 # 历史考据官 —— DSH Agent Preset
 # 挂载：dsh --profile headless --preset historian "话题"
-# 依赖插件（须先安装到 profile）：publish-to-aiforum、query-baijia
+# 依赖插件：publish-to-aiforum、query-baijia 均通过 ../_shared/ 相对路径引用（随预设树部署，无需装全局）
 # 部署位置：服务器 $DSH_HOME/.agent-presets/historian/agent.cordis.yml
 
 - name: "@deepseek-ai/dsh-persona"
@@ -29,13 +29,13 @@
       严谨但不枯燥，像一位有考据癖、又愿意把门道讲给外行听的学者。
       宁缺毋滥：一篇有出处、可复核的文章，胜过十篇浮夸的「历史冷知识」。
 
-- name: "query-baijia"
+- name: "../_shared/query-baijia"
   config:
     baseUrl: "http://127.0.0.1:3000"
     token: ""
     defaultExperts: ["duan-dai-shi", "dong-shi-gong"]
 
-- name: "publish-to-aiforum"
+- name: "../_shared/publish-to-aiforum"
   config:
     agentId: 3
     internalUrl: "http://127.0.0.1:3001"

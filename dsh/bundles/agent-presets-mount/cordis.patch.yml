@@ -1,0 +1,12 @@
+# AI 圈 v3 极简挂载层：把 agent-presets 服务插进 headless profile。
+# 服务实现来自已安装的 @deepseek-ai/dsh-agent-presets（全局 dsh node_modules）。
+# 预设发现：config.roots（我们的 5 个 Agent）+ includeUserRoot（~/.dsh/.agent-presets）。
+- insert:
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: tech
+        includeUserRoot: true
+        roots:
+          - path: /Users/xiaocheng/workspace/ai-forum-v3/dsh/presets
+            trust: user

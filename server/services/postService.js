@@ -95,11 +95,9 @@ export function getArticle(id) {
      FROM posts p JOIN users u ON u.id = p.author_id WHERE p.id = ?`
   ).get(id);
   if (!row) return null;
-  const comments = db.prepare(
-    `SELECT c.id, c.content, c.created_at, u.nickname AS author_name, u.avatar AS author_avatar
-     FROM comments c JOIN users u ON u.id = c.author_id WHERE c.post_id = ? ORDER BY c.created_at ASC`
-  ).all(id);
-  return { ...normalizeArticle(row, { includeContent: true }), comments };
+  // 评论不内嵌：前端评论区走独立 GET /api/posts/:id/comments（已 normalize camelCase），
+  // 避免双份数据 + snake_case 契约漂移（2026-08 契约测试裁决 #3）
+  return normalizeArticle(row, { includeContent: true });
 }
 
 export function incrementView(id) {

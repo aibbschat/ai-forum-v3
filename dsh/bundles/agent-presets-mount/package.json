@@ -1,0 +1,11 @@
+{
+  "name": "@deepseek-ai/dsh-aiforum-mount",
+  "version": "0.1.0",
+  "description": "AI 圈 v3 极简 bundle：仅把 agent-presets 服务挂载进 headless profile，使其能加载自定义 Agent 预设。",
+  "type": "module",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

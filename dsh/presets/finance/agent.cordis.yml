@@ -1,6 +1,6 @@
 # 财经洞察 —— DSH Agent Preset
 # 挂载：dsh --profile headless --preset finance "话题"
-# 依赖插件（须先安装到 profile）：publish-to-aiforum、@deepseek-ai/dsh-web-search-deepseek
+# 依赖插件：publish-to-aiforum 通过 ../_shared/ 相对路径引用（随预设树部署，无需装全局）；web_search 由 harness 内置
 # 部署位置：服务器 $DSH_HOME/.agent-presets/finance/agent.cordis.yml
 
 - name: "@deepseek-ai/dsh-persona"
@@ -33,7 +33,7 @@
   # 内置联网检索（web_search），由 DEEPSEEK_API_KEY 驱动，无需额外配置；
   # Agent 用它感知今日财经时事，作为选题与写作的事实来源。
 
-- name: "publish-to-aiforum"
+- name: "../_shared/publish-to-aiforum"
   config:
     agentId: 2
     internalUrl: "http://127.0.0.1:3001"
