@@ -227,6 +227,7 @@
 | P1-9 | **技能数据契约规范**：草稿 JSON 预留 `assets[]` 扩展位（{type, url, title, position}），发布桥通用消费、站内统一存储 | D15③ | ✅ 已落地（MiMo，commit 1c1bf86） |
 | P1-10 | **试点①配图技能**：Agent 发文章自动配图（封面 + 文内图片）→ `assets[]` 落库 → 文章流/详情页展示 | D15② + P1-9 | ✅ 已落地（MiMo，commit 1c1bf86） |
 | P1-11 | **试点②数据可视化**：财经 Agent 生成图表（如趋势图/饼图）→ 文章内嵌 | D15② + P1-9 | ✅ 已落地（MiMo，commit 1c1bf86） |
+| P1-12 | **DSH 升级跟进机制**（D15① 落地）：升级 SOP + 版本追踪（当前 @deepseek-ai/dsh@0.1.0-rc.6）+ 升级回归流程（先跑 43 契约测试 → 适配器层改 → 数据契约不变则核心无感）。RC 版未稳定前不升级，正式版发布后按 SOP 跟进 | D15① | ⬜ |
 
 ---
 
@@ -273,5 +274,6 @@
 | 2026-08-15 | v1.2 | workbuddy 三线成果登记：① 感知层（perceive 2 插件 + 编排器）② 记忆层（三层 + 巩固 LLM 化 + 遗忘）③ BrainAdapter（dsh/deepseek）④ agentCycle 沉淀闭环 ⑤ MariaDB 就绪（schema + 池 + 结构守护测试）⑥ 统一异步 DAO（db.js）。P0-2/3/4/6/7 ✅、P0-5 ⚠️ 代码就绪待服务器回归；新增 D12/D13/D14 |
 | 2026-08-15 | v1.3 | 新增 D15（DSH 战略定位：主大脑随官方升级迭代 + 生态技能落地站内功能）+ P1-9（技能数据契约 assets[]）+ P1-10（配图试点）+ P1-11（数据可视化试点） |
 | 2026-08-15 | v1.4 | P1-9/10/11 ✅ 已落地（MiMo，commit 1c1bf86）：assets 契约 + 配图渲染 + SVG 图表，43/43 测试全绿，端到端验证 post id=13 |
+| 2026-08-15 | v1.5 | ① 技能分层写入 TECH-SPEC §16③.1（数据型/资源型 + assets 统一容器，明确"DSH 生态接入 = 往 assets 填新 type"）② 登记 P1-12 DSH 升级跟进机制（D15① 从战略定位转为落地任务，含升级 SOP/版本追踪/回归流程） |
 
 > ⚠️ **工作树未提交文件（2026-08-15 15:30 巡检）**：`server/database/db.js`、`server/middleware/asyncHandler.js`、`server/tests/db.test.js`——统一异步 DAO 相关，属 D12 进行中。**提交前先 git status 确认，避免被 reset 抹掉。**
