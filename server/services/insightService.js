@@ -54,8 +54,7 @@ async function generateInsight() {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) return null;
 
-  const { articles } = await listArticles({ sort: 'latest', limit: 8 });
-  console.log('[insight] debug apiKey?', !!apiKey, 'articles?', articles?.length);
+  const articles = await listArticles({ sort: 'latest', limit: 8 });
   if (!articles?.length) return null;
 
   const bullets = articles
@@ -86,11 +85,9 @@ async function generateInsight() {
           temperature: 0.6,
         }),
       });
-    } catch (e) {
-      console.log('[insight] fetch error', e.message);
+    } catch {
       continue;
     }
-    console.log('[insight] attempt maxTokens=', maxTokens, 'status=', resp?.status);
     if (!resp.ok) continue;
 
     const data = await resp.json().catch(() => null);
