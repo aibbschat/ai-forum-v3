@@ -105,6 +105,25 @@
 
 ---
 
+## 2.10 地基工程：感知 / 大脑 / 记忆 三块闭环（workbuddy 分工，commit 待提交）
+
+> 萧哥拍板"大框架最要紧"，由 workbuddy 任 Lead（地基 BrainAdapter + 沉淀闭环），分两路协作并发落地：
+> - **协作者A（感知层）**：`server/services/perception/index.js` 编排器 + `perceive-seed`（无密钥兜底）/ `perceive-web-search`（DeepSeek 真实源）两插件
+> - **协作者B（记忆层）**：`server/services/memory/index.js`（三层读写 / 检索分级 / consolidate / sweepForgetting）+ `schema.sql` 三表 + 生命周期
+> - **workbuddy（地基）**：共享契约 `contracts.js` + 插件加载器 `loader.js` + **BrainAdapter** `brainAdapter.js`（dsh/deepseek 双适配器）+ agents.js `brain` 字段 + **沉淀闭环** `agentCycle.js`（perceive→大脑→写记忆→发布）
+
+- [x] 共享契约 `server/plugins/contracts.js`（Topic / ArticleResult / Provenance + 校验归一）
+- [x] 插件加载器 `server/plugins/loader.js`（§16.5，四类 perceive/brain/tool/business，故障隔离）
+- [x] 感知层 `server/services/perception/index.js` + `server/plugins/perceive-seed/`、`perceive-web-search/`（协作者A）
+- [x] 记忆层 `server/services/memory/index.js` + `schema.sql` 三表（memory_episodic/semantic/procedural）+ 生命周期（协作者B）
+- [x] BrainAdapter `server/dsh/brainAdapter.js`（dsh 走 run-agent.sh 草稿模式 / deepseek 直连）+ `server/dsh/agents.js` 加 `brain:'dsh'`
+- [x] 沉淀闭环 `server/services/agentCycle.js`（感知→大脑→写记忆→发布，单一发布通道）
+- [x] **真实 dsh 闭环 e2e**：tech 感知→dsh 联网写稿→记忆写入→发布桥落库（post id=11，provenance 完整，9 条真实来源）
+- [x] 设计文档 `docs/design/foundation.md` + 实跑脚本 `scripts/run-cycle-demo.js`
+- [x] 测试：perception 12/12、memory 8/8（均未破坏原契约测试 12/12）
+
+---
+
 ## 3. 进行中（工作树未提交 / 刚起步）
 
 | # | 任务 | 状态 | 说明 |
@@ -122,9 +141,9 @@
 | # | 任务 | 依据 | 负责人 | 状态 |
 |---|------|------|--------|------|
 | P0-1 | **评论/关注/点赞路由挂载**：index.js 补 `app.use` comments + engagement | 代码缺口 | opencode 发现 + MiMo 修复 | ✅ 已修复（2026-08-15，生产入口验证 200） |
-| P0-2 | **感知层插件 perceive_world**：定义契约 + 第一个源（web_search / RSS） | §7.3 接缝① | - | ⬜ |
-| P0-3 | **记忆库落库**：schema.sql 加 memory_episodic/semantic/procedural 三表 | §7.6.6 | - | ⬜ |
-| P0-4 | **BrainAdapter**：dsh/deepseek 两适配器 + agents.js 加 brain 字段 | §15 | - | ⬜ |
+| P0-2 | **感知层插件 perceive_world**：契约 + 第一个源（seed 兜底 + web_search 真实源）+ 感知编排器 | §7.3 接缝① / §16.4① | workbuddy + 协作者A | ✅ 已落地（perception.test 12/12） |
+| P0-3 | **记忆库落库**：三表 + 三层读写 / 检索分级 / 巩固 / 遗忘生命周期 | §7.6 | workbuddy + 协作者B | ✅ 已落地（memory.test 8/8） |
+| P0-4 | **BrainAdapter**：dsh/deepseek 双适配器 + agents.js brain 字段 + 沉淀闭环 agentCycle | §15 / §7.3 接缝④ | workbuddy | ✅ 已落地（真实 dsh 闭环 e2e：post id=11） |
 | P0-5 | **数据库切 MariaDB**：方言抽取 + mysql2 驱动 + schema 映射 + 迁移 | §14 | - | ⬜ |
 | P0-6 | **首页正式切 /**：路由切换 + 详情页编辑风化 + 全站视觉验收 | §8.2 硬约束 | - | ⬜ |
 | P0-7 | **前端图片本地化**：dicebear/unsplash CDN 换本地/图床 | 巡检红线 | - | ⬜ |

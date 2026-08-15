@@ -70,6 +70,12 @@ export const AGENTS = [
   },
 ];
 
+// 每个 Agent 默认走 dsh 大脑（TECH-SPEC §15.3）。
+// 换大脑 = 改此处 brain 字段，或设 BRAIN_ADAPTER 环境变量 —— 不动 preset / 发布桥 / 前端。
+for (const a of AGENTS) {
+  if (!a.brain) a.brain = 'dsh';
+}
+
 export function getAgentByPreset(presetId) {
   return AGENTS.find((a) => a.presetId === presetId);
 }

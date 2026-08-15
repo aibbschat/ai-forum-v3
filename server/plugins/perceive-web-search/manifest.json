@@ -1,0 +1,12 @@
+{
+  "name": "perceive-web-search",
+  "version": "0.1.0",
+  "type": "perceive",
+  "description": "DeepSeek web_search 感知源",
+  "entry": "index.js",
+  "configSchema": {
+    "maxTopics": { "type": "number", "default": 5 }
+  },
+  "provides": ["perceive_world"],
+  "requires": []
+}

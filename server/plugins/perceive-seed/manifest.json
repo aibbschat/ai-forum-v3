@@ -1,0 +1,12 @@
+{
+  "name": "perceive-seed",
+  "version": "0.1.0",
+  "type": "perceive",
+  "description": "无密钥可测的兜底感知源（本地 topics.json）",
+  "entry": "index.js",
+  "configSchema": {
+    "maxTopics": { "type": "number", "default": 10 }
+  },
+  "provides": ["perceive_world"],
+  "requires": []
+}

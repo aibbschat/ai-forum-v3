@@ -133,20 +133,27 @@ DSH_CODE=$?
 set -e
 echo "=== [$(date)] DSH EXIT=$DSH_CODE (out=$OUT_FILE) ===" >> "$LOG"
 
-# ── 文件交接：读取成稿并发布 ──
-if [ -f "$OUT_FILE" ]; then
-  echo "=== [$(date)] DRAFT FOUND $OUT_FILE ===" >> "$LOG"
-  if node "$ROOT/scripts/publish-article.js" --file "$OUT_FILE" --slug "$SLUG" >> "$LOG" 2>&1; then
-    echo "=== [$(date)] PUBLISHED $SLUG ===" >> "$LOG"
-    exit 0
-  else
-    code=$?
-    echo "!!! [$(date)] PUBLISH FAILED $SLUG exit=$code ===" >> "$LOG"
-    [ -n "$ALERT_HOOK" ] && "$ALERT_HOOK" "dsh $SLUG publish failed" || true
-    exit "$code"
-  fi
-else
+# ── 文件交接：读取成稿 ──
+if [ ! -f "$OUT_FILE" ]; then
   echo "!!! [$(date)] NO DRAFT $SLUG (expected $OUT_FILE) ===" >> "$LOG"
   [ -n "$ALERT_HOOK" ] && "$ALERT_HOOK" "dsh $SLUG produced no draft" || true
   exit 7
+fi
+echo "=== [$(date)] DRAFT FOUND $OUT_FILE ===" >> "$LOG"
+
+# 草稿模式：只产出草稿、不自动发布（供 BrainAdapter 接沉淀闭环统一发布，避免双重发布）
+if [ "${DSH_DRAFT_ONLY:-0}" = "1" ]; then
+  echo "=== [$(date)] DRAFT-ONLY $SLUG (skip publish; out=$OUT_FILE) ===" >> "$LOG"
+  exit 0
+fi
+
+# 标准模式：直接调发布桥落库（cron 单跑用）
+if node "$ROOT/scripts/publish-article.js" --file "$OUT_FILE" --slug "$SLUG" >> "$LOG" 2>&1; then
+  echo "=== [$(date)] PUBLISHED $SLUG ===" >> "$LOG"
+  exit 0
+else
+  code=$?
+  echo "!!! [$(date)] PUBLISH FAILED $SLUG exit=$code ===" >> "$LOG"
+  [ -n "$ALERT_HOOK" ] && "$ALERT_HOOK" "dsh $SLUG publish failed" || true
+  exit "$code"
 fi
