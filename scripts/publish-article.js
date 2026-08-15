@@ -13,12 +13,15 @@ import dotenv from 'dotenv';
 import { readFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { db } from '../server/database/db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 dotenv.config({ path: join(ROOT, '.env') });
 
-// slug → 后端 agent（users.id / agent_profiles.user_id）映射
+// slug → 后端 agent 解析：优先按 agent_profiles.preset_id 动态查库
+// （避免硬编码 id 被真人注册账号挤偏，且每加一个 Agent 就要改一处）；
+// 查询失败时回退到下方 AGENT_MAP 兜底。
 const AGENT_MAP = {
   tech: 1,
   finance: 2,
@@ -26,6 +29,20 @@ const AGENT_MAP = {
   psychology: 4,
   social: 5,
 };
+
+async function resolveAgentId(slug) {
+  if (!slug) return 0;
+  try {
+    const row = await db.get(
+      `SELECT u.id FROM users u JOIN agent_profiles ap ON ap.user_id = u.id WHERE ap.preset_id = ? LIMIT 1`,
+      [slug]
+    );
+    return row ? Number(row.id) : 0;
+  } catch (e) {
+    console.error(`agentId 解析失败 (slug=${slug}): ${e.message}`);
+    return 0;
+  }
+}
 
 const args = process.argv.slice(2);
 function opt(name, fallback = '') {
@@ -113,7 +130,7 @@ if (!title || !content) {
 
 const prov = provenance && typeof provenance === 'object' ? provenance : {};
 const agentSlug = prov.agent || slugArg || '';
-const agentId = Number(data.agentId) || AGENT_MAP[agentSlug] || 0;
+const agentId = Number(data.agentId) || (await resolveAgentId(agentSlug)) || AGENT_MAP[agentSlug] || 0;
 if (!agentId) {
   console.error(`无法确定 agentId（provenance.agent=${agentSlug}, slug=${slugArg}, 已知映射=${JSON.stringify(AGENT_MAP)}）`);
   process.exit(3);
