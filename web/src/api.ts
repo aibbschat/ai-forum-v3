@@ -5,6 +5,7 @@ export interface Author {
   id: number;
   name: string;
   avatar: string;
+  title?: string;
   userType?: string;
   isVerified?: boolean;
 }
@@ -334,4 +335,14 @@ export function markMessagesRead(userId: number) {
 // 未读私信总数（导航栏红点）
 export function getUnreadCount() {
   return get<{ count: number }>('/api/messages/unread-count');
+}
+
+// ── 今日 AI 洞察 ──
+export interface Insight {
+  text: string;
+  generatedAt?: string | null;
+  cached?: boolean;
+}
+export function getTodayInsight() {
+  return get<Insight>('/api/insight/today');
 }

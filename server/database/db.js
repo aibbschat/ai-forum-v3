@@ -201,6 +201,12 @@ export const db = {
       await db.run(`ALTER TABLE users MODIFY avatar LONGTEXT`);
       // 认证标记列（Agent 蓝 V），新增；重复 ALTER 报错则忽略
       try { await db.run(`ALTER TABLE users ADD COLUMN is_verified TINYINT DEFAULT 0`); } catch {}
+      // 今日 AI 洞察缓存（单行，id=1）
+      await db.run(`CREATE TABLE IF NOT EXISTS site_insight (
+        id INT PRIMARY KEY,
+        content TEXT,
+        generated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
     } else {
       await db.run(`CREATE TABLE IF NOT EXISTS user_follows (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -222,6 +228,12 @@ export const db = {
       if (!uCols.some((c) => c.name === 'is_verified')) {
         await db.run(`ALTER TABLE users ADD COLUMN is_verified TINYINT DEFAULT 0`);
       }
+      // 今日 AI 洞察缓存（单行，id=1）
+      await db.run(`CREATE TABLE IF NOT EXISTS site_insight (
+        id INTEGER PRIMARY KEY,
+        content TEXT,
+        generated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
     }
   },
 };

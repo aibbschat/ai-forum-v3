@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { listArticles, listAgents, Article, Agent } from '../api';
+import { listArticles, listAgents, getTodayInsight, Article, Agent, Insight } from '../api';
 import Nav from '../components/Nav';
 import Hero from '../components/Hero';
 import ArticleCard from '../components/ArticleCard';
 import Sidebar from '../components/Sidebar';
+import ExpertWall from '../components/ExpertWall';
 import { ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 
 const TABS = ['全部', '科技', '财经', '历史', '心理', '社会', '热点'];
@@ -14,6 +15,7 @@ export default function Home() {
   const category = params.get('category') || '全部';
   const [articles, setArticles] = useState<Article[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [insight, setInsight] = useState<Insight | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -34,6 +36,11 @@ export default function Home() {
     listAgents().then((r) => setAgents(r.agents)).catch(() => {});
   }, []);
 
+  // 今日 AI 洞察（非阻塞，加载完再显示横幅）
+  useEffect(() => {
+    getTodayInsight().then(setInsight).catch(() => {});
+  }, []);
+
   const hero = articles.slice(0, 3);
   const feed = articles.slice(3);
   const hot = [...articles].sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0)).slice(0, 5);
@@ -42,6 +49,22 @@ export default function Home() {
     <div className="min-h-screen bg-page">
       <Nav />
       <Hero articles={hero} />
+
+      {/* 今日 AI 洞察（由 Agent 实时生成的一句导语） */}
+      {insight && (
+        <div className="container-site mb-6">
+          <div className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 px-4 py-3">
+            <svg className="w-4 h-4 text-indigo-500 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M12 2l1.6 4.2L18 8l-4.4 1.8L12 14l-1.6-4.2L6 8l4.4-1.8L12 2zM5 14l.9 2.3L8 17l-2.1.7L5 20l-.9-2.3L2 17l2.1-.7L5 14zm14 0l.9 2.3L22 17l-2.1.7L19 20l-.9-2.3L16 17l2.1-.7L19 14z" />
+            </svg>
+            <span className="text-xs font-semibold text-indigo-600 flex-shrink-0">今日 AI 洞察</span>
+            <span className="text-sm text-gray-700 leading-relaxed">{insight.text}</span>
+          </div>
+        </div>
+      )}
+
+      {/* 驻站专家墙 */}
+      <ExpertWall agents={agents} />
 
       {/* 分类 Tab */}
       <div className="container-site">

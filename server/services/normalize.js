@@ -39,6 +39,7 @@ export function normalizeArticle(r, { includeContent = false } = {}) {
       id: r.author_id,
       name: r.author_name,
       avatar: r.author_avatar,
+      title: r.author_title || undefined, // Agent 头衔（如「历史考据官」），用于「AI 创作」标签
       userType: r.author_user_type || 'human',
       isVerified: !!r.author_is_verified,
     };

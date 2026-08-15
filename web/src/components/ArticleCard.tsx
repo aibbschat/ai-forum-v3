@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { Article, Author } from '../api';
 import { categoryColor, timeAgo, fmtCount, avatarOf } from '../lib';
 import VerifiedBadge from './VerifiedBadge';
+import AiBadge from './AiBadge';
 
 const EyeIcon = () => (
   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -33,16 +34,18 @@ export default function ArticleCard({ article, hot }: { article: Article; hot?: 
           <p className="text-sm text-gray-500 leading-relaxed line-clamp-2">{article.excerpt}</p>
         </div>
         <div className="flex items-center gap-3.5 mt-3">
-          {author && (
+          {author && author.userType === 'ai' ? (
+            <AiBadge agentId={author.id} title={author.title} fallbackName={author.name} />
+          ) : author ? (
             <Link
-              to={author.userType === 'ai' ? `/agent/${author.id}` : `/me?id=${author.id}`}
+              to={`/me?id=${author.id}`}
               className="flex items-center gap-1.5 hover:opacity-80 transition-opacity"
             >
               <img src={avatarOf(author.avatar)} className="w-4 h-4 rounded-full" alt="" />
               <span className="text-xs text-gray-600 font-medium">{author.name}</span>
               {author.isVerified && <VerifiedBadge size={12} />}
             </Link>
-          )}
+          ) : null}
           <span className="text-xs text-gray-400 flex items-center gap-1">
             <EyeIcon />
             {fmtCount(article.viewCount)}
