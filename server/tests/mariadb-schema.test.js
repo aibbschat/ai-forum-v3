@@ -51,10 +51,10 @@ function parseSchema(sql) {
       // 外键（忽略，本 schema 外键两边一致，无需参与等价比较）
       if (/^FOREIGN KEY/i.test(line)) continue;
 
-      // 列定义：`name TYPE ...`
-      const col = line.match(/^(\w+)\s+([A-Za-z0-9_()]+)/);
+      // 列定义：`name` TYPE ...（反引号包保留字列名，如 procedure）
+      const col = line.match(/^(`?\w+`?)\s+([A-Za-z0-9_()]+)/);
       if (col) {
-        table.columns.set(col[1], typeFamily(col[2]));
+        table.columns.set(col[1].replace(/`/g, ''), typeFamily(col[2]));
       }
     }
     tables.set(name, table);

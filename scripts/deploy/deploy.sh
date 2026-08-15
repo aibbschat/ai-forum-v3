@@ -31,7 +31,8 @@ git reset --hard origin/main
 echo "=== [3/5] 依赖与构建 ==="
 npm ci --omit=dev 2>/dev/null || npm install
 if [ "$SKIP_BUILD" != "--skip-build" ]; then
-  (cd web && npm ci --omit=dev 2>/dev/null || npm install)
+  # 注意：web 构建需要 vite（devDependency），必须全量 npm ci，不能 --omit=dev
+  (cd web && npm ci)
   (cd web && npx vite build)
 fi
 

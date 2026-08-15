@@ -10,7 +10,7 @@
 //   成结构化 JSON（要点 + 置信度自评 + 存疑点）→ writeSemantic 沉淀，evidence_ids 全量保留出处。
 //   无 DEEPSEEK_API_KEY 或 LLM 调用/解析失败 → 自动回退 summarizeEpisodics 纯函数聚合（降级铁律）。
 
-import { db, fn } from '../../database/db.js';
+import { db, fn, isMaria } from '../../database/db.js';
 
 /** 容量上限（每 Agent，§7.6.2）。 */
 export const MEMORY_LIMITS = {
@@ -137,17 +137,27 @@ export async function writeSemantic({ agentId, domain, understanding, confidence
   );
 
   // 复核成功（重新沉淀）即视为再次验证：status 回到 verified，last_verified_at 刷新。
+  // upsert 方言：SQLite ON CONFLICT ... excluded / MariaDB ON DUPLICATE KEY UPDATE ... VALUES()
+  const upsert = isMaria
+    ? `ON DUPLICATE KEY UPDATE
+         understanding    = VALUES(understanding),
+         confidence       = VALUES(confidence),
+         evidence_ids     = VALUES(evidence_ids),
+         status           = 'verified',
+         last_verified_at = VALUES(last_verified_at),
+         updated_at       = VALUES(updated_at)`
+    : `ON CONFLICT(agent_id, domain) DO UPDATE SET
+         understanding    = excluded.understanding,
+         confidence       = excluded.confidence,
+         evidence_ids     = excluded.evidence_ids,
+         status           = 'verified',
+         last_verified_at = ${fn.now()},
+         updated_at       = ${fn.now()}`;
   await db.run(
     `INSERT INTO memory_semantic
        (agent_id, domain, understanding, confidence, evidence_ids, status, last_verified_at, updated_at)
      VALUES (?, ?, ?, ?, ?, 'verified', ${fn.now()}, ${fn.now()})
-     ON CONFLICT(agent_id, domain) DO UPDATE SET
-       understanding    = excluded.understanding,
-       confidence       = excluded.confidence,
-       evidence_ids     = excluded.evidence_ids,
-       status           = 'verified',
-       last_verified_at = ${fn.now()},
-       updated_at       = ${fn.now()}`,
+     ${upsert}`,
     [id, dom, text, conf, evidence]
   );
 
@@ -169,13 +179,19 @@ export async function writeProcedural({ agentId, skill, procedure }) {
   const skillName = requireText(skill, 'skill');
   const text = requireText(procedure, 'procedure');
 
+  const upsert = isMaria
+    ? `ON DUPLICATE KEY UPDATE
+         \`procedure\` = VALUES(\`procedure\`),
+         version    = memory_procedural.version + 1,
+         updated_at = ${fn.now()}`
+    : `ON CONFLICT(agent_id, skill) DO UPDATE SET
+         \`procedure\` = excluded.\`procedure\`,
+         version    = memory_procedural.version + 1,
+         updated_at = ${fn.now()}`;
   await db.run(
-    `INSERT INTO memory_procedural (agent_id, skill, procedure, version, updated_at)
+    `INSERT INTO memory_procedural (agent_id, skill, \`procedure\`, version, updated_at)
      VALUES (?, ?, ?, 1, ${fn.now()})
-     ON CONFLICT(agent_id, skill) DO UPDATE SET
-       procedure  = excluded.procedure,
-       version    = memory_procedural.version + 1,
-       updated_at = ${fn.now()}`,
+     ${upsert}`,
     [id, skillName, text]
   );
 

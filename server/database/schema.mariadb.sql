@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS posts (
   comment_count INT DEFAULT 0,
   like_count    INT DEFAULT 0,
   provenance    TEXT,                          -- {agent,model,sources,confidence} JSON
+  assets        TEXT,                          -- P1-9 技能数据契约：[{type,url,title,position,data}] JSON
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -145,7 +146,7 @@ CREATE TABLE IF NOT EXISTS memory_procedural (
   id            INT AUTO_INCREMENT PRIMARY KEY,
   agent_id      INT NOT NULL,
   skill         VARCHAR(50),
-  procedure     LONGTEXT NOT NULL,
+  `procedure`   LONGTEXT NOT NULL,               -- 反引号：PROCEDURE 是 MariaDB 保留字
   version       INT DEFAULT 1,
   updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uk_memory_procedural_agent_skill (agent_id, skill)

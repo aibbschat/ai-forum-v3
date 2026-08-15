@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS posts (
   comment_count INTEGER DEFAULT 0,
   like_count    INTEGER DEFAULT 0,
   provenance    TEXT,                            -- 新增：{agent,model,sources,confidence} JSON
+  assets        TEXT,                            -- 新增（P1-9 技能数据契约）：[{type,url,title,position,data}] JSON，技能产出（配图/图表）
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -144,7 +145,7 @@ CREATE TABLE IF NOT EXISTS memory_procedural (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   agent_id      INTEGER NOT NULL,
   skill         VARCHAR(50),                     -- how_to_write / how_to_cite / how_to_judge
-  procedure     TEXT NOT NULL,
+  `procedure`   TEXT NOT NULL,                   -- 反引号：PROCEDURE 是 MariaDB 保留字（SQLite 亦兼容）
   version       INTEGER DEFAULT 1,
   updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (agent_id, skill)

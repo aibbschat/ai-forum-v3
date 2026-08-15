@@ -32,7 +32,8 @@ mv "$APP_DIR/current_bak" "$APP_DIR/current_old_$(date +%s)" 2>/dev/null || true
 
 cd "$APP_DIR/current"
 npm ci --omit=dev 2>/dev/null || npm install
-(cd web && npm ci --omit=dev 2>/dev/null || npm install)
+# web 构建需要 vite（devDependency），全量 npm ci
+(cd web && npm ci 2>/dev/null || true)
 (cd web && npx vite build) 2>/dev/null || echo "⚠️ 前端构建失败（老版本可能无 web/，忽略）"
 
 pm2 restart "$PM2_NAME"

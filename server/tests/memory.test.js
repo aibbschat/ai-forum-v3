@@ -365,7 +365,7 @@ test('writeProcedural 同 (agent, skill) 重复写入 → version 递增', async
   assert.equal(v2.id, v1.id, 'upsert 应更新同一行');
 
   const row = getDb()
-    .prepare(`SELECT procedure FROM memory_procedural WHERE id = ?`)
+    .prepare('SELECT `procedure` FROM memory_procedural WHERE id = ?')
     .get(v1.id);
   assert.match(row.procedure, /存疑必明说/);
 });
