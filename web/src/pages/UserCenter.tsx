@@ -48,6 +48,12 @@ export default function UserCenter() {
   const [nickname, setNickname] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // 头像上传：进度 + 反馈
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState('');
+  const [uploadSuccess, setUploadSuccess] = useState(false);
+
   const load = () => {
     if (!getToken()) {
       setLoading(false);
@@ -97,14 +103,59 @@ export default function UserCenter() {
 
   const onPickAvatar = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
+    e.target.value = ''; // 允许重复选择同一文件
     if (!f) return;
+    setUploadError('');
+    setUploadSuccess(false);
     const reader = new FileReader();
-    reader.onload = () => {
-      updateProfile({ avatar: String(reader.result) })
-        .then((r) => setMe(r.user))
-        .catch(() => setError('头像上传失败'));
-    };
+    reader.onload = () => uploadAvatar(String(reader.result));
     reader.readAsDataURL(f);
+  };
+
+  // 用 XHR 上传，以便拿到真实的上传进度（fetch 无法监听上传进度）
+  const uploadAvatar = (dataUrl: string) => {
+    const token = getToken();
+    const body = JSON.stringify({ avatar: dataUrl });
+    setUploading(true);
+    setUploadProgress(0);
+    const xhr = new XMLHttpRequest();
+    xhr.open('PATCH', '/api/users/me');
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (ev) => {
+      if (ev.lengthComputable) setUploadProgress(Math.round((ev.loaded / ev.total) * 100));
+    };
+    xhr.onload = () => {
+      setUploading(false);
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const r = JSON.parse(xhr.responseText);
+          const u = r.user as AuthUser;
+          setMe(u);
+          // 同步刷新 profile，避免头像不立即更新（之前需刷新页面才生效的根因）
+          setProfile((p) => (p ? { ...p, avatar: u.avatar } : p));
+          setUploadProgress(100);
+          setUploadSuccess(true);
+          setTimeout(() => setUploadSuccess(false), 2000);
+        } catch {
+          setUploadError('头像已上传，但解析响应失败');
+        }
+      } else {
+        let msg = '头像上传失败';
+        try {
+          const d = JSON.parse(xhr.responseText);
+          if (d && (d.message || d.error)) msg = d.message || d.error;
+        } catch {
+          /* ignore */
+        }
+        setUploadError(msg);
+      }
+    };
+    xhr.onerror = () => {
+      setUploading(false);
+      setUploadError('网络错误，头像上传失败');
+    };
+    xhr.send(body);
   };
 
   const saveProfile = async () => {
@@ -193,11 +244,17 @@ export default function UserCenter() {
               className="w-16 h-16 rounded-full object-cover"
               alt=""
             />
+            {uploading && (
+              <div className="absolute inset-0 rounded-full bg-black/55 flex flex-col items-center justify-center text-white">
+                <span className="text-[10px] font-semibold leading-none">{uploadProgress}%</span>
+              </div>
+            )}
             {isSelf && (
               <>
                 <button
                   onClick={() => fileRef.current?.click()}
-                  className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-gray-900 text-white text-xs flex items-center justify-center hover:bg-gray-700"
+                  disabled={uploading}
+                  className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-gray-900 text-white text-xs flex items-center justify-center hover:bg-gray-700 disabled:opacity-50"
                   aria-label="更换头像"
                 >
                   +
@@ -240,6 +297,8 @@ export default function UserCenter() {
             ) : (
               display.bio && <p className="text-xs text-gray-400 mt-1">{display.bio}</p>
             )}
+            {uploadSuccess && <p className="text-xs text-green-600 mt-1">头像已更新 ✓</p>}
+            {uploadError && <p className="text-xs text-red-500 mt-1">{uploadError}</p>}
           </div>
 
           <div className="flex gap-6 text-right">
