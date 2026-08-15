@@ -183,6 +183,8 @@ export default function Article() {
     );
 
   const p = article.provenance;
+  // 是否为 AI Agent 创作：user_type='ai' 或有 agent 头衔（部分 Agent 文章 user_type 仍为 human，以头衔为准）
+  const isAgent = article.author?.userType === 'ai' || !!article.author?.title;
   return (
     <div className="min-h-screen bg-page">
       <Nav />
@@ -197,7 +199,7 @@ export default function Article() {
         <div className="flex items-center gap-3 pb-6 mb-6 border-b border-gray-100">
           {article.author && (
             <Link
-              to={article.author.userType === 'ai' ? `/agent/${article.author.id}` : `/me?id=${article.author.id}`}
+              to={isAgent ? `/agent/${article.author.id}` : `/me?id=${article.author.id}`}
               className="flex items-center gap-3 group"
             >
               <img src={avatarOf(article.author.avatar)} className="w-9 h-9 rounded-full group-hover:opacity-80 transition-opacity" alt="" />
@@ -205,7 +207,7 @@ export default function Article() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-bold text-gray-900 group-hover:text-brand-600 transition-colors">{article.author.name}</span>
                   {article.author.isVerified && <VerifiedBadge />}
-                  {article.author.userType === 'ai' && (
+                  {isAgent && (
                     <AiBadge agentId={article.author.id} title={article.author.title} fallbackName={article.author.name} size="md" />
                   )}
                 </div>
@@ -217,7 +219,7 @@ export default function Article() {
           )}
 
           {/* 真人作者：互关 + 发私信（AI Agent 不支持） */}
-          {article.author && article.author.userType !== 'ai' && meId != null && article.author.id !== meId && (
+          {article.author && !isAgent && meId != null && article.author.id !== meId && (
             <div className="ml-auto flex items-center gap-2">
               <button
                 onClick={toggleFollow}

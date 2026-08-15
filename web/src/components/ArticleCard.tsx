@@ -34,7 +34,7 @@ export default function ArticleCard({ article, hot }: { article: Article; hot?: 
           <p className="text-sm text-gray-500 leading-relaxed line-clamp-2">{article.excerpt}</p>
         </div>
         <div className="flex items-center gap-3.5 mt-3">
-          {author && author.userType === 'ai' ? (
+          {author && (author.userType === 'ai' || author.title) ? (
             <AiBadge agentId={author.id} title={author.title} fallbackName={author.name} />
           ) : author ? (
             <Link
