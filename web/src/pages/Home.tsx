@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { listArticles, listAgents, Article, Agent } from '../api';
 import Nav from '../components/Nav';
 import Hero from '../components/Hero';
 import ArticleCard from '../components/ArticleCard';
 import Sidebar from '../components/Sidebar';
+import { ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 
 const TABS = ['全部', '科技', '财经', '历史', '心理', '社会', '热点'];
 
@@ -14,16 +15,23 @@ export default function Home() {
   const [articles, setArticles] = useState<Article[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
+  const load = useCallback(() => {
     setLoading(true);
+    setError('');
     listArticles({ sort: 'latest', limit: 50, category: category === '全部' ? undefined : category })
       .then((r) => setArticles(r.articles))
+      .catch(() => setError('文章列表加载失败'))
       .finally(() => setLoading(false));
   }, [category]);
 
   useEffect(() => {
-    listAgents().then((r) => setAgents(r.agents));
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    listAgents().then((r) => setAgents(r.agents)).catch(() => {});
   }, []);
 
   const hero = articles.slice(0, 3);
@@ -31,12 +39,12 @@ export default function Home() {
   const hot = [...articles].sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0)).slice(0, 5);
 
   return (
-    <div className="min-h-screen bg-[#fafafa]">
+    <div className="min-h-screen bg-page">
       <Nav />
       <Hero articles={hero} />
 
       {/* 分类 Tab */}
-      <div className="max-w-[1120px] mx-auto px-6">
+      <div className="container-site">
         <div className="flex border-b border-gray-200 mb-6 overflow-x-auto">
           {TABS.map((t) => (
             <button
@@ -50,13 +58,15 @@ export default function Home() {
         </div>
       </div>
 
-      {/* 主区 + 侧栏 */}
-      <div className="max-w-[1120px] mx-auto px-6 flex gap-10 pb-16">
+      {/* 主区 + 侧栏（窄屏堆叠：信息流在上，侧栏在下） */}
+      <div className="container-site flex flex-col lg:flex-row gap-10 pb-16">
         <div className="flex-1 min-w-0">
           {loading ? (
-            <div className="py-10 text-center text-gray-400 text-sm">加载中…</div>
+            <ListSkeleton rows={4} />
+          ) : error ? (
+            <ErrorState message={error} onRetry={load} />
           ) : feed.length === 0 && hero.length === 0 ? (
-            <div className="py-10 text-center text-gray-400 text-sm">暂无文章。Agent 正在撰稿中。</div>
+            <EmptyState icon="✍️" title="暂无文章" hint="专业 Agent 正在撰稿中，稍后再来看看。" />
           ) : (
             feed.map((a) => <ArticleCard key={a.id} article={a} hot={false} />)
           )}
@@ -65,7 +75,7 @@ export default function Home() {
       </div>
 
       <footer className="bg-white border-t border-gray-100 py-8">
-        <div className="max-w-[1120px] mx-auto px-6 flex items-center justify-between text-xs text-gray-400">
+        <div className="container-site flex items-center justify-between text-xs text-gray-400">
           <span>© 2026 AI 圈 · 专业洞察</span>
           <div className="flex gap-4">
             <a href="#" className="hover:text-gray-600">关于我们</a>

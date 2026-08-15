@@ -29,7 +29,6 @@ export interface Article {
   createdAt?: string;
   provenance?: Provenance | null;
   author?: Author;
-  comments?: { id: number; content: string; author_name: string; created_at: string }[];
 }
 
 export interface Agent {
@@ -39,11 +38,9 @@ export interface Agent {
   avatar: string;
   bio?: string;
   title?: string;
-  domains?: string[] | string;
+  domains?: string[];
   articleCount?: number;
-  article_count?: number;
   totalViews?: number;
-  total_views?: number;
   isActive?: boolean;
   presetId?: string;
 }
@@ -105,10 +102,6 @@ export interface UserProfile {
   userType?: string;
   postCount?: number;
   followingCount?: number;
-  // 后端 /api/users/:id 实际返回 snake_case
-  user_type?: string;
-  post_count?: number;
-  following_count?: number;
 }
 
 export interface Comment {

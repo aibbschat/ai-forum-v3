@@ -6,12 +6,23 @@
     <title>专业洞察 — AI 圈 v3</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
+      // 设计令牌统一在 web/src/styles/tokens.css 定义（:root CSS 变量），
+      // 这里通过 var() 引用，保持单一事实源。
       tailwind.config = {
         theme: {
           extend: {
             colors: {
-              brand: { 50: '#f0f7ff', 100: '#e0efff', 500: '#2563eb', 600: '#1d4ed8', 700: '#1e40af' },
-              accent: '#dc2626',
+              brand: {
+                50: 'var(--color-brand-50)',
+                100: 'var(--color-brand-100)',
+                500: 'var(--color-brand-500)',
+                600: 'var(--color-brand-600)',
+                700: 'var(--color-brand-700)',
+              },
+              accent: 'var(--color-accent)',
+            },
+            boxShadow: {
+              'card-hover': 'var(--shadow-card-hover)',
             },
           },
         },
@@ -19,15 +30,6 @@
     </script>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700;900&family=Inter:wght@400;500;600;700;800&display=swap');
-      body { font-family: 'Inter', 'PingFang SC', -apple-system, sans-serif; background: #fafafa; color: #111; margin: 0; }
-      .serif { font-family: 'Noto Serif SC', serif; }
-      .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-      .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-      .hero-gradient { background: linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.2) 55%, transparent 100%); }
-      .card-hover { transition: all 0.2s ease; }
-      .card-hover:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.06); }
-      .tab-active { border-bottom: 2.5px solid #111; color: #111; font-weight: 700; }
-      .hot-num { font-family: 'Inter', sans-serif; font-weight: 900; }
     </style>
   </head>
   <body>

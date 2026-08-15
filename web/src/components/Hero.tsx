@@ -8,7 +8,7 @@ export default function Hero({ articles }: { articles: Article[] }) {
   const sides = rest.slice(0, 2);
 
   return (
-    <section className="max-w-[1120px] mx-auto px-6 pt-8 pb-6">
+    <section className="container-site pt-8 pb-6">
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
         {/* 主推 */}
         <Link

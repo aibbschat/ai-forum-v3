@@ -1,33 +1,64 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { listAgentArticles, Agent, Article } from '../api';
 import Nav from '../components/Nav';
 import ArticleCard from '../components/ArticleCard';
 import { categoryColor } from '../lib';
+import { BlockSkeleton, ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 
 export default function AgentSpace() {
   const { id } = useParams();
   const [data, setData] = useState<{ agent: Agent; posts: Article[] } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
+  const load = useCallback(() => {
     setLoading(true);
-    if (id) listAgentArticles(Number(id), 50).then(setData).finally(() => setLoading(false));
+    setError('');
+    if (id) {
+      listAgentArticles(Number(id), 50)
+        .then(setData)
+        .catch(() => setError('作者信息加载失败'))
+        .finally(() => setLoading(false));
+    }
   }, [id]);
 
-  if (loading) return <div className="min-h-screen bg-[#fafafa]"><Nav /><div className="py-20 text-center text-gray-400">加载中…</div></div>;
-  if (!data) return <div className="min-h-screen bg-[#fafafa]"><Nav /><div className="py-20 text-center text-gray-400">作者不存在。</div></div>;
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  if (loading)
+    return (
+      <div className="min-h-screen bg-page">
+        <Nav />
+        <div className="container-site pt-8">
+          <div className="bg-white rounded-lg p-7 border border-gray-100">
+            <BlockSkeleton lines={3} />
+          </div>
+        </div>
+      </div>
+    );
+
+  if (error || !data)
+    return (
+      <div className="min-h-screen bg-page">
+        <Nav />
+        <div className="container-site pt-8">
+          <ErrorState message={error || '作者不存在。'} onRetry={load} />
+        </div>
+      </div>
+    );
 
   const { agent, posts } = data;
-  const domains = typeof agent.domains === 'string' ? agent.domains : (agent.domains as string[])?.join(' · ');
-  const count = agent.articleCount || agent.article_count || 0;
+  const domains = agent.domains?.join(' · ');
+  const count = agent.articleCount || 0;
 
   return (
-    <div className="min-h-screen bg-[#fafafa]">
+    <div className="min-h-screen bg-page">
       <Nav />
 
       {/* Agent 头部 */}
-      <section className="max-w-[1120px] mx-auto px-6 pt-8">
+      <section className="container-site pt-8">
         <div className="bg-white rounded-lg p-7 border border-gray-100 flex items-center gap-5">
           <img src={agent.avatar} className="w-16 h-16 rounded-full" alt="" />
           <div className="flex-1 min-w-0">
@@ -43,10 +74,12 @@ export default function AgentSpace() {
       </section>
 
       {/* 时序文章流（朋友圈/专栏） */}
-      <div className="max-w-[1120px] mx-auto px-6 py-6">
+      <div className="container-site py-6">
         <h2 className="text-sm font-extrabold text-gray-900 mb-2 tracking-wide">最新文章</h2>
-        {posts.length === 0 ? (
-          <div className="py-10 text-center text-gray-400 text-sm">这位 Agent 还没有发布文章。</div>
+        {loading ? (
+          <ListSkeleton rows={3} />
+        ) : posts.length === 0 ? (
+          <EmptyState icon="✍️" title="这位 Agent 还没有发布文章。" />
         ) : (
           <div className="border-t border-gray-100">
             {posts.map((p) => (
@@ -59,7 +92,7 @@ export default function AgentSpace() {
       </div>
 
       <footer className="bg-white border-t border-gray-100 py-8">
-        <div className="max-w-[1120px] mx-auto px-6 text-xs text-gray-400">
+        <div className="container-site text-xs text-gray-400">
           <Link to="/" className="hover:text-gray-600">← 返回首页</Link>
         </div>
       </footer>

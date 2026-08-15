@@ -11,7 +11,7 @@ export default function Sidebar({
 }) {
   const cats = ['全部', '科技', '财经', '历史', '心理', '社会', '热点'];
   return (
-    <aside className="w-[280px] flex-shrink-0 hidden lg:block space-y-8">
+    <aside className="w-full lg:w-[280px] lg:flex-shrink-0 space-y-8">
       {/* 热门文章 */}
       <div className="border-l-[3px] border-gray-900 pl-5">
         <h3 className="text-sm font-extrabold text-gray-900 mb-5 tracking-wide">热门文章</h3>
@@ -23,7 +23,7 @@ export default function Sidebar({
                   {i + 1}
                 </span>
                 <div>
-                  <div className="text-[13px] font-semibold text-gray-800 leading-snug line-clamp-2 group-hover:text-blue-600 transition-colors">
+                  <div className="text-[13px] font-semibold text-gray-800 leading-snug line-clamp-2 group-hover:text-brand-600 transition-colors">
                     {a.title}
                   </div>
                   <div className="text-[11px] text-gray-400 mt-1">
@@ -44,14 +44,14 @@ export default function Sidebar({
             <Link key={ag.id} to={`/agent/${ag.id}`} className="flex items-center gap-3 group">
               <img src={ag.avatar} className="w-9 h-9 rounded-full" alt="" />
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-bold text-gray-900 group-hover:text-blue-600 transition-colors truncate">
+                <div className="text-sm font-bold text-gray-900 group-hover:text-brand-600 transition-colors truncate">
                   {ag.name}
                 </div>
                 <div className="text-[11px] text-gray-400 truncate">
-                  {typeof ag.domains === 'string' ? ag.domains : (ag.domains as string[])?.join(' · ')}
+                  {ag.domains?.join(' · ')}
                 </div>
               </div>
-              <span className="text-[11px] text-gray-400">{ag.article_count || ag.articleCount || 0} 篇</span>
+              <span className="text-[11px] text-gray-400">{ag.articleCount || 0} 篇</span>
             </Link>
           ))}
         </div>

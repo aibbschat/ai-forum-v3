@@ -25,7 +25,7 @@ export default function ArticleCard({ article, hot }: { article: Article; hot?: 
             )}
           </div>
           <Link to={`/article/${article.id}`}>
-            <h3 className="text-[17px] font-bold leading-relaxed text-gray-900 line-clamp-2 mb-1.5 group-hover:text-blue-600 transition-colors">
+            <h3 className="text-[17px] font-bold leading-relaxed text-gray-900 line-clamp-2 mb-1.5 group-hover:text-brand-600 transition-colors">
               {article.title}
             </h3>
           </Link>

@@ -11,26 +11,34 @@ import {
 import Nav from '../components/Nav';
 import CommentSection from '../components/CommentSection';
 import { categoryColor, timeAgo, fmtCount } from '../lib';
+import { BlockSkeleton, ErrorState } from '../components/AsyncState';
 
 export default function Article() {
   const { id } = useParams();
   const [article, setArticle] = useState<ArticleT | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
   const [authError, setAuthError] = useState('');
 
-  useEffect(() => {
+  const load = useCallback(() => {
     setLoading(true);
+    setError('');
     if (id) {
       getArticle(Number(id))
         .then((a) => {
           setArticle(a);
           setLikeCount(a.likeCount || 0);
         })
+        .catch(() => setError('文章加载失败'))
         .finally(() => setLoading(false));
     }
   }, [id]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   // 阅读计数（进入详情页即记一次）
   useEffect(() => {
@@ -58,12 +66,29 @@ export default function Article() {
     }
   }, [id]);
 
-  if (loading) return <div className="min-h-screen bg-[#fafafa]"><Nav /><div className="py-20 text-center text-gray-400">加载中…</div></div>;
-  if (!article) return <div className="min-h-screen bg-[#fafafa]"><Nav /><div className="py-20 text-center text-gray-400">文章不存在。</div></div>;
+  if (loading)
+    return (
+      <div className="min-h-screen bg-page">
+        <Nav />
+        <article className="max-w-[760px] mx-auto px-6 pt-10 pb-16">
+          <BlockSkeleton lines={6} />
+        </article>
+      </div>
+    );
+
+  if (error || !article)
+    return (
+      <div className="min-h-screen bg-page">
+        <Nav />
+        <article className="max-w-[760px] mx-auto px-6 pt-10 pb-16">
+          <ErrorState message={error || '文章不存在。'} onRetry={load} />
+        </article>
+      </div>
+    );
 
   const p = article.provenance;
   return (
-    <div className="min-h-screen bg-[#fafafa]">
+    <div className="min-h-screen bg-page">
       <Nav />
       <article className="max-w-[760px] mx-auto px-6 pt-10 pb-16">
         <div className="flex items-center gap-2 mb-3">
@@ -88,7 +113,7 @@ export default function Article() {
           <button
             onClick={toggleLike}
             className={`inline-flex items-center gap-1.5 text-sm font-semibold transition-colors ${
-              liked ? 'text-red-500' : 'text-gray-500 hover:text-gray-800'
+              liked ? 'text-accent' : 'text-gray-500 hover:text-gray-800'
             }`}
           >
             <svg
@@ -117,7 +142,7 @@ export default function Article() {
             </svg>
             {fmtCount(article.commentCount)}
           </span>
-          {authError && <span className="text-xs text-red-500">{authError}</span>}
+          {authError && <span className="text-xs text-accent">{authError}</span>}
         </div>
 
         <div className="prose max-w-none text-[17px] leading-[1.9] text-gray-800 whitespace-pre-wrap">
@@ -137,7 +162,7 @@ export default function Article() {
                     {p.sources.map((s, i) => (
                       <li key={i}>
                         《{s.title}》{s.author ? `（${s.dynasty ? s.dynasty + '·' : ''}${s.author}）` : ''}
-                        {s.url ? <a href={s.url} className="text-blue-600 hover:underline ml-1">链接</a> : null}
+                        {s.url ? <a href={s.url} className="text-brand-600 hover:underline ml-1">链接</a> : null}
                       </li>
                     ))}
                   </ul>

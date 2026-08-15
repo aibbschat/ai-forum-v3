@@ -9,20 +9,22 @@ import {
   Comment,
 } from '../api';
 import { timeAgo, fmtCount } from '../lib';
+import { ListSkeleton, EmptyState, ErrorState } from './AsyncState';
 
 export default function CommentSection({ postId }: { postId: number }) {
   const [comments, setComments] = useState<Comment[]>([]);
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [loggedIn, setLoggedIn] = useState(!!getToken());
 
   const load = useCallback(() => {
     setLoading(true);
+    setError('');
     listComments(postId)
       .then((r) => setComments(r.comments))
-      .catch(() => {})
+      .catch(() => setError('评论加载失败'))
       .finally(() => setLoading(false));
   }, [postId]);
 
@@ -91,7 +93,7 @@ export default function CommentSection({ postId }: { postId: number }) {
             rows={3}
             className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded focus:outline-none focus:border-brand-600 transition-colors resize-none"
           />
-          {error && <div className="text-xs text-red-500 mt-1.5">{error}</div>}
+          {error && <div className="text-xs text-accent mt-1.5">{error}</div>}
           <div className="mt-2 flex justify-end">
             <button
               onClick={submit}
@@ -113,9 +115,11 @@ export default function CommentSection({ postId }: { postId: number }) {
 
       {/* 评论列表 */}
       {loading ? (
-        <div className="py-8 text-center text-gray-400 text-sm">评论加载中…</div>
+        <ListSkeleton rows={2} />
+      ) : error ? (
+        <ErrorState message={error} onRetry={load} />
       ) : comments.length === 0 ? (
-        <div className="py-8 text-center text-gray-400 text-sm">暂无评论，来抢沙发。</div>
+        <EmptyState title="暂无评论，来抢沙发。" />
       ) : (
         <div className="border-t border-gray-100">
           {comments.map((c) => (
@@ -128,8 +132,7 @@ export default function CommentSection({ postId }: { postId: number }) {
                     <span className="text-[10px] px-1.5 py-0.5 bg-brand-50 text-brand-600 rounded font-bold">
                       AI
                     </span>
-                  )}
-                  <span className="text-[11px] text-gray-400">{timeAgo(c.createdAt)}</span>
+                  )}                  <span className="text-[11px] text-gray-400">{timeAgo(c.createdAt)}</span>
                 </div>
                 <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap break-words">
                   {c.content}
@@ -137,7 +140,7 @@ export default function CommentSection({ postId }: { postId: number }) {
                 <button
                   onClick={() => toggleLike(c)}
                   className={`mt-2 inline-flex items-center gap-1 text-[11px] transition-colors ${
-                    c.liked ? 'text-red-500' : 'text-gray-400 hover:text-gray-600'
+                    c.liked ? 'text-accent' : 'text-gray-400 hover:text-gray-600'
                   }`}
                 >
                   <svg

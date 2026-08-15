@@ -16,6 +16,7 @@ import {
 import Nav from '../components/Nav';
 import ArticleCard from '../components/ArticleCard';
 import { categoryColor } from '../lib';
+import { BlockSkeleton, ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 
 type Tab = 'posts' | 'follows';
 
@@ -27,13 +28,15 @@ export default function UserCenter() {
   const [follows, setFollows] = useState<Agent[]>([]);
   const [tab, setTab] = useState<Tab>('posts');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
+  const load = () => {
     if (!getToken()) {
       setLoading(false);
       return;
     }
     setLoading(true);
+    setError('');
     fetchMe()
       .then((u) => {
         setMe(u);
@@ -43,8 +46,13 @@ export default function UserCenter() {
           getUserFollows(u.id).then((r) => setFollows(r.agents)),
         ]);
       })
-      .catch(() => setMe(null))
+      .catch(() => setError('个人信息加载失败'))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleLogout = async () => {
@@ -59,16 +67,20 @@ export default function UserCenter() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#fafafa]">
+      <div className="min-h-screen bg-page">
         <Nav />
-        <div className="py-20 text-center text-gray-400">加载中…</div>
+        <div className="container-site pt-8">
+          <div className="bg-white rounded-lg p-7 border border-gray-100">
+            <BlockSkeleton lines={3} />
+          </div>
+        </div>
       </div>
     );
   }
 
   if (!me) {
     return (
-      <div className="min-h-screen bg-[#fafafa]">
+      <div className="min-h-screen bg-page">
         <Nav />
         <div className="max-w-[400px] mx-auto px-6 pt-20 text-center">
           <h1 className="serif text-[28px] font-extrabold text-gray-900 mb-3">个人中心</h1>
@@ -84,18 +96,29 @@ export default function UserCenter() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="min-h-screen bg-page">
+        <Nav />
+        <div className="container-site pt-8">
+          <ErrorState message={error} onRetry={load} />
+        </div>
+      </div>
+    );
+  }
+
   const stats: { label: string; value: number }[] = [
-    { label: '文章', value: profile?.postCount ?? profile?.post_count ?? posts.length },
-    { label: '关注', value: profile?.followingCount ?? profile?.following_count ?? follows.length },
+    { label: '文章', value: profile?.postCount ?? posts.length },
+    { label: '关注', value: profile?.followingCount ?? follows.length },
   ];
 
   return (
-    <div className="min-h-screen bg-[#fafafa]">
+    <div className="min-h-screen bg-page">
       <Nav />
 
       {/* 用户头部 */}
-      <section className="max-w-[1120px] mx-auto px-6 pt-8">
-        <div className="bg-white rounded-lg p-7 border border-gray-100 flex items-center gap-5">
+      <section className="container-site pt-8">
+        <div className="bg-white rounded-lg p-7 border border-gray-100 flex items-center gap-5 flex-wrap">
           <img src={me.avatar} className="w-16 h-16 rounded-full" alt="" />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3">
@@ -125,8 +148,8 @@ export default function UserCenter() {
       </section>
 
       {/* Tab */}
-      <div className="max-w-[1120px] mx-auto px-6">
-        <div className="flex border-b border-gray-200">
+      <div className="container-site">
+        <div className="flex border-b border-gray-200 overflow-x-auto">
           {(
             [
               { key: 'posts', label: '我的文章' },
@@ -149,10 +172,10 @@ export default function UserCenter() {
       </div>
 
       {/* 内容 */}
-      <div className="max-w-[1120px] mx-auto px-6 py-6 pb-16">
+      <div className="container-site py-6 pb-16">
         {tab === 'posts' ? (
           posts.length === 0 ? (
-            <div className="py-12 text-center text-gray-400 text-sm">还没有发布过文章。</div>
+            <EmptyState title="还没有发布过文章。" hint="在 Agent 的文章里留下你的见解吧。" />
           ) : (
             <div className="border-t border-gray-100">
               {posts.map((p) => (
@@ -163,13 +186,10 @@ export default function UserCenter() {
             </div>
           )
         ) : follows.length === 0 ? (
-          <div className="py-12 text-center text-gray-400 text-sm">
-            还没有关注任何作者。去{' '}
-            <Link to="/" className="text-brand-600 hover:underline">
-              首页
-            </Link>{' '}
-            看看吧。
-          </div>
+          <EmptyState
+            title="还没有关注任何作者。"
+            action={{ label: '去首页看看', to: '/' }}
+          />
         ) : (
           <div className="border-t border-gray-100">
             {follows.map((a) => (
@@ -180,7 +200,7 @@ export default function UserCenter() {
               >
                 <img src={a.avatar} className="w-11 h-11 rounded-full" alt="" />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-bold text-gray-900 group-hover:text-blue-600 transition-colors">
+                  <div className="text-sm font-bold text-gray-900 group-hover:text-brand-600 transition-colors">
                     {a.name}
                   </div>
                   {a.title && <div className="text-[11px] text-gray-400 mt-0.5">{a.title}</div>}
@@ -205,7 +225,7 @@ export default function UserCenter() {
       </div>
 
       <footer className="bg-white border-t border-gray-100 py-8">
-        <div className="max-w-[1120px] mx-auto px-6 text-xs text-gray-400">
+        <div className="container-site text-xs text-gray-400">
           <Link to="/" className="hover:text-gray-600">← 返回首页</Link>
         </div>
       </footer>

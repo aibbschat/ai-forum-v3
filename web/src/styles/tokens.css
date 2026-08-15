@@ -1,0 +1,102 @@
+/* ═══════════════════════════════════════════════════════════════
+   设计令牌（单一事实源）— 严格对齐 article-prototype.html
+   改动任何一个令牌，全站视觉会同步变化；不要在各页面写死色值。
+   index.html 的 tailwind.config 通过 var() 引用这里的变量。
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* 布局 */
+  --container-max: 1120px;      /* 内容区最大宽度 */
+  --container-pad: 1.5rem;      /* px-6 = 24px */
+  --article-max: 760px;         /* 文章正文阅读宽度 */
+
+  /* 色彩 */
+  --color-bg: #fafafa;          /* 页面底色（白灰） */
+  --color-surface: #ffffff;     /* 卡片/导航底色 */
+  --color-ink: #111;            /* 主文字（近黑） */
+  --color-ink-strong: #111;
+  --color-border: #e5e7eb;      /* gray-200 浅边框 */
+
+  /* 品牌蓝 #1d4ed8 */
+  --color-brand-50: #f0f7ff;
+  --color-brand-100: #e0efff;
+  --color-brand-500: #2563eb;
+  --color-brand-600: #1d4ed8;
+  --color-brand-700: #1e40af;
+
+  /* 强调红 #dc2626 —— 仅用于热榜/热标/点赞态等“重要/涨”语义 */
+  --color-accent: #dc2626;
+
+  /* 字体 */
+  --font-sans: 'Inter', 'PingFang SC', -apple-system, 'Segoe UI', sans-serif;
+  --font-serif: 'Noto Serif SC', 'Songti SC', serif;
+
+  /* 圆角 / 阴影 */
+  --radius-card: 8px;
+  --shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-ink);
+  margin: 0;
+}
+
+/* ── 布局容器：1120px 居中 + 左右 24px 留白 ─────────────────────── */
+.container-site {
+  max-width: var(--container-max);
+  margin-inline: auto;
+  padding-inline: var(--container-pad);
+}
+
+/* ── 页面底色（等价 tailwind 的 bg-[#fafafa]） ──────────────────── */
+.bg-page {
+  background-color: var(--color-bg);
+}
+
+/* ── 排版：衬线标题 ─────────────────────────────────────────────── */
+.serif {
+  font-family: var(--font-serif);
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Hero 渐变 ─────────────────────────────────────────────────── */
+.hero-gradient {
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.82) 0%, rgba(0, 0, 0, 0.2) 55%, transparent 100%);
+}
+
+/* ── 卡片 hover ────────────────────────────────────────────────── */
+.card-hover {
+  transition: all 0.2s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* ── 分类 Tab 下划线激活态（黑色下划线 + 加粗） ───────────────────── */
+.tab-active {
+  border-bottom: 2.5px solid #111;
+  color: #111;
+  font-weight: 700;
+}
+
+/* ── 热榜序号（仅这里用红，遵循“涨=红”） ──────────────────────────── */
+.hot-num {
+  font-family: var(--font-sans);
+  font-weight: 900;
+}

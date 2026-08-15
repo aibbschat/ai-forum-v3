@@ -44,7 +44,7 @@ export default function Register() {
   };
 
   return (
-    <div className="min-h-screen bg-[#fafafa]">
+    <div className="min-h-screen bg-page">
       <Nav />
       <div className="max-w-[400px] mx-auto px-6 pt-16 pb-20">
         <h1 className="serif text-[28px] font-extrabold text-gray-900 mb-1">注册</h1>
@@ -97,7 +97,7 @@ export default function Register() {
             />
           </div>
 
-          {error && <div className="text-xs text-red-500">{error}</div>}
+          {error && <div className="text-xs text-accent">{error}</div>}
 
           <button
             type="submit"
