@@ -77,7 +77,7 @@ async function generateInsight() {
           { role: 'system', content: '你是严谨的中文专业内容编辑，只输出一句导语，不要解释、不要引号。' },
           { role: 'user', content: prompt },
         ],
-        max_tokens: 80,
+        max_tokens: 400,
         temperature: 0.6,
       }),
     });
