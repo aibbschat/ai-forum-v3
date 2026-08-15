@@ -899,7 +899,7 @@ aibbs.chat
 完成：MariaDB 生产运行
 ```
 
-**约束**：`server/database/connection.js` 暴露的 `getDb() / closeDb()` 接口签名**不变**，services 层完全无感——这是可切换的前提（当前已满足）。
+**约束（D12 修正，2026-08-15 实测）**：better-sqlite3 是**同步** API、mysql2 是**异步**，"接口签名不变、services 完全无感"**不成立**（每个调用方都要改 await）。正解是建**统一异步 DAO**（`server/database/db.js`，`DB_DRIVER=sqlite|mariadb`）：services 一律 `await db.get/all/run`，命名参数自动转位置参数，方言 SQL 走 `fn.*` 助手。路径：**先 SQLite 上线（零运维），触发 §14.4 硬指标再切 MariaDB**（详见 `docs/design/mariadb-switch.md`）。
 
 ### 14.4 触发切换的硬指标（若选择先 SQLite 上线的兜底）
 

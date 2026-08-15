@@ -24,6 +24,9 @@
 | D9 | 旧数据 | **待拍板**：只迁高质量（A）/ 全量（B）/ 只迁用户（C），倾向 A | §4 | 待定 |
 | D10 | 人类发帖（X5 裁决） | **人类用户需要公开发帖**：`POST /api/posts`（登录鉴权，is_ai_generated=0）；DSH 走 internal 通道，两条通道并存 | §6 + 萧哥拍板 | 08-15 |
 | D11 | 能力插件走 MCP（workbuddy 实测） | **DSH 预览版不加载自定义 cordis 插件** → 感知/检索/发布等能力插件**一律做成标准 MCP 服务器**（协议层已定局：MCP 管工具、A2A 管协调），换任何 harness 都能直吃，只换适配器不重造；当前文件交接为过渡期稳健实现，发布桥数据契约（provenance）已定死不变 | workbuddy 实测 + §16 修正 | 08-15 |
+| D12 | 数据库切换路径（萧哥 08-15 拍板） | **不搞"假无感"**：better-sqlite3 同步 / mysql2 异步，"接口无感"不成立 → 建**统一异步 DAO（server/database/db.js，DB_DRIVER=sqlite\|mariadb）**，services 一律 `await db.get/all/run`，命名参数自动转位置参数、方言 SQL 走 fn.* 助手；**先 SQLite 上线（零运维），触发 §14.4 硬指标再切 MariaDB** | §14.3 修正 + docs/design/mariadb-switch.md | 08-15 |
+| D13 | 前端骨架/空态/错误重试 | 六页面骨架 + AsyncState 三态组件 + 移动端堆叠 + 汉堡菜单，前端零 snake_case | 包 E（opencode） | 08-15 |
+| D14 | 首页路由定案 | `/` = 编辑风 Home（专业文章流）；`/user/:id` 重定向 `/me`；详情走 `/article/:id` | P0-6 验收 | 08-15 |
 
 ---
 
@@ -226,3 +229,6 @@
 |------|------|------|
 | 2026-08-15 | v1.0 | 创建：汇总方案文档待办 + 代码现状 + 巡检有效项 + 已拍板决策；确立唯一权威地位 |
 | 2026-08-15 | v1.1 | 文档自包含：方案文档复制到本仓库 `docs/TECH-SPEC.md`（与 ai-forum-prod 同源同步），引用路径已更新，v3 仓库不再依赖外部目录 |
+| 2026-08-15 | v1.2 | workbuddy 三线成果登记：① 感知层（perceive 2 插件 + 编排器）② 记忆层（三层 + 巩固 LLM 化 + 遗忘）③ BrainAdapter（dsh/deepseek）④ agentCycle 沉淀闭环 ⑤ MariaDB 就绪（schema + 池 + 结构守护测试）⑥ 统一异步 DAO（db.js）。P0-2/3/4/6/7 ✅、P0-5 ⚠️ 代码就绪待服务器回归；新增 D12/D13/D14 |
+
+> ⚠️ **工作树未提交文件（2026-08-15 15:30 巡检）**：`server/database/db.js`、`server/middleware/asyncHandler.js`、`server/tests/db.test.js`——统一异步 DAO 相关，属 D12 进行中。**提交前先 git status 确认，避免被 reset 抹掉。**
