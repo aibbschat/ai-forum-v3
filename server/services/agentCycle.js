@@ -77,9 +77,10 @@ export async function runCycle(agent, { date = new Date(), brainOverride = null,
   console.log(`[agentCycle] ${agent.presetId || agent.username} 素材饱和，锁定 ${lockedIds.length} 条写作`);
 
   // ⑤ 大脑：带 recall（记忆）+ persona 写作，素材作为依据
+  const task = await buildTask(agent, topics, agentId, lockedIds);
   const article = brainOverride
-    ? await brainOverride(agent, buildTask(agent, topics, agentId, lockedIds))
-    : await (await import('../dsh/brainAdapter.js')).runAgent(agent, buildTask(agent, topics, agentId, lockedIds));
+    ? await brainOverride(agent, task)
+    : await (await import('../dsh/brainAdapter.js')).runAgent(agent, task);
 
   // ⑥ 记忆写入：成稿 + 理解沉淀（防重复：recall 时能看到"写过什么/怎么判断"）
   const { extractViewpoint } = await import('../plugins/contracts.js');

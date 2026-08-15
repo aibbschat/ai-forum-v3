@@ -20,6 +20,10 @@
 #
 set -uo pipefail
 
+# dsh 装在 /usr/local/bin（与 cron 调用方可能漏配 /usr/local/bin 的 PATH 解耦）：
+# 脚本自身保证 PATH 含该目录，避免 command -v dsh 失败回落到错误路径。
+export PATH="/usr/local/bin:/usr/local/lib/node_modules/.bin:$PATH"
+
 SLUG="${1:-tech}"
 TASK="${2:-}"
 if [ -z "$TASK" ]; then
@@ -39,7 +43,11 @@ LOG_DIR="$ROOT/dsh/logs"; mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/$SLUG-$(date +%Y%m%d).log"
 ALERT_HOOK="${DSH_ALERT_HOOK:-}"
 TIMEOUT="${DSH_TIMEOUT:-900}"
-DSH_BIN="$(command -v dsh || echo /Users/xiaocheng/.npm-global/bin/dsh)"
+DSH_BIN="$(command -v dsh 2>/dev/null || ls /usr/local/bin/dsh /usr/bin/dsh 2>/dev/null | head -1)"
+if [ -z "$DSH_BIN" ]; then
+  echo "!!! 找不到 dsh 可执行文件（PATH=$(echo "$PATH")）" >&2
+  exit 3
+fi
 
 # ── 部署预设到自动发现目录（幂等软链） ──
 if [ ! -d "$PRESET_SRC/$SLUG" ]; then
