@@ -77,6 +77,28 @@ export async function runCycle(agent, { date = new Date(), brainOverride = null,
         importance: 0.95, // 判断类记忆重要性最高，参与 recall 排序最优先
       });
     }
+
+    // ★ 巩固节流（2026-08-15 半环补全）：短期判断 → 长期语义理解。
+    //   距上次 consolidate 满 consolidateEveryDays 天且本周期有新 episodic 时，
+    //   把 episodic 炼成 semantic（LLM 驱动，失败自动回退纯函数）。
+    //   这是"越写越懂世界"的物理动作：判断从 episodic 沉淀为长期理解。
+    const consolidateEveryDays = Number(process.env.CONSOLIDATE_EVERY_DAYS || 7);
+    try {
+      const { maybeConsolidate } = await import('../services/memory/index.js');
+      const consolidated = await maybeConsolidate(agentId, {
+        consolidateEveryDays,
+        days: consolidateEveryDays,
+      });
+      if (consolidated) {
+        console.log(
+          `[agentCycle] agent=${agent.presetId || agent.username} 巩固完成：` +
+            `领域=${consolidated.domains} 沉淀=${consolidated.written.length}`
+        );
+      }
+    } catch (e) {
+      // 巩固失败不阻塞发布（记忆增强，不是前提）
+      console.warn(`[agentCycle] 巩固失败（继续发布）: ${e?.message || e}`);
+    }
   }
 
   // ④ 发布：统一走 postService（单一发布通道）

@@ -130,3 +130,47 @@ test('评论 Agent 文章 → 读者反馈写回该 Agent 记忆（source=feedba
   ).get(agentRow.user_id).c;
   assert.equal(shortCount, 0, '短评论不应写记忆');
 });
+
+// ── 5. 巩固节流：短期判断 → 长期语义理解（半环补全） ──
+test('maybeConsolidate：未到周期跳过；到期且有素材才巩固成 semantic', async () => {
+  const { getDb } = await import('../database/connection.js');
+  const db3 = getDb();
+  const agentRow = db3.prepare(`SELECT user_id FROM agent_profiles WHERE preset_id = 'tech'`).get();
+  const aid = agentRow.user_id;
+
+  // 清空该 agent 的 semantic，保证可重复
+  db3.prepare(`DELETE FROM memory_semantic WHERE agent_id = ?`).run(aid);
+
+  // 写入一批带判断的 episodic（模拟"短期判断积累"）
+  const { writeEpisodic } = await import('../services/memory/index.js');
+  for (let i = 0; i < 10; i++) {
+    await writeEpisodic({
+      agentId: aid,
+      content: `[AI芯片] 第 ${i} 条：国产芯片业绩兑现但估值透支，需谨慎。`,
+      source: 'publish',
+      importance: 0.9,
+    });
+  }
+
+  const { maybeConsolidate, getLastConsolidatedAt } = await import('../services/memory/index.js');
+
+  // ① 首次（无 semantic 历史）且 interval=7 → 应该执行（无 last 限制）
+  const r1 = await maybeConsolidate(aid, { consolidateEveryDays: 7 });
+  assert.ok(r1, '首次巩固应执行');
+  assert.ok(r1.written.length >= 1, '应沉淀出 semantic');
+  const last1 = await getLastConsolidatedAt(aid);
+  assert.ok(last1, '巩固后应有 lastConsolidatedAt');
+
+  // ② 刚巩固过 → 未到 7 天周期 → 跳过（null）
+  const r2 = await maybeConsolidate(aid, { consolidateEveryDays: 7 });
+  assert.equal(r2, null, '刚巩固过应跳过');
+
+  // ③ interval 最小钳为 1 天 → 刚巩固过仍跳过（防高频巩固）
+  const r3 = await maybeConsolidate(aid, { consolidateEveryDays: 0 });
+  assert.equal(r3, null, 'interval=0 钳为 1 天，刚巩固过应跳过（防高频）');
+
+  // ④ 验证 semantic 里确有沉淀的理解（含"估值"关键词）
+  const sem = db3.prepare(`SELECT understanding FROM memory_semantic WHERE agent_id = ?`).all(aid);
+  const allText = sem.map((s) => s.understanding).join(' ');
+  assert.ok(allText.includes('估值'), `semantic 应含判断关键词，实际: ${allText.slice(0, 100)}`);
+});

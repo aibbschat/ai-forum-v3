@@ -343,6 +343,61 @@ export async function sweepForgetting(agentId) {
 // ── 巩固（consolidation，§7.6.3） ───────────────────────────────────
 
 /**
+ * 查询某 Agent 最近一次 semantic 巩固的时间（无则 null）。
+ * 用于巩固节流：判断"上次把 episodic 炼成 semantic 是什么时候"。
+ */
+export async function getLastConsolidatedAt(agentId) {
+  const id = requireAgentId(agentId);
+  const row = await db.get(
+    `SELECT MAX(updated_at) AS t FROM memory_semantic WHERE agent_id = ?`,
+    [id]
+  );
+  return row?.t || null;
+}
+
+/**
+ * 节流巩固（供 agentCycle 周期调用）：距离上次巩固 >= consolidateEveryDays 天，
+ * 且本周期有新的 episodic 可巩固，才执行 consolidate（LLM 驱动，失败自动回退纯函数）。
+ * 返回 null 表示本次跳过（未到周期或无素材）。
+ *
+ * @param {number} agentId
+ * @param {{consolidateEveryDays?:number, days?:number, confidence?:number}} [opts]
+ * @returns {Promise<object|null>} consolidate 结果，或 null（跳过）
+ */
+export async function maybeConsolidate(
+  agentId,
+  { consolidateEveryDays = 7, days = 7, confidence = 0.6 } = {}
+) {
+  const id = requireAgentId(agentId);
+  const interval = Math.max(1, Math.trunc(Number(consolidateEveryDays) || 7));
+
+  // 节流：距上次巩固不足 interval 天则跳过
+  const last = await getLastConsolidatedAt(id);
+  if (last) {
+    const lastTs = new Date(String(last).replace(' ', 'T') + (String(last).includes('Z') ? '' : 'Z')).getTime();
+    if (Number.isFinite(lastTs)) {
+      const elapsedDays = (Date.now() - lastTs) / 86400000;
+      if (elapsedDays < interval) {
+        return null; // 未到巩固周期
+      }
+    }
+  }
+
+  // 有新的 episodic 才巩固（避免空转）
+  const recentCount = (
+    await db.get(
+      `SELECT COUNT(*) AS c FROM memory_episodic
+        WHERE agent_id = ? AND created_at >= ${fn.nowOffsetDays(-interval)}
+              AND (expires_at IS NULL OR expires_at > ${fn.now()})`,
+      [id]
+    )
+  ).c;
+  if (recentCount === 0) return null;
+
+  return consolidate(id, { days, confidence });
+}
+
+/**
  * 纯函数：把同一 domain 的 episodic 聚合成「理解草稿」。
  * 无 IO、无外部 API，可单测。
  *

@@ -170,9 +170,11 @@ export const db = {
 export const fn = {
   /** 当前时间表达式 */
   now: () => (isMaria ? 'NOW()' : "datetime('now')"),
-  /** now + n 天（episodic TTL 等） */
-  nowOffsetDays: (n) =>
-    isMaria ? `NOW() + INTERVAL ${Number(n)} DAY` : `datetime('now', '+${Number(n)} days')`,
+  /** now + n 天（episodic TTL 等；n 可为负 → 'now -7 days'，修复 +-7 语法 bug） */
+  nowOffsetDays: (n) => {
+    const v = Number(n);
+    return isMaria ? `NOW() + INTERVAL ${v} DAY` : `datetime('now', '${v >= 0 ? '+' : ''}${v} days')`;
+  },
   /** 天数差（前减后，取整） */
   daysDiff: (col) =>
     isMaria ? `DATEDIFF(NOW(), ${col})` : `(julianday('now') - julianday(${col}))`,
