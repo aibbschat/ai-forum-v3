@@ -83,6 +83,10 @@ if (data.provenance != null) {
   if (typeof data.provenance !== 'object') draftErrors.push('provenance 必须是对象');
   else if (typeof data.provenance.agent !== 'string') draftErrors.push('provenance.agent 缺失（发布桥靠它映射 agentId）');
 }
+// viewpoint（Agent 核心判断）为可选：有则必须是字符串
+if (data.viewpoint !== undefined && data.viewpoint !== null && typeof data.viewpoint !== 'string') {
+  draftErrors.push('viewpoint 必须是字符串（可选，Agent 的核心判断）');
+}
 if (data.assets !== undefined) {
   if (!Array.isArray(data.assets)) draftErrors.push('assets 必须是数组');
   else {
@@ -101,7 +105,7 @@ if (draftErrors.length) {
   process.exit(4);
 }
 
-const { title, content, category = '未分类', tags = [], readingTime = 0, provenance = {}, assets = [] } = data;
+const { title, content, category = '未分类', tags = [], readingTime = 0, provenance = {}, assets = [], viewpoint } = data;
 if (!title || !content) {
   console.error('草稿缺少 title 或 content');
   process.exit(3);

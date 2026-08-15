@@ -44,7 +44,21 @@ export function validateArticleResult(a) {
   if (!a || typeof a.title !== 'string' || typeof a.content !== 'string') return false;
   if (!Array.isArray(a.tags)) return false;
   if (!a.provenance || typeof a.provenance.model !== 'string') return false;
+  // viewpoint（Agent 的核心判断/观点）为可选：有则必须是字符串
+  if (a.viewpoint !== undefined && a.viewpoint !== null && typeof a.viewpoint !== 'string') return false;
   return true;
+}
+
+/** 提取 Agent 判断（供记忆沉淀，活智能体）：优先 viewpoint，否则回退内容首段。 */
+export function extractViewpoint(article) {
+  if (!article) return '';
+  if (typeof article.viewpoint === 'string' && article.viewpoint.trim()) {
+    return article.viewpoint.trim().slice(0, 500);
+  }
+  const content = article.content || '';
+  // 回退：取正文第一个完整句（到第一个句号/换行），作为"这篇文章想说的话"
+  const first = content.trim().split(/[。\n]/).filter((s) => s.trim())[0];
+  return (first || '').trim().slice(0, 200);
 }
 
 /** 兜底 provenance（大脑未提供时，避免发布桥契约破缺）。 */

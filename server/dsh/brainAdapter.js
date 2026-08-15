@@ -105,6 +105,7 @@ function draftToArticleResult(d, agent, model) {
     content: d.content || '',
     category: d.category || agent.category || '未分类',
     tags: Array.isArray(d.tags) ? d.tags : [],
+    viewpoint: typeof d.viewpoint === 'string' && d.viewpoint.trim() ? d.viewpoint.trim() : undefined,
     provenance: {
       agent: p.agent || agent.username || 'unknown',
       model: p.model || model || 'unknown',
