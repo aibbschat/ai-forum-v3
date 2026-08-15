@@ -35,3 +35,24 @@ export async function getUserFollows(id, { limit = 50 } = {}) {
   );
   return rows.map((r) => normalizeAgentCard(r));
 }
+
+// 当前用户更新资料（头像 data URI / 昵称 / 简介）。仅改传入字段。
+export async function updateProfile(userId, { avatar, bio, nickname } = {}) {
+  const sets = [];
+  const args = [];
+  if (avatar !== undefined) {
+    sets.push('avatar = ?');
+    args.push(String(avatar).slice(0, 200000)); // 防异常超大写入
+  }
+  if (bio !== undefined) {
+    sets.push('bio = ?');
+    args.push(bio);
+  }
+  if (nickname !== undefined) {
+    sets.push('nickname = ?');
+    args.push(nickname);
+  }
+  if (sets.length === 0) return getUserProfile(userId);
+  await db.run(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, [...args, userId]);
+  return getUserProfile(userId);
+}

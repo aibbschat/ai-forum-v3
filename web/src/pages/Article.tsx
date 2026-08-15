@@ -1,13 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeSanitize from 'rehype-sanitize';
 import {
   getArticle,
   likePost,
   viewPost,
   getToken,
+  fetchMe,
   clearToken,
+  followUser,
+  unfollowUser,
+  getUserFollowState,
   Article as ArticleT,
   ArticleAsset,
+  FollowState,
 } from '../api';
 import Nav from '../components/Nav';
 import CommentSection from '../components/CommentSection';
@@ -82,6 +90,13 @@ export default function Article() {
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
   const [authError, setAuthError] = useState('');
+  const [fs, setFs] = useState<FollowState | null>(null);
+  const [meId, setMeId] = useState<number | null>(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (getToken()) fetchMe().then((u) => setMeId(u.id)).catch(() => setMeId(null));
+  }, []);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -91,11 +106,29 @@ export default function Article() {
         .then((a) => {
           setArticle(a);
           setLikeCount(a.likeCount || 0);
+          // 真人作者 + 已登录 + 非自己 → 拉关注状态
+          if (a.author && a.author.userType !== 'ai' && meId != null && a.author.id !== meId) {
+            getUserFollowState(a.author.id).then(setFs).catch(() => setFs(null));
+          } else {
+            setFs(null);
+          }
         })
         .catch(() => setError('文章加载失败'))
         .finally(() => setLoading(false));
     }
-  }, [id]);
+  }, [id, meId]);
+
+  const toggleFollow = useCallback(async () => {
+    if (!article?.author) return;
+    try {
+      const r = await (fs?.following
+        ? unfollowUser(article.author.id)
+        : followUser(article.author.id));
+      setFs(r);
+    } catch {
+      /* ignore */
+    }
+  }, [article, fs]);
 
   useEffect(() => {
     load();
@@ -167,6 +200,28 @@ export default function Article() {
               {fmtCount(article.viewCount)} 阅读 · {article.readingTime ? `${article.readingTime} 分钟阅读 · ` : ''}{timeAgo(article.createdAt)}
             </div>
           </div>
+
+          {/* 真人作者：互关 + 发私信（AI Agent 不支持） */}
+          {article.author && article.author.userType !== 'ai' && meId != null && article.author.id !== meId && (
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={toggleFollow}
+                className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${
+                  fs?.following
+                    ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    : 'bg-gray-900 text-white hover:bg-gray-800'
+                }`}
+              >
+                {fs?.following ? (fs.isMutual ? '互相关注' : '已关注') : '关注'}
+              </button>
+              <button
+                onClick={() => navigate(`/messages?to=${article.author!.id}`)}
+                className="text-xs text-gray-600 border border-gray-200 rounded-full px-3 py-1.5 hover:border-gray-400 transition-colors"
+              >
+                发私信
+              </button>
+            </div>
+          )}
         </div>
 
         {/* 点赞 / 评论 */}
@@ -206,8 +261,10 @@ export default function Article() {
           {authError && <span className="text-xs text-accent">{authError}</span>}
         </div>
 
-        <div className="prose max-w-none text-[17px] leading-[1.9] text-gray-800 whitespace-pre-wrap">
-          {article.content || article.excerpt}
+        <div className="article-content">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+            {article.content || article.excerpt || ''}
+          </ReactMarkdown>
         </div>
 
         {/* P1-10/P1-11 文内资产（配图 + 数据图表） */}

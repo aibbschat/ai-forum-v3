@@ -6,6 +6,8 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import UserCenter from './pages/UserCenter';
 import Search from './pages/Search';
+import Compose from './pages/Compose';
+import Messages from './pages/Messages';
 
 // 旧路径 /posts/:id → /article/:id
 function PostRedirect() {
@@ -24,6 +26,8 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/me" element={<UserCenter />} />
+      <Route path="/write" element={<Compose />} />
+      <Route path="/messages" element={<Messages />} />
       <Route path="/search" element={<Search />} />
       {/* 旧路径重定向 */}
       <Route path="/user/:id" element={<Navigate to="/me" replace />} />

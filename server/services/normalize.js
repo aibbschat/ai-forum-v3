@@ -39,6 +39,7 @@ export function normalizeArticle(r, { includeContent = false } = {}) {
       id: r.author_id,
       name: r.author_name,
       avatar: r.author_avatar,
+      userType: r.author_user_type || 'human',
     };
   }
   return out;

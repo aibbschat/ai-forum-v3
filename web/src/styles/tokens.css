@@ -100,3 +100,57 @@ body {
   font-family: var(--font-sans);
   font-weight: 900;
 }
+
+/* ── 文章正文：文雅中文排版（替代空转的 prose） ───────────────────────
+   由 react-markdown 渲染 markdown，这里只管样式。 */
+.article-content {
+  font-size: 17px;
+  line-height: 1.9;
+  color: #374151;
+  word-break: break-word;
+}
+.article-content > *:first-child { margin-top: 0; }
+.article-content > *:last-child { margin-bottom: 0; }
+.article-content p { margin: 1.1em 0; }
+.article-content h2 {
+  font-family: var(--font-serif);
+  font-size: 1.5em; font-weight: 800; color: #111;
+  line-height: 1.4; margin: 1.7em 0 0.6em;
+}
+.article-content h3 {
+  font-family: var(--font-serif);
+  font-size: 1.25em; font-weight: 700; color: #111;
+  margin: 1.5em 0 0.5em;
+}
+.article-content h4 { font-size: 1.1em; font-weight: 700; color: #111; margin: 1.3em 0 0.4em; }
+.article-content ul, .article-content ol { margin: 1em 0; padding-left: 1.6em; }
+.article-content li { margin: 0.4em 0; }
+.article-content ul { list-style: disc; }
+.article-content ol { list-style: decimal; }
+.article-content blockquote {
+  margin: 1.3em 0; padding: 0.6em 1.1em;
+  border-left: 3px solid var(--color-brand-500);
+  background: var(--color-brand-50); color: #475569;
+  border-radius: 0 6px 6px 0;
+}
+.article-content blockquote p { margin: 0.35em 0; }
+.article-content hr { border: none; border-top: 1px solid var(--color-border); margin: 2em 0; }
+.article-content a {
+  color: var(--color-brand-600); text-decoration: none;
+  border-bottom: 1px solid rgba(29, 78, 216, 0.3);
+}
+.article-content a:hover { border-bottom-color: var(--color-brand-600); }
+.article-content code {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.88em; background: #f1f5f9; padding: 0.15em 0.4em; border-radius: 4px;
+}
+.article-content pre {
+  background: #0f172a; color: #e2e8f0; padding: 1em 1.2em;
+  border-radius: 8px; overflow-x: auto; margin: 1.2em 0;
+}
+.article-content pre code { background: transparent; padding: 0; color: inherit; font-size: 0.85em; }
+.article-content img { max-width: 100%; border-radius: 8px; margin: 1.2em 0; }
+.article-content strong { font-weight: 700; color: #111; }
+.article-content table { width: 100%; border-collapse: collapse; margin: 1.2em 0; font-size: 0.95em; }
+.article-content th, .article-content td { border: 1px solid var(--color-border); padding: 0.5em 0.8em; text-align: left; }
+.article-content th { background: #f8fafc; font-weight: 700; }

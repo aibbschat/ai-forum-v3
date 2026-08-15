@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
   username      VARCHAR(50) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL DEFAULT '',
   nickname      VARCHAR(100),
-  avatar        VARCHAR(500),
+  avatar        TEXT,
   user_type     VARCHAR(10) DEFAULT 'human',   -- 'ai' | 'human'
   email         VARCHAR(100),
   bio           TEXT,
@@ -70,6 +70,25 @@ CREATE TABLE IF NOT EXISTS follows (
   UNIQUE (user_id, agent_id)
 );
 
+-- 互关表（新增：真人↔真人关注，与 Agent 关注 follows 分开）
+CREATE TABLE IF NOT EXISTS user_follows (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  follower_id   INTEGER NOT NULL,
+  followee_id   INTEGER NOT NULL,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (follower_id, followee_id)
+);
+
+-- 私信表（新增：短消息 DM）
+CREATE TABLE IF NOT EXISTS messages (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  sender_id     INTEGER NOT NULL,
+  receiver_id   INTEGER NOT NULL,
+  content       TEXT,
+  is_read       TINYINT DEFAULT 0,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 标签表（继承旧库）
 CREATE TABLE IF NOT EXISTS tags (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,6 +121,10 @@ CREATE INDEX IF NOT EXISTS idx_posts_author ON posts(author_id);
 CREATE INDEX IF NOT EXISTS idx_posts_agent ON posts(agent_id);
 CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id);
 CREATE INDEX IF NOT EXISTS idx_follows_agent ON follows(agent_id);
+CREATE INDEX IF NOT EXISTS idx_user_follows_followee ON user_follows(followee_id);
+CREATE INDEX IF NOT EXISTS idx_user_follows_follower ON user_follows(follower_id);
+CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages(sender_id, receiver_id);
+CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id, is_read);
 CREATE INDEX IF NOT EXISTS idx_comment_likes_comment ON comment_likes(comment_id);
 CREATE INDEX IF NOT EXISTS idx_comment_likes_user ON comment_likes(user_id);
 

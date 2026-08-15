@@ -5,6 +5,7 @@ export interface Author {
   id: number;
   name: string;
   avatar: string;
+  userType?: string;
 }
 
 export interface Provenance {
@@ -175,6 +176,18 @@ async function post<T>(url: string, body: unknown, withAuth = false): Promise<T>
   return res.json() as Promise<T>;
 }
 
+async function del<T>(url: string): Promise<T> {
+  const res = await fetch(url, { method: 'DELETE', headers: authHeaders() });
+  if (!res.ok) {
+    const e = new Error(`请求失败 ${res.status}`) as Error & { status?: number };
+    e.status = res.status;
+    const data = await res.json().catch(() => null);
+    if (data && (data.message || data.error)) e.message = data.message || data.error;
+    throw e;
+  }
+  return res.json() as Promise<T>;
+}
+
 // ── Auth ──
 export function login(username: string, password: string) {
   return post<AuthResponse>('/api/auth/login', { username, password });
@@ -244,4 +257,72 @@ export function likePost(postId: number) {
 
 export function viewPost(postId: number) {
   return post<{ ok: boolean }>(`/api/posts/${postId}/view`, {});
+}
+
+// ── 资料更新（头像 / 昵称 / 简介） ──
+async function patch<T>(url: string, body: unknown): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...authHeaders() };
+  const res = await fetch(url, { method: 'PATCH', headers, body: JSON.stringify(body ?? {}) });
+  if (!res.ok) {
+    const e = new Error(`请求失败 ${res.status}`) as Error & { status?: number };
+    e.status = res.status;
+    const data = await res.json().catch(() => null);
+    if (data && (data.message || data.error)) e.message = data.message || data.error;
+    throw e;
+  }
+  return res.json() as Promise<T>;
+}
+
+export function updateProfile(data: { avatar?: string; bio?: string; nickname?: string }) {
+  return patch<{ user: AuthUser }>('/api/users/me', data);
+}
+
+// ── 互关（真人↔真人） ──
+export interface FollowState {
+  following: boolean;
+  followerCount: number;
+  followingCount: number;
+  isMutual: boolean;
+}
+
+export function followUser(id: number) {
+  return post<FollowState>(`/api/users/${id}/follow`, {});
+}
+export function unfollowUser(id: number) {
+  return del<FollowState>(`/api/users/${id}/follow`);
+}
+export function getUserFollowState(id: number) {
+  return get<FollowState>(`/api/users/${id}/follow`);
+}
+export function getUserFollowers(id: number, limit = 50) {
+  return get<{ users: UserProfile[] }>(`/api/users/${id}/followers?limit=${limit}`);
+}
+
+// ── 短消息 DM ──
+export interface DMessage {
+  id: number;
+  senderId: number;
+  receiverId: number;
+  content: string;
+  isRead: boolean;
+  createdAt: string;
+}
+export interface Conversation {
+  user: { id: number; name?: string; avatar?: string };
+  lastMessage: string;
+  lastAt: string;
+  unread: number;
+}
+
+export function sendMessage(to: number, content: string) {
+  return post<{ message: DMessage }>('/api/messages', { to, content });
+}
+export function listConversations() {
+  return get<{ conversations: Conversation[] }>('/api/messages/conversations');
+}
+export function getMessageThread(userId: number) {
+  return get<{ messages: DMessage[] }>(`/api/messages/thread/${userId}`);
+}
+export function markMessagesRead(userId: number) {
+  return post<{ ok: boolean }>(`/api/messages/thread/${userId}/read`, {});
 }

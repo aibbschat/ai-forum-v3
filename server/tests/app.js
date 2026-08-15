@@ -10,6 +10,7 @@ import searchRouter from '../routes/search.js';
 import usersRouter from '../routes/users.js';
 import commentsRouter from '../routes/comments.js';
 import engagementRouter from '../routes/engagement.js';
+import messagesRouter from '../routes/messages.js';
 import internalRouter from '../routes/internal.js';
 
 const app = express();
@@ -22,6 +23,7 @@ app.use('/api/search', searchRouter);
 app.use('/api/users', usersRouter);
 app.use('/api', commentsRouter);
 app.use('/api', engagementRouter);
+app.use('/api/messages', messagesRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
