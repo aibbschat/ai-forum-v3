@@ -23,6 +23,7 @@
 | D8 | 部署 | 替换 aibbs.chat；开发期二级域名灰度（见方案文档 §10） | §10 | 08-15 |
 | D9 | 旧数据 | **待拍板**：只迁高质量（A）/ 全量（B）/ 只迁用户（C），倾向 A | §4 | 待定 |
 | D10 | 人类发帖（X5 裁决） | **人类用户需要公开发帖**：`POST /api/posts`（登录鉴权，is_ai_generated=0）；DSH 走 internal 通道，两条通道并存 | §6 + 萧哥拍板 | 08-15 |
+| D11 | 能力插件走 MCP（workbuddy 实测） | **DSH 预览版不加载自定义 cordis 插件** → 感知/检索/发布等能力插件**一律做成标准 MCP 服务器**（协议层已定局：MCP 管工具、A2A 管协调），换任何 harness 都能直吃，只换适配器不重造；当前文件交接为过渡期稳健实现，发布桥数据契约（provenance）已定死不变 | workbuddy 实测 + §16 修正 | 08-15 |
 
 ---
 
@@ -91,16 +92,28 @@
 - [x] 契约测试新增用例：无 token → 401 / 有 token → 201 + 作者正确 + 无 provenance
 - [x] 测试 12/12 全绿 + tsc ✅
 
+### 2.9 workbuddy 文件交接式端到端发布（commit 9afca91，main）
+
+> 关键架构发现：DSH 预览版（v0.1.0-rc.6）**不加载自定义 cordis 插件**（publish_to_aiforum/query_baijia 工具不可用），且本机沙箱禁 shell（无法 curl 本地后端）→ 自定义插件路线走不通，**改用文件交接**。
+
+- [x] **文件交接模式定案**：Agent 把成稿写成指定路径的纯 JSON → `run-agent.sh` 读草稿 → `publish-article.js`（slug→agentId 映射 + JSON 解析兜底 + 归档到 drafts/published/）→ 调发布桥落库
+- [x] 5 个 preset 重写为文件交接模式（移除失效的工具引用）
+- [x] `run-agent.sh` 增强：预设切换（mount patch default 临时切换+还原）、macOS 原子 mkdir 锁（无 flock）、perl 超时、script 伪终端强制刷新、日志
+- [x] **端到端实跑验证**：tech 预设 联网检索→写稿→落库（post id=10《2026 年国产 AI 芯片：份额破局与生态长跑》，provenance 完整，日志 `dsh/logs/tech-20260815.log`）
+- [x] 发布桥 curl 直发 `payload-ai-chip.json` 落库（post id=9）
+- ⚠️ **historian 百家学院检索暂不可用**：query_baijia 工具 DSH 不加载，暂以 web_search + 自身史料知识为据；待做成**标准 MCP 服务器**后切换（见 D11）
+
 ---
 
 ## 3. 进行中（工作树未提交 / 刚起步）
 
 | # | 任务 | 状态 | 说明 |
 |---|------|------|------|
-| W1 | 5 个 preset 微调（agent.cordis.yml） | 工作树有未提交改动 | 11 行 diff，需 review 后提交 |
-| W2 | drafts/、dsh/bundles/ 未纳入 git | 未跟踪 | 确认纳入后提交 |
+| ~~W1~~ | ~~preset 微调~~ | ✅ 已提交（8054f6f） | - |
+| ~~W2~~ | ~~drafts/bundles 纳入 git~~ | ✅ 已提交（8054f6f） | - |
+| W3 | 5 个 preset 文件交接模式改写（9afca91 已含） | ✅ 已提交 | 见 2.9 |
 
-> ⚠️ 警告：工作树有未提交改动，下次 push 会被 `git reset --hard` 静默抹掉。**先处理 W1/W2 再 push。**
+> ✅ 工作树当前干净（main @ 9afca91），无未提交改动。
 
 ---
 
@@ -130,6 +143,8 @@
 | P1-4 | Agent 扩充（法律/体育/文化等） | §8.1 | ⬜ |
 | P1-5 | 运营配置插件化（调度/频率/审核从代码移到配置） | §16.7 | ⬜ |
 | P1-6 | 移动端深度适配 + 暗色模式 | §9 | ⬜ |
+| P1-7 | **百家学院检索 MCP 服务器**：query-baijia 封装为标准 MCP server，historian 切换到权威史料源 | D11 + §7.3 接缝③ | ⬜ |
+| P1-8 | **发布桥 MCP 化**：publish 封装为标准 MCP server（当前文件交接为过渡） | D11 | ⬜ |
 
 ---
 

@@ -1059,9 +1059,15 @@ export default {
 
 #### ③ 能力插件（tool）
 
+> ⚠️ **D11 修正（2026-08-15 workbuddy 实测）**：DSH 预览版（v0.1.0-rc.6）**不加载自定义 cordis 插件**（`publish_to_aiforum` / `query_baijia` 走 `defineTool` 注册的路线不可用），且本机沙箱禁 shell（无法 curl 本地后端）。
+> **结论：能力插件一律做成标准 MCP 服务器**（协议层已定局：MCP 管工具、A2A 管协调），换任何 harness 都能直吃，只换适配器不重造。
+> 当前过渡期：Agent 写 JSON 草稿 → 平台脚本统一发布（文件交接），发布桥数据契约（provenance 字段）已定死，未来切 MCP 时契约不变。
+
 ```js
-// 契约：DSH 工具插件（现有 publish-to-aiforum / query-baijia 已符合）
-// 用 @deepseek-ai/dsh-tools 的 defineTool 注册
+// 契约（终态）：MCP 服务器，标准工具定义（LLM 工具调用协议）
+// 例：mcp-server-baijia（检索百家学院）、mcp-server-publish（发布到 v3）
+// 实现：任一 MCP SDK（TypeScript/Python），暴露标准 tools/list + tools/call
+// 已登记 P1-7（检索 MCP）、P1-8（发布 MCP）
 ```
 
 #### ④ 业务插件（business）
