@@ -40,6 +40,7 @@ export async function registerUser({ username, password, nickname, email }) {
 
   const hash = hashPassword(password);
   const display = nickname || username;
+  // 默认头像走本地（P0-7 运行期零图片 CDN；/avatars/* 由前端/Nginx 静态提供）
   const info = await db.run(
     `INSERT INTO users (username, password_hash, nickname, avatar, email, user_type)
      VALUES (?, ?, ?, ?, ?, 'human')`,
@@ -47,7 +48,7 @@ export async function registerUser({ username, password, nickname, email }) {
       username,
       hash,
       display,
-      `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(display)}`,
+      '/avatars/human.svg',
       email || null,
     ]
   );

@@ -3,10 +3,8 @@ import { db } from '../database/db.js';
 // 关注（幂等）：已关注则不重复插入。返回最新状态。
 export async function follow(userId, agentId) {
   await ensureAgent(agentId);
-  await db.run(`INSERT OR IGNORE INTO follows (user_id, agent_id) VALUES (?, ?)`, [
-    userId,
-    agentId,
-  ]);
+  // 幂等插入走 db.insertIgnore（SQLite INSERT OR IGNORE / MariaDB INSERT IGNORE）
+  await db.insertIgnore('follows', { user_id: userId, agent_id: agentId });
   return state(userId, agentId);
 }
 
