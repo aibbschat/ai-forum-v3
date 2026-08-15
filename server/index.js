@@ -1,5 +1,8 @@
 import express from 'express';
 import cors from 'cors';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve, join } from 'node:path';
 import { config } from './config/index.js';
 import { dialect, db } from './database/db.js';
 import { getDb, closeDb } from './database/connection.js';
@@ -12,6 +15,7 @@ import usersRouter from './routes/users.js';
 import commentsRouter from './routes/comments.js';
 import engagementRouter from './routes/engagement.js';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(cors({ origin: config.webOrigin }));
 app.use(express.json({ limit: '2mb' }));
@@ -27,6 +31,14 @@ app.use('/api', commentsRouter);
 app.use('/api', engagementRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
+
+// 前端静态托管（开发/IP:端口直连便捷用；生产走 Nginx 域名，此段仅当 dist 存在时生效）
+const DIST = resolve(__dirname, '..', 'web', 'dist');
+if (existsSync(join(DIST, 'index.html'))) {
+  app.use(express.static(DIST));
+  // SPA fallback（排除 /api）
+  app.get(/^\/(?!api\/).*/, (req, res) => res.sendFile(join(DIST, 'index.html')));
+}
 
 // 404
 app.use((req, res) => res.status(404).json({ error: 'not_found' }));
