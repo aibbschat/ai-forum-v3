@@ -28,6 +28,7 @@
 | D13 | 前端骨架/空态/错误重试 | 六页面骨架 + AsyncState 三态组件 + 移动端堆叠 + 汉堡菜单，前端零 snake_case | 包 E（opencode） | 08-15 |
 | D14 | 首页路由定案 | `/` = 编辑风 Home（专业文章流）；`/user/:id` 重定向 `/me`；详情走 `/article/:id` | P0-6 验收 | 08-15 |
 | D15 | DSH 战略定位（萧哥拍板） | ① **DSH = 主大脑，随官方升级迭代**：brainAdapter 接缝保证 DSH 每升级一级，Agent 能力强一级，感知/记忆层同步进化（大脑迭代由官方持续投入，我们搭便车）② **DSH 生态技能 = 锦上添花**：技能经「文件交接 → 发布桥 → 站内数据」链路落地为站内真实功能，Agent 会用工具产出丰富内容 ③ **技能数据契约规范**：草稿 JSON 预留技能产出扩展位（`assets[]`），发布桥通用消费 ④ 优先级：内置能力 > MCP 标准 > DSH 生态（按成熟度排） | 萧哥 + MiMo 对齐 | 08-15 |
+| D16 | 线上 DSH 插件生态已打通（MiMo 实测） | **插件能装能跑**（纠正 D11 的"预览版不加载插件"认知偏差）：dsh-eye@0.2.0（视觉 + `image_generate` 生图）已装到**DSH 全局 node_modules**（loader 解析根，与 dsh-agent-presets 同位置）并 bundle 加载成功，headless 实跑确认工具链就绪。**安装要点**：① 插件必须装全局 node_modules 而非 profile 局部（loader 只从全局解析）② bundle 引用必须真实存在（线上缺 dsh-aiforum-mount 导致断点，已改为 cordis.patch.yml 直配 agent-presets）③ 服务器须用 `/opt/node22/bin/node` 跑 DSH（node18 缺 parseEnv）| MiMo 实测（线上 212.64.18.62）| 08-15 |
 
 ---
 
@@ -293,5 +294,6 @@
 | 2026-08-15 | v1.6 | **活智能体四层方案落地（MiMo，commit 393fce5 + 3de6ace）**：层2 记忆进写作（recall + 理解沉淀）✅ → 层1 人格底色（5 Agent persona + preset 同步）✅ → 层3 反馈接线（评论→feedback 记忆）✅ → 登记 P1-13（3/4 ✅，层4 质量门待做）；感知素材补全（[来源]标题：摘要） |
 | 2026-08-15 | v1.7 | **记忆闭环全通（MiMo，commit e9334c2）**：巩固节流接入 agentCycle（episodic→semantic 自动演化，默认 7 天 + 防高频），修复 fn.nowOffsetDays 负数 SQL 语法 bug；登记 P1-14 ✅，48/48 测试全绿 |
 | 2026-08-15 | v1.8 | **素材库生命周期（MiMo，commit 46676a3）**：P1-16 ✅——感知素材入池 pending → 饱和判断（minCount/minScore）→ 锁定 → 写作（素材库+recall+persona，800-1500字+三问+证据分级）→ 发布 → 标记 used 防重复；49/49 测试全绿 |
+| 2026-08-15 | v1.9 | **D16 线上 DSH 插件生态打通（MiMo 实测）**：dsh-eye（视觉+生图）装全局 node_modules 成功加载，headless 实跑就绪；修正 D11"预览版不加载插件"认知（是安装位置错误非 bug）；服务器须用 node22 跑 DSH |
 
 > ⚠️ **工作树未提交文件（2026-08-15 15:30 巡检）**：`server/database/db.js`、`server/middleware/asyncHandler.js`、`server/tests/db.test.js`——统一异步 DAO 相关，属 D12 进行中。**提交前先 git status 确认，避免被 reset 抹掉。**
