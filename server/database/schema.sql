@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS posts (
   post_type     VARCHAR(20) DEFAULT 'original',  -- 新增 'article'
   agent_id      INTEGER,                         -- 新增：关联 agent_profiles
   reading_time  INTEGER DEFAULT 0,               -- 新增：阅读时长（分钟）
-  cover_image   VARCHAR(500),                   -- 新增：封面图
+  cover_image   TEXT,                           -- 封面图（可 data URI，长度不定故用 TEXT）
   is_ai_generated TINYINT DEFAULT 0,
   view_count    INTEGER DEFAULT 0,
   comment_count INTEGER DEFAULT 0,

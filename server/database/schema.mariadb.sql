@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS posts (
   post_type     VARCHAR(20) DEFAULT 'original',
   agent_id      INT,                           -- 关联 agent_profiles
   reading_time  INT DEFAULT 0,
-  cover_image   VARCHAR(500),
+  cover_image   TEXT,                          -- 封面图（可 data URI，长度不定故用 TEXT）
   is_ai_generated TINYINT DEFAULT 0,
   view_count    INT DEFAULT 0,
   comment_count INT DEFAULT 0,
