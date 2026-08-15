@@ -242,6 +242,7 @@
 | P1-12 | **DSH 升级跟进机制**（D15① 落地）：升级 SOP + 版本追踪（当前 @deepseek-ai/dsh@0.1.0-rc.6）+ 升级回归流程（先跑 43 契约测试 → 适配器层改 → 数据契约不变则核心无感）。RC 版未稳定前不升级，正式版发布后按 SOP 跟进 | D15① | ⬜ |
 | P1-13 | **活智能体四层方案**（观点养出来，非 prompt 硬约束）：层1 人格底色 ✅ / 层2 记忆进写作 ✅ / 层3 反馈接线 ✅ / 层4 质量门 ⬜ | 活智能体 + MiMo 落地 | 3/4 ✅（层4 ⬜）|
 | P1-14 | **记忆闭环全通**：感知素材（[来源]标题：摘要）✅ + 理解沉淀（判断进 episodic）✅ + 反馈接线（评论→feedback）✅ + **巩固节流（episodic→semantic 自动演化）✅**——四来源全通，Agent 越写越懂世界 | 记忆来源四栏 + MiMo | ✅ 已落地（commit e9334c2） |
+| P1-16 | **素材库生命周期**：感知素材入池（pending）→ 饱和判断（minCount/minScore）→ 锁定（locked）→ 写作（素材库+recall+persona，800-1500字+三问+证据分级）→ 发布 → 标记已用（used）防重复；一周整理配合 consolidate/sweep | 萧哥拍板 + MiMo | ✅ 已落地（commit 46676a3） |
 
 ---
 
@@ -291,5 +292,6 @@
 | 2026-08-15 | v1.5 | ① 技能分层写入 TECH-SPEC §16③.1（数据型/资源型 + assets 统一容器，明确"DSH 生态接入 = 往 assets 填新 type"）② 登记 P1-12 DSH 升级跟进机制（D15① 从战略定位转为落地任务，含升级 SOP/版本追踪/回归流程） |
 | 2026-08-15 | v1.6 | **活智能体四层方案落地（MiMo，commit 393fce5 + 3de6ace）**：层2 记忆进写作（recall + 理解沉淀）✅ → 层1 人格底色（5 Agent persona + preset 同步）✅ → 层3 反馈接线（评论→feedback 记忆）✅ → 登记 P1-13（3/4 ✅，层4 质量门待做）；感知素材补全（[来源]标题：摘要） |
 | 2026-08-15 | v1.7 | **记忆闭环全通（MiMo，commit e9334c2）**：巩固节流接入 agentCycle（episodic→semantic 自动演化，默认 7 天 + 防高频），修复 fn.nowOffsetDays 负数 SQL 语法 bug；登记 P1-14 ✅，48/48 测试全绿 |
+| 2026-08-15 | v1.8 | **素材库生命周期（MiMo，commit 46676a3）**：P1-16 ✅——感知素材入池 pending → 饱和判断（minCount/minScore）→ 锁定 → 写作（素材库+recall+persona，800-1500字+三问+证据分级）→ 发布 → 标记 used 防重复；49/49 测试全绿 |
 
 > ⚠️ **工作树未提交文件（2026-08-15 15:30 巡检）**：`server/database/db.js`、`server/middleware/asyncHandler.js`、`server/tests/db.test.js`——统一异步 DAO 相关，属 D12 进行中。**提交前先 git status 确认，避免被 reset 抹掉。**
