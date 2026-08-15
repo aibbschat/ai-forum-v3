@@ -168,6 +168,22 @@
 
 ---
 
+## 2.13 数据库一步到位·服务器真库回归通过（commit 已推服务器，2026-08-15）
+
+> 萧哥拍板"服务器一步到位"：212.64.18.62 上 MariaDB 10.6 真库全链路验证。
+
+- **服务器落地**：重置空转库 root（skip-grant-tables + skip-networking 保护，密码存 /root/.mariadb-aiforum-*.txt）→ 建 aiforum 库/用户 → schema.mariadb.sql 建 11 表 → .env（生产随机密钥 + DB_DRIVER=mariadb + PORT=3002）→ pm2 起服 `listening on :3002 (db=mariadb)` → pm2 save + startup。
+- **真库回归抓出并修复 3 类方言雷**（SQLite 测试永远抓不到，这就是真库验证的价值）：
+  1. **`procedure` 是 MariaDB 保留字** → memory_procedural 建表 1064 → 列名加反引号（两边兼容）
+  2. **`INSERT OR IGNORE` 是 SQLite 语法** → followService 裸写 → 改走 db.insertIgnore
+  3. **`ON CONFLICT...excluded` 是 SQLite 语法** → writeSemantic/writeProcedural → 按 isMaria 分支（ON DUPLICATE KEY UPDATE VALUES()）
+  - 另修：注册人类默认头像 dicebear → /avatars/human.svg（P0-7 后端遗漏）
+- **全链路真库通过**：seed 5+5、agents（camelCase + 本地头像）、注册/登录 JWT、人类发帖+详情、评论、点赞、关注、搜索（URL 编码后命中）、internal 发布桥落库、memory 读写（fn.* 方言：NOW()+90天 / GREATEST+DATEDIFF / ON DUPLICATE）全绿。
+- **迁移 dry-run**：26 行（users6/profiles5/posts11/episodic4）。
+- **剩余（灰度前）**：① 服务器 DSH 环境（装 dsh + headless profile + preset + cron，文件交接链路）② Nginx（ai.xs91.com → 3002 + 前端 dist 静态 + /avatars）③ DNS：ai.xs91.com A 记录 → 212.64.18.62（当前指向别处）④ 前端页面经浏览器验收。
+
+---
+
 ## 3. 进行中（工作树未提交 / 刚起步）
 
 | # | 任务 | 状态 | 说明 |
@@ -188,11 +204,11 @@
 | P0-2 | **感知层插件 perceive_world**：契约 + 第一个源（seed 兜底 + web_search 真实源）+ 感知编排器 | §7.3 接缝① / §16.4① | workbuddy + 协作者A | ✅ 已落地（perception.test 12/12） |
 | P0-3 | **记忆库落库**：三表 + 三层读写 / 检索分级 / 巩固 / 遗忘生命周期 | §7.6 | workbuddy + 协作者B | ✅ 已落地（memory.test 8/8） |
 | P0-4 | **BrainAdapter**：dsh/deepseek 双适配器 + agents.js brain 字段 + 沉淀闭环 agentCycle | §15 / §7.3 接缝④ | workbuddy | ✅ 已落地（真实 dsh 闭环 e2e：post id=11） |
-| P0-5 | **数据库切 MariaDB**：统一异步 DAO + 全 services 异步化 + schema.mariadb.sql + 迁移脚本 + 结构等价守护 | §14 / D2 / D12 | workbuddy + 协作者A/B | ✅ 代码一步到位（SQLite 仅开发驱动；真库回归待服务器，见 docs/design/mariadb-switch.md） |
+| P0-5 | **数据库切 MariaDB**：统一异步 DAO + 全 services 异步化 + schema.mariadb.sql + 迁移脚本 + 结构等价守护 | §14 / D2 / D12 | workbuddy + 协作者A/B | ✅ 代码一步到位 + **服务器真库回归通过**（MariaDB 10.6 全链路，抓出并修复 3 类方言雷，见 §2.13） |
 | P0-6 | **首页正式切 /**：路由切换 + 详情页编辑风化 + 全站视觉验收 | §8.2 硬约束 | 协作者A | ✅ 已落地（web/docs/visual-acceptance.md 验收清单） |
-| P0-7 | **前端图片本地化**：dicebear/unsplash CDN 换本地/图床 | 巡检红线 | 协作者A | ✅ 已落地（web/public/avatars + agents.js 本地路径，运行期零 CDN） |
+| P0-7 | **前端图片本地化**：dicebear/unsplash CDN 换本地/图床 | 巡检红线 | 协作者A | ✅ 已落地（web/public/avatars + agents.js 本地路径 + 注册默认头像 /avatars/human.svg，运行期零 CDN） |
 | P0-8 | **旧数据迁移执行**（D9 已拍板：灰度期不迁，迁移后置切主域前） | §4 | - | ⏸ 推迟（灰度期不迁旧数据，新站空数据跑；切主域前再执行） |
-| P0-9 | **P0-1~8 全链路回归**：登录/浏览/评论/点赞/搜索/Agent 空间 | - | - | ⬜ |
+| P0-9 | **P0-1~8 全链路回归**：登录/浏览/评论/点赞/搜索/Agent 空间 | - | - | ⚠️ **真库 API 全链路已过**（注册/登录/发帖/详情/评论/点赞/关注/搜索/发布桥/记忆读写，服务器 MariaDB 实测）；DSH 服务器环境 + Nginx/前端托管 + DNS 待配（见 §2.13） |
 
 ---
 
