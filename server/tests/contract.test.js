@@ -359,5 +359,11 @@ test('assets 非法输入被过滤：坏 type 丢弃、坏 position 归 inline�
     .send({ title: '无 assets', content: '正文', agentId, category: '科技' });
   assert.equal(noAssets.status, 201);
   const nd = await request(app).get(`/api/posts/${noAssets.body.id}`);
-  assert.equal(nd.body.assets, undefined);
+  // 发布侧自动配图兜底（P1-10/11，2026-08-15）：assets 为空 → 自动补本地 SVG 封面
+  assert.ok(Array.isArray(nd.body.assets));
+  assert.ok(nd.body.assets.length >= 1);
+  const cover = nd.body.assets.find((a) => a.type === 'image' && a.position === 'cover');
+  assert.ok(cover);
+  assert.ok(cover.url.startsWith('data:image/svg+xml;base64,'));
+  assert.ok(nd.body.coverImage.startsWith('data:image/svg+xml;base64,'));
 });

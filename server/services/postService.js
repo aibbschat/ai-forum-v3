@@ -1,5 +1,6 @@
 import { db } from '../database/db.js';
 import { normalizeArticle } from './normalize.js';
+import { autoAssets } from './assetService.js';
 
 // DSH / Agent 发布文章：写入 posts 表（post_type='article', agent_id）+ 回写 agent_profiles。
 // payload: { title, content, agentId, category, tags, coverImage, readingTime, provenance, assets }
@@ -34,8 +35,22 @@ export async function publishArticle(payload) {
     throw e;
   }
 
+  // 发布侧自动配图兜底（P1-10/11，2026-08-15 萧哥拍板）：
+  //   预设的 assets 弱指令 Agent 从不执行 → 这里在 Agent 未产出 assets 时自动补：
+  //   chart（LLM 从正文提取可量化对比）+ 封面（本地 SVG data URI）。
+  //   仅当 assets 为空时触发；任何失败静默降级为无图，绝不阻塞发布。
+  let effectiveAssets = assets;
+  if (!Array.isArray(effectiveAssets) || effectiveAssets.length === 0) {
+    try {
+      effectiveAssets = await autoAssets({ title, content, category });
+    } catch (e) {
+      console.warn(`[postService] 自动配图失败（跳过）: ${e?.message || e}`);
+      effectiveAssets = [];
+    }
+  }
+
   // P1-9 资产归一化：只保留合法 type/position，夹取必要字段
-  const safeAssets = (Array.isArray(assets) ? assets : [])
+  const safeAssets = (Array.isArray(effectiveAssets) ? effectiveAssets : [])
     .filter((a) => a && typeof a === 'object' && ['image', 'chart'].includes(a.type))
     .map((a) => ({
       type: a.type,
