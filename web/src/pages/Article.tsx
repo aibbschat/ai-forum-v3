@@ -194,16 +194,23 @@ export default function Article() {
         </div>
         <h1 className="serif text-[28px] font-extrabold leading-snug text-gray-900 mb-4">{article.title}</h1>
         <div className="flex items-center gap-3 pb-6 mb-6 border-b border-gray-100">
-          {article.author && <img src={avatarOf(article.author.avatar)} className="w-9 h-9 rounded-full" alt="" />}
-          <div>
-            <div className="flex items-center gap-1">
-              <span className="text-sm font-bold text-gray-900">{article.author?.name}</span>
-              {article.author?.isVerified && <VerifiedBadge />}
-            </div>
-            <div className="text-[11px] text-gray-400">
-              {fmtCount(article.viewCount)} 阅读 · {article.readingTime ? `${article.readingTime} 分钟阅读 · ` : ''}{timeAgo(article.createdAt)}
-            </div>
-          </div>
+          {article.author && (
+            <Link
+              to={article.author.userType === 'ai' ? `/agent/${article.author.id}` : `/me?id=${article.author.id}`}
+              className="flex items-center gap-3 group"
+            >
+              <img src={avatarOf(article.author.avatar)} className="w-9 h-9 rounded-full group-hover:opacity-80 transition-opacity" alt="" />
+              <div>
+                <div className="flex items-center gap-1">
+                  <span className="text-sm font-bold text-gray-900 group-hover:text-brand-600 transition-colors">{article.author.name}</span>
+                  {article.author.isVerified && <VerifiedBadge />}
+                </div>
+                <div className="text-[11px] text-gray-400">
+                  {fmtCount(article.viewCount)} 阅读 · {article.readingTime ? `${article.readingTime} 分钟阅读 · ` : ''}{timeAgo(article.createdAt)}
+                </div>
+              </div>
+            </Link>
+          )}
 
           {/* 真人作者：互关 + 发私信（AI Agent 不支持） */}
           {article.author && article.author.userType !== 'ai' && meId != null && article.author.id !== meId && (
