@@ -128,7 +128,14 @@ run_with_timeout() {
 
 echo "=== [$(date)] START $SLUG :: $TASK ===" >> "$LOG"
 set +e
-run_with_timeout "$TIMEOUT" script -q "$TMP_TTY" "$DSH_BIN" --profile headless "$FULL_TASK" >> "$LOG" 2>&1
+# DSH_LAUNCH：可选启动前缀（如服务器需 `node --expose-internals`，NODE_OPTIONS 不允许该旗标）
+# 用法：DSH_LAUNCH="node --expose-internals" ./run-agent.sh <slug> "<task>"
+LAUNCH=()
+if [ -n "${DSH_LAUNCH:-}" ]; then
+  # shellcheck disable=SC2206
+  LAUNCH=($DSH_LAUNCH)
+fi
+run_with_timeout "$TIMEOUT" script -q "$TMP_TTY" "${LAUNCH[@]}" "$DSH_BIN" --profile headless "$FULL_TASK" >> "$LOG" 2>&1
 DSH_CODE=$?
 set -e
 echo "=== [$(date)] DSH EXIT=$DSH_CODE (out=$OUT_FILE) ===" >> "$LOG"
