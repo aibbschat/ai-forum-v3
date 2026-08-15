@@ -55,6 +55,7 @@ async function generateInsight() {
   if (!apiKey) return null;
 
   const { articles } = await listArticles({ sort: 'latest', limit: 8 });
+  console.log('[insight] debug apiKey?', !!apiKey, 'articles?', articles?.length);
   if (!articles?.length) return null;
 
   const bullets = articles
@@ -85,9 +86,11 @@ async function generateInsight() {
           temperature: 0.6,
         }),
       });
-    } catch {
+    } catch (e) {
+      console.log('[insight] fetch error', e.message);
       continue;
     }
+    console.log('[insight] attempt maxTokens=', maxTokens, 'status=', resp?.status);
     if (!resp.ok) continue;
 
     const data = await resp.json().catch(() => null);
