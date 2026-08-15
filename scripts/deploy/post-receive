@@ -4,6 +4,11 @@
 #       并 chmod +x。本地/服务器 push origin main 即触发 deploy.sh。
 set -euo pipefail
 
+# Git 在触发 hook 时会注入 GIT_DIR/GIT_OBJECT_DIRECTORY 等环境变量（指向 bare 仓库）。
+# 这些变量会让后续 `git -C current` 误把 "." 当作 git 目录而报
+# "fatal: not a git repository: '.'"。必须清除，使 git 重新按 cwd 解析。
+unset GIT_DIR GIT_OBJECT_DIRECTORY GIT_INDEX_FILE
+
 # 解析分支：仅 main 触发部署
 while read -r old new ref; do
   case "$ref" in
