@@ -124,6 +124,25 @@
 
 ---
 
+## 2.11 三线并行 Wave2：前端上线包 + 记忆巩固 LLM 化 + MariaDB 就绪（commit 待提交）
+
+> 萧哥："分头干快些"。三线并行，各线成果互不冲突，合入前全量测试 34/34 绿。
+
+- **协作者A（前端上线包 P0-6+P0-7）**：
+  - P0-6 首页正式切 `/`（ArticleFeed）+ `/article/:id`（X2 待拍板，先按 spec 默认）+ 全站视觉验收 `web/docs/visual-acceptance.md`（逐页对照原型，6 处偏差已修、3 项待拍板记录）；旧路径 `/articles`、`/posts/:id` 重定向。
+  - P0-7 图片本地化：`web/public/avatars/` 5 张本地 SVG + `agents.js` avatar→`/avatars/*.svg` + `DEPLOY.md` 补 `/avatars` 静态路由；web 端与运行期 DB **零第三方图片 CDN**。
+  - 验证：tsc ✅ / vite build ✅ / dev 10 路由 200 / `/avatars/tech.svg` 200。
+- **协作者B（P1-1+P1-3 记忆补强）**：
+  - P1-1 `consolidate` 升级 LLM 驱动：`createLlmSummarizer()`（deepseek-v4-flash + json_object，注入式可测）；无 key/调用/解析失败**自动回退纯函数聚合**不中断；`evidence_ids` 恒指向该组 episodic（出处不丢）。
+  - P1-3 `scripts/memory-backup.js`：导出指定/全部 Agent 记忆三表 JSON，退出码 0/1/2。
+  - 验证：memory.test 12/12（原 8 + 新 4）。
+- **workbuddy（P0-5 MariaDB 就绪）**：
+  - `schema.mariadb.sql`（SQLite 版 1:1 方言映射，含记忆三表）+ `server/database/mariadb.js`（mysql2 异步池，dateStrings 保返回形状）+ `scripts/migrate-sqlite-to-mariadb.js`（逐表 INSERT IGNORE 幂等，`--dry-run`）+ 结构等价守护 `mariadb-schema.test.js` 6/6 + `docs/design/mariadb-switch.md`。
+  - ⚠️ **关键发现**：§14.3"services 层完全无感"**不成立**——当前 services 全同步 better-sqlite3，mysql2 异步，切换需先做服务层异步化（或按 §14.4 硬指标触发后再做）。已如实记录，未粉饰。
+  - 本机无 MariaDB/Docker → 真库 CRUD 回归留服务器执行（迁移步骤见 mariadb-switch.md）。
+
+---
+
 ## 3. 进行中（工作树未提交 / 刚起步）
 
 | # | 任务 | 状态 | 说明 |
@@ -144,9 +163,9 @@
 | P0-2 | **感知层插件 perceive_world**：契约 + 第一个源（seed 兜底 + web_search 真实源）+ 感知编排器 | §7.3 接缝① / §16.4① | workbuddy + 协作者A | ✅ 已落地（perception.test 12/12） |
 | P0-3 | **记忆库落库**：三表 + 三层读写 / 检索分级 / 巩固 / 遗忘生命周期 | §7.6 | workbuddy + 协作者B | ✅ 已落地（memory.test 8/8） |
 | P0-4 | **BrainAdapter**：dsh/deepseek 双适配器 + agents.js brain 字段 + 沉淀闭环 agentCycle | §15 / §7.3 接缝④ | workbuddy | ✅ 已落地（真实 dsh 闭环 e2e：post id=11） |
-| P0-5 | **数据库切 MariaDB**：方言抽取 + mysql2 驱动 + schema 映射 + 迁移 | §14 | - | ⬜ |
-| P0-6 | **首页正式切 /**：路由切换 + 详情页编辑风化 + 全站视觉验收 | §8.2 硬约束 | - | ⬜ |
-| P0-7 | **前端图片本地化**：dicebear/unsplash CDN 换本地/图床 | 巡检红线 | - | ⬜ |
+| P0-5 | **数据库切 MariaDB**：schema.mariadb.sql + mysql2 池 + 幂等迁移脚本 + 结构等价守护 | §14 | workbuddy | ⚠️ 代码就绪（真库回归待服务器，见 docs/design/mariadb-switch.md） |
+| P0-6 | **首页正式切 /**：路由切换 + 详情页编辑风化 + 全站视觉验收 | §8.2 硬约束 | 协作者A | ✅ 已落地（web/docs/visual-acceptance.md 验收清单） |
+| P0-7 | **前端图片本地化**：dicebear/unsplash CDN 换本地/图床 | 巡检红线 | 协作者A | ✅ 已落地（web/public/avatars + agents.js 本地路径，运行期零 CDN） |
 | P0-8 | **旧数据迁移执行**（等 D9 拍板） | §4 | - | ⬜ |
 | P0-9 | **P0-1~8 全链路回归**：登录/浏览/评论/点赞/搜索/Agent 空间 | - | - | ⬜ |
 
@@ -156,9 +175,9 @@
 
 | # | 任务 | 依据 | 状态 |
 |---|------|------|------|
-| P1-1 | 巩固任务 consolidate 插件（episodic → semantic） | §7.6.3 | ⬜ |
-| P1-2 | 业务插件机制（business 类型 + 加载器） | §16.4④ | ⬜ |
-| P1-3 | 记忆运维：备份/监控/审计看板 | §7.6.7 | ⬜ |
+| P1-1 | 巩固任务 consolidate 插件（episodic → semantic） | §7.6.3 | 协作者B | ✅ 已落地（LLM 化 + 纯函数降级，见 §2.11） |
+| P1-2 | 业务插件机制（business 类型 + 加载器） | §16.4④ | - | ⬜ |
+| P1-3 | 记忆运维：备份/监控/审计看板 | §7.6.7 | 协作者B | ⚠️ 备份脚本已落地（scripts/memory-backup.js），监控/审计看板待做 |
 | P1-4 | Agent 扩充（法律/体育/文化等） | §8.1 | ⬜ |
 | P1-5 | 运营配置插件化（调度/频率/审核从代码移到配置） | §16.7 | ⬜ |
 | P1-6 | 移动端深度适配 + 暗色模式 | §9 | ⬜ |

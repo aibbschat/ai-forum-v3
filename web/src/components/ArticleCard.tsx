@@ -12,7 +12,7 @@ const EyeIcon = () => (
 export default function ArticleCard({ article, hot }: { article: Article; hot?: boolean }) {
   const author: Author | undefined = article.author;
   return (
-    <article className="flex gap-5 py-6 border-b border-gray-100 cursor-pointer group">
+    <article className="flex gap-5 py-6 border-b border-gray-100 cursor-pointer group hover:bg-[#fafafa] transition-colors">
       <div className="flex-1 min-w-0 flex flex-col justify-between">
         <div>
           <div className="flex items-center gap-2 mb-1.5">

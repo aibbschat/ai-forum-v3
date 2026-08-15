@@ -6,7 +6,9 @@
 // - 所有 DB 访问统一走 getDb()，本文件不持有连接、不改动 connection.js。
 // - 时间统一用 SQLite 的 datetime('now')（UTC），与建表默认值 CURRENT_TIMESTAMP 同口径。
 // - 检索加权 = importance × recency，recency = 1 / (1 + 距今天数)（Ebbinghaus 简化，§7.6.4）。
-// - 巩固（consolidate）只做结构与聚合，LLM 总结留作插件接入点（见 summarizeEpisodics 的 TODO）。
+// - 巩固（consolidate）由 LLM 驱动（§7.6.3）：按 domain 分组 → 每组一次 /chat/completions 总结
+//   成结构化 JSON（要点 + 置信度自评 + 存疑点）→ writeSemantic 沉淀，evidence_ids 全量保留出处。
+//   无 DEEPSEEK_API_KEY 或 LLM 调用/解析失败 → 自动回退 summarizeEpisodics 纯函数聚合（降级铁律）。
 
 import { getDb } from '../../database/connection.js';
 
@@ -28,6 +30,14 @@ export const EPISODIC_TTL_DAYS = 90;
 
 /** 容量淘汰每轮删除的批量大小，避免单条 DELETE 循环打满 CPU。 */
 const EVICT_BATCH = 1_000;
+
+// ── LLM 巩固（§7.6.3）配置 ─────────────────────────────────────────
+// 关键 API 知识（2026-08-15 实测）：
+// - 巩固总结走标准 /chat/completions（不需要 web_search 工具，该工具只在 Anthropic 兼容路由）。
+// - deepseek-chat / deepseek-reasoner 已于 2026-07-24 弃用，模型用 deepseek-v4-flash。
+const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com/chat/completions';
+const DEEPSEEK_MODEL = 'deepseek-v4-flash';
+const LLM_TIMEOUT_MS = 30_000;
 
 /** 检索加权表达式：importance × recency，recency = 1/(1+距今天数)。 */
 const SCORE_SQL = `importance * (1.0 / (1.0 + MAX(0, julianday('now') - julianday(created_at))))`;
@@ -309,12 +319,13 @@ export function sweepForgetting(agentId) {
 
 /**
  * 纯函数：把同一 domain 的 episodic 聚合成「理解草稿」。
- * 无 IO、无外部 API，可单测、可被 LLM 版本替换。
+ * 无 IO、无外部 API，可单测。
  *
- * TODO(P1，§7.6.3 契约)：接入 LLM 总结插件替换此处的机械聚合——
- *   把 rows 交给 brain / consolidate 类型插件，产出「要点 + 关键出处 + 存疑点」，
- *   返回结构保持不变（understanding / evidenceIds / sources / confidence），
- *   使调用方 consolidate() 无需改动。当前实现是无外部依赖的兜底基线。
+ * 现在它是 consolidate 的**降级基线**（§7.6.3 降级铁律）：
+ *   无 DEEPSEEK_API_KEY 或 LLM 调用/解析失败时，consolidate 自动回退到这里，
+ *   产出机械聚合草稿，保证巩固闭环绝不中断。LLM 版本见 createLlmSummarizer()。
+ * 返回结构（understanding / evidenceIds / sources / confidence）与 LLM 版本保持一致，
+ * 使 consolidate() 对两种路径的消费方式完全相同。
  *
  * @param {Array<{id:number, content:string, source?:string, importance?:number, created_at?:string}>} rows
  * @returns {{understanding:string, evidenceIds:number[], sources:string[], count:number, avgImportance:number}}
@@ -350,6 +361,116 @@ export function summarizeEpisodics(rows = []) {
   return { understanding, evidenceIds, sources, count: list.length, avgImportance };
 }
 
+/**
+ * 容错解析 LLM 返回的 JSON：剥掉 ```json 围栏，截取首个 {…} 块。
+ * 解析失败抛错（由调用方触发降级，绝不静默吞掉结构问题）。
+ */
+function parseLlmJson(raw) {
+  let s = String(raw ?? '').trim();
+  s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new Error('LLM 返回中未找到 JSON 对象');
+  try {
+    return JSON.parse(s.slice(start, end + 1));
+  } catch (e) {
+    throw new Error(`LLM 返回 JSON 解析失败: ${e.message}`);
+  }
+}
+
+/**
+ * 创建 LLM 巩固总结器（§7.6.3 契约的 LLM 实现）。
+ *
+ * 返回 async (rows) => draft，draft 结构：
+ *   { understanding, evidenceIds, sources, count, avgImportance, confidence, doubts }
+ * 与 summarizeEpisodics 返回结构对齐（额外带 confidence 自评与 doubts 存疑点），
+ * 使 consolidate() 对 LLM / 纯函数两条路径的消费方式一致。
+ *
+ * 实现要点：
+ * - 走 DeepSeek 标准 /chat/completions（不需要 web_search 工具），模型 deepseek-v4-flash。
+ * - response_format: { type: 'json_object' } 强制 JSON 返回；Node 22 内置 fetch。
+ * - 无 DEEPSEEK_API_KEY 或无 fetch → 抛错（consolidate 捕获后回退纯函数，不发起网络）。
+ * - 一次调用总结一组 rows；空组直接返回纯函数空草稿。
+ *
+ * 依赖全部可注入（apiKey / fetchImpl 等），测试注入 mock fetch 不真调 API。
+ *
+ * @param {{apiKey?:string, model?:string, endpoint?:string, timeoutMs?:number,
+ *          fetchImpl?:typeof fetch}} [opts]
+ * @returns {(rows:Array<object>) => Promise<object>}
+ */
+export function createLlmSummarizer({
+  apiKey = process.env.DEEPSEEK_API_KEY,
+  model = DEEPSEEK_MODEL,
+  endpoint = DEEPSEEK_ENDPOINT,
+  timeoutMs = LLM_TIMEOUT_MS,
+  fetchImpl = globalThis.fetch,
+} = {}) {
+  return async function llmSummarizer(rows = []) {
+    const list = Array.isArray(rows) ? rows.filter(Boolean) : [];
+    if (!list.length) return summarizeEpisodics([]);
+    if (!apiKey) throw new Error('DEEPSEEK_API_KEY 未设置，跳过 LLM 巩固（回退纯函数聚合）');
+    if (typeof fetchImpl !== 'function') {
+      throw new Error('当前运行时无 fetch，跳过 LLM 巩固（回退纯函数聚合）');
+    }
+
+    // domain 从组内第一条 content 推断，仅用于 prompt 上下文提示，不做分组依据。
+    const domain = inferDomain(list[0].content);
+    const evidences = list.map((r) => `#${r.id} [imp=${clamp01(r.importance, 0.5).toFixed(2)}] ${oneLine(r.content, 160)}`);
+
+    const messages = [
+      {
+        role: 'system',
+        content:
+          '你是记忆巩固引擎。把同一领域的一组情景记忆归纳为一条结构化理解，输出 JSON：' +
+          '{"understanding": "要点理解（1~3 句，可含关键结论）", "confidence": 0~1 的自评置信度, ' +
+          '"doubts": ["存疑点数组，可为空"], "evidenceIds": [支撑证据的 episodic id 数组]}。' +
+          '不要编造原文没有的信息；证据不足时降低 confidence 并在 doubts 里说明。',
+      },
+      {
+        role: 'user',
+        content: `领域：${domain}\n共 ${list.length} 条情景记忆：\n${evidences.join('\n')}`,
+      },
+    ];
+
+    let resp;
+    try {
+      resp = await fetchImpl(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model, messages, response_format: { type: 'json_object' } }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (e) {
+      throw new Error(`LLM 请求失败: ${e.message}`);
+    }
+
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`LLM HTTP ${resp.status}: ${text.slice(0, 200)}`);
+    }
+
+    const payload = await resp.json().catch(() => {
+      throw new Error('LLM 响应不是合法 JSON');
+    });
+    const content = payload?.choices?.[0]?.message?.content;
+    if (typeof content !== 'string' || !content.trim()) throw new Error('LLM 返回内容为空');
+
+    const parsed = parseLlmJson(content);
+    const understanding = typeof parsed.understanding === 'string' ? parsed.understanding.trim() : '';
+    if (!understanding) throw new Error('LLM 返回缺少 understanding 字段');
+
+    return {
+      understanding,
+      evidenceIds: toIdArray(parsed.evidenceIds),
+      sources: [...new Set(list.map((r) => r.source).filter(Boolean))],
+      count: list.length,
+      avgImportance: list.reduce((sum, r) => sum + clamp01(r.importance, 0.5), 0) / list.length,
+      confidence: clamp01(parsed.confidence, undefined), // 缺失时留给 consolidate 用 confidence 参数兜底
+      doubts: Array.isArray(parsed.doubts) ? parsed.doubts.map(String).filter(Boolean) : [],
+    };
+  };
+}
+
 /** 内容压成单行摘要，避免理解草稿被长文淹没。 */
 function oneLine(content, max = 120) {
   const s = String(content ?? '').replace(/\s+/g, ' ').trim();
@@ -381,18 +502,33 @@ function inferDomain(content) {
 }
 
 /**
- * 巩固：扫描近 days 天 episodic → 按 domain 分组 → summarizeEpisodics 产出理解草稿
- * → writeSemantic 沉淀（confidence 0.6）。这是「Agent 越来越懂世界」的物理动作。
- * 纯本地聚合，不依赖外部 API；LLM 总结见 summarizeEpisodics 的 TODO。
+ * 巩固：扫描近 days 天 episodic → 按 domain 分组 → 每组一次 LLM 总结（§7.6.3）
+ * → writeSemantic 沉淀（understanding=LLM 总结、confidence=LLM 自评夹 0~1、
+ *   evidence_ids=该组全部 episodic id，出处不丢）。
+ * 这是「Agent 越来越懂世界」的物理动作。
+ *
+ * 降级铁律：无 DEEPSEEK_API_KEY 或 LLM 调用/解析失败 → 该组自动回退
+ * summarizeEpisodics 纯函数聚合并 console.warn，绝不中断、不抛错。
+ *
+ * 可测性：llmSummarizer(rows) 可注入（默认 createLlmSummarizer() 调 DeepSeek），
+ * 测试注入 mock / 抛出故障的 mock，不真调 API。
+ *
  * @param {number} agentId
- * @param {{days?:number, confidence?:number}} [opts]
- * @returns {{agentId:number, days:number, scanned:number, domains:number,
- *            written:Array<{domain:string, semanticId:number, count:number, created:boolean}>}}
+ * @param {{days?:number, confidence?:number,
+ *          llmSummarizer?: (rows:Array<object>) => Promise<object>}} [opts]
+ * @returns {Promise<{agentId:number, days:number, scanned:number, domains:number,
+ *            written:Array<{domain:string, semanticId:number, count:number,
+ *                           created:boolean, llm:boolean}>}>}
  */
-export function consolidate(agentId, { days = 7, confidence = 0.6 } = {}) {
+export async function consolidate(
+  agentId,
+  { days = 7, confidence = 0.6, llmSummarizer } = {}
+) {
   const id = requireAgentId(agentId);
   const win = Math.max(1, Math.min(3650, Math.trunc(Number(days) || 7)));
   const conf = clamp01(confidence, 0.6);
+  // 默认 LLM 总结器；未注入时每次调用现取（apiKey 读自 process.env，可测试无 key 场景）。
+  const summarizer = llmSummarizer ?? createLlmSummarizer();
 
   const rows = getDb()
     .prepare(
@@ -419,20 +555,49 @@ export function consolidate(agentId, { days = 7, confidence = 0.6 } = {}) {
 
   const written = [];
   for (const [domain, group] of groups) {
-    const draft = summarizeEpisodics(group);
+    let draft;
+    let usedLlm = false;
+    try {
+      draft = await summarizer(group);
+      if (!draft || typeof draft.understanding !== 'string' || !draft.understanding.trim()) {
+        throw new Error('总结器返回空 understanding');
+      }
+      usedLlm = true;
+    } catch (err) {
+      // 降级铁律：LLM 不可用/故障 → 纯函数聚合兜底，绝不让巩固环节中断。
+      console.warn(
+        `[memory] consolidate agent=${id} domain=${domain} LLM 总结失败，回退纯函数聚合：${err.message}`
+      );
+      draft = summarizeEpisodics(group);
+    }
+
     if (!draft.understanding) continue;
+
+    // 出处不丢（§7.6.8）：evidence_ids 恒为该组全部 episodic id，不依赖 LLM 是否返回。
+    const evidenceIds = group.map((r) => Number(r.id)).filter(Number.isFinite);
+    // confidence：LLM 路径用自评（夹 0~1，缺失回落参数）；纯函数路径用参数。
+    const finalConf = usedLlm ? clamp01(draft.confidence, conf) : conf;
+
     const res = writeSemantic({
       agentId: id,
       domain,
       understanding: draft.understanding,
-      confidence: conf,
-      evidenceIds: draft.evidenceIds, // 出处不丢：证据 id 全量落库
+      confidence: finalConf,
+      evidenceIds,
     });
-    written.push({ domain, semanticId: res.id, count: draft.count, created: res.created });
+    written.push({
+      domain,
+      semanticId: res.id,
+      count: group.length,
+      created: res.created,
+      llm: usedLlm,
+    });
   }
 
+  const llmCount = written.filter((w) => w.llm).length;
   console.log(
-    `[memory] consolidate agent=${id} 窗口=${win}天 扫描=${rows.length} 领域=${groups.size} 沉淀=${written.length}`
+    `[memory] consolidate agent=${id} 窗口=${win}天 扫描=${rows.length} 领域=${groups.size} ` +
+      `沉淀=${written.length}（LLM=${llmCount}，回退=${written.length - llmCount}）`
   );
   return { agentId: id, days: win, scanned: rows.length, domains: groups.size, written };
 }

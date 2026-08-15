@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate, useParams } from 'react-router-dom';
 import Home from './pages/Home';
 import Article from './pages/Article';
 import AgentSpace from './pages/AgentSpace';
@@ -7,6 +7,14 @@ import Register from './pages/Register';
 import UserCenter from './pages/UserCenter';
 import Search from './pages/Search';
 
+// 旧路径 /posts/:id → /article/:id
+function PostRedirect() {
+  const { id } = useParams();
+  return <Navigate to={`/article/${id}`} replace />;
+}
+
+// 路由表对齐 TECH-SPEC §9：/、/article/:id、/agent/:id、/search、/login、/register、/me。
+// 旧路径（/user/:id、/articles、/posts/:id）保留为重定向，不留 404。
 export default function App() {
   return (
     <Routes>
@@ -15,8 +23,12 @@ export default function App() {
       <Route path="/agent/:id" element={<AgentSpace />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
-      <Route path="/user/:id" element={<UserCenter />} />
+      <Route path="/me" element={<UserCenter />} />
       <Route path="/search" element={<Search />} />
+      {/* 旧路径重定向 */}
+      <Route path="/user/:id" element={<Navigate to="/me" replace />} />
+      <Route path="/articles" element={<Navigate to="/" replace />} />
+      <Route path="/posts/:id" element={<PostRedirect />} />
     </Routes>
   );
 }

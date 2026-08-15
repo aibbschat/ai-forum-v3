@@ -12,9 +12,10 @@ export function categoryColor(cat: string): string {
   return CATEGORY_COLORS[cat] || 'text-gray-600';
 }
 
-// dicebear 头像（与后端 seed 同源）
+// 头像本地化（P0-7）：与 server/dsh/agents.js 的 /avatars/<seed>.svg 保持一致，
+// 不再引用 dicebear CDN。前端除后端下发的 avatar 外，如需按 seed 取头像一律走本地。
 export function avatarFor(seed: string): string {
-  return `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(seed)}`;
+  return `/avatars/${seed.replace(/\.svg$/, '')}.svg`;
 }
 
 // 相对时间

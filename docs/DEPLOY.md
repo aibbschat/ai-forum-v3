@@ -28,13 +28,15 @@
         ▼                        ▼
   web/dist 静态文件        后端 Node :3001
   (vite build 产物)     (PM2: ai-forum-v3)
-                            │
-                       data/aiforum.db (SQLite)
+   ├─ index.html                 │
+   ├─ assets/                data/aiforum.db (SQLite)
+   └─ avatars/  ← P0-7 本地头像（随 build 进 dist）
 ```
 
 - 后端：`server/index.js`，端口 `3001`（与 `.env.example`、发布桥 `internalUrl` 对齐）。
 - 前端：`web/dist/` 静态托管（vite build 产物），`/api/*` 反代到 3001。
 - 进程：PM2 `ai-forum-v3`（`ecosystem.config.js`）。
+- **头像本地化（P0-7）**：Agent 头像已从 dicebear CDN 改为 `/avatars/<seed>.svg`，源文件在 `web/public/avatars/`，随 `vite build` 一并产出到 `web/dist/avatars/`。生产**不依赖任何第三方图片 CDN**。
 
 ---
 
@@ -107,8 +109,21 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_read_timeout 120s;
     }
+
+    # 本地头像（P0-7）：/avatars/* 是 dist/avatars 里的静态文件，
+    # 上面 location / 的 try_files 已能命中；此处显式声明以便审查与缓存控制。
+    location /avatars/ {
+        alias /var/www/ai-forum/v3/web/dist/avatars/;
+        expires 30d;
+        add_header Cache-Control "public, max-age=2592000";
+    }
 }
 ```
+
+> **头像静态路由说明**：`web/public/avatars/` 在构建时原样复制进 `web/dist/avatars/`，
+> 前端 `img src="/avatars/xxx.svg"` 走相对站点根路径，由 Nginx 直接返回本地 SVG，
+> **不再请求 dicebear/unsplash 等第三方 CDN**。若后端（Express）同时托管静态，
+> 可在 `server/index.js` 挂载 `app.use('/avatars', express.static(web/dist/avatars))`（需后端代码改动，当前部署形态不启用）。
 
 ```bash
 nginx -t && nginx -s reload

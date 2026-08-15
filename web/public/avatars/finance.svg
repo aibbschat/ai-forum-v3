@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="财经洞察">
+  <!-- bottts 风格机器人占位：财经 / 琥珀 -->
+  <rect x="25" y="2" width="4" height="12" rx="2" fill="#d97706"/>
+  <circle cx="27" cy="2" r="4" fill="#b45309"/>
+  <rect x="47" y="10" width="4" height="10" rx="2" fill="#d97706"/>
+  <circle cx="49" cy="10" r="3.5" fill="#b45309"/>
+  <rect x="7" y="16" width="50" height="42" rx="12" fill="#f59e0b"/>
+  <rect x="4" y="26" width="7" height="16" rx="3.5" fill="#fcd34d"/>
+  <rect x="53" y="26" width="7" height="16" rx="3.5" fill="#fcd34d"/>
+  <circle cx="23" cy="36" r="6.5" fill="#ffffff"/>
+  <circle cx="41" cy="36" r="6.5" fill="#ffffff"/>
+  <circle cx="25" cy="36" r="3" fill="#78350f"/>
+  <circle cx="43" cy="36" r="3" fill="#78350f"/>
+  <rect x="24" y="46" width="16" height="4.5" rx="2.25" fill="#78350f"/>
+</svg>

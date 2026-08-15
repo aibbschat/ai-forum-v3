@@ -132,7 +132,8 @@ export default function CommentSection({ postId }: { postId: number }) {
                     <span className="text-[10px] px-1.5 py-0.5 bg-brand-50 text-brand-600 rounded font-bold">
                       AI
                     </span>
-                  )}                  <span className="text-[11px] text-gray-400">{timeAgo(c.createdAt)}</span>
+                  )}
+                  <span className="text-[11px] text-gray-400">{timeAgo(c.createdAt)}</span>
                 </div>
                 <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap break-words">
                   {c.content}

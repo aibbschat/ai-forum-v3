@@ -16,6 +16,7 @@ import {
   sweepForgetting,
   consolidate,
   summarizeEpisodics,
+  createLlmSummarizer,
   SUSPECT_THRESHOLD,
 } from '../services/memory/index.js';
 
@@ -64,7 +65,7 @@ test('三张 memory 表与索引按 §7.6.6 落地（SQLite 方言）', () => {
 });
 
 // ── 验收 1：100 条 episodic → 巩固出 semantic，且出处不丢 ───────────
-test('§7.6.8-1 写入 100 条 episodic → consolidate 产出 semantic，出处不丢', () => {
+test('§7.6.8-1 写入 100 条 episodic → consolidate 产出 semantic，出处不丢', async () => {
   const ids = [];
   for (let i = 1; i <= 100; i++) {
     const { id } = writeEpisodic({
@@ -85,7 +86,7 @@ test('§7.6.8-1 写入 100 条 episodic → consolidate 产出 semantic，出处
   assert.ok(sample.expires_at, 'expires_at 应被写入');
   assert.ok(sample.expires_at > sample.created_at, 'expires_at 应晚于 created_at（+90 天）');
 
-  const res = consolidate(AGENT_CONSOLIDATE, { days: 7 });
+  const res = await consolidate(AGENT_CONSOLIDATE, { days: 7 });
   assert.equal(res.scanned, 100, '应扫描到 100 条 episodic');
   const hit = res.written.find((w) => w.domain === DOMAIN);
   assert.ok(hit, `应沉淀出 domain=${DOMAIN} 的 semantic`);
@@ -104,10 +105,138 @@ test('§7.6.8-1 写入 100 条 episodic → consolidate 产出 semantic，出处
   assert.equal(s.confidence, 0.6);
 
   // 再次巩固 → upsert 同一行（不产生重复 domain）
-  const again = consolidate(AGENT_CONSOLIDATE, { days: 7 });
+  const again = await consolidate(AGENT_CONSOLIDATE, { days: 7 });
   assert.equal(again.written.find((w) => w.domain === DOMAIN).created, false, '第二次应为更新');
   const after2 = readMemory(AGENT_CONSOLIDATE, { domain: DOMAIN });
   assert.equal(after2.semantic.length, 1, 'upsert 不应产生重复 semantic');
+});
+
+// ── P1-1：LLM 化巩固（§7.6.3），全部注入 mock，不真调 API ──────────
+const AGENT_LLM = 9005;
+const AGENT_LLM_FAIL = 9006;
+const AGENT_NO_KEY = 9007;
+
+test('P1-1 LLM 巩固：mock 每 domain 调一次、产出 semantic、置信度用自评、出处不丢', async () => {
+  const ids = [];
+  for (let i = 1; i <= 100; i++) {
+    const { id } = writeEpisodic({
+      agentId: AGENT_LLM,
+      content: `[${DOMAIN}] LLM 版史料第 ${i} 则：《宋会要》市舶条细节 ${i}。`,
+      source: 'perceive',
+      importance: 0.3 + (i % 7) / 10,
+    });
+    ids.push(id);
+  }
+
+  let callCount = 0;
+  let received = null;
+  const mock = async (rows) => {
+    callCount += 1;
+    received = rows;
+    return {
+      understanding: `【LLM 巩固】市舶司要点：抽解与博买制度（共 ${rows.length} 条史料）。`,
+      confidence: 0.87,
+      doubts: ['存疑：抽解比例个别记载冲突'],
+    };
+  };
+
+  const res = await consolidate(AGENT_LLM, { days: 7, llmSummarizer: mock });
+  assert.equal(res.scanned, 100, '应扫描到 100 条 episodic');
+  assert.equal(callCount, 1, '一个 domain 只应调一次 LLM 总结');
+  assert.equal(received.length, 100, 'mock 应收到该组全部 100 条');
+  assert.equal(res.written[0].llm, true, 'written 应标记走了 LLM 路径');
+  assert.equal(res.written[0].count, 100);
+
+  const { semantic } = readMemory(AGENT_LLM, { domain: DOMAIN });
+  assert.equal(semantic.length, 1);
+  assert.match(semantic[0].understanding, /市舶司要点/, 'understanding 应为 LLM 总结');
+  assert.equal(semantic[0].confidence, 0.87, 'confidence 应用 LLM 自评');
+  assert.deepEqual(semantic[0].evidenceIds, ids, 'evidence_ids 应全量指向该组 episodic（出处不丢）');
+  assert.equal(semantic[0].status, 'verified');
+});
+
+test('P1-1 LLM 失败 → 自动回退 summarizeEpisodics 纯函数，不抛错', async () => {
+  writeEpisodic({ agentId: AGENT_LLM_FAIL, content: `[${DOMAIN}] 甲：LLM 故障时的史料一。`, importance: 0.6 });
+  writeEpisodic({ agentId: AGENT_LLM_FAIL, content: `[${DOMAIN}] 乙：LLM 故障时的史料二。`, importance: 0.4 });
+
+  const boom = async () => {
+    throw new Error('mock LLM 故障');
+  };
+  // 关键断言：LLM 抛错时 consolidate 不向上抛，回退纯函数继续沉淀。
+  const res = await consolidate(AGENT_LLM_FAIL, { days: 7, llmSummarizer: boom });
+  assert.equal(res.scanned, 2);
+  const hit = res.written.find((w) => w.domain === DOMAIN);
+  assert.ok(hit, '回退路径仍应产出 semantic');
+  assert.equal(hit.count, 2);
+  assert.equal(hit.llm, false, 'written 应标记回退路径');
+
+  const { semantic } = readMemory(AGENT_LLM_FAIL, { domain: DOMAIN });
+  assert.equal(semantic.length, 1);
+  assert.match(semantic[0].understanding, /聚合草稿/, '回退路径应产出纯函数聚合草稿');
+  assert.equal(semantic[0].confidence, 0.6, '回退路径置信度用 consolidate 参数');
+  assert.equal(semantic[0].evidenceIds.length, 2, '回退路径出处同样不丢');
+});
+
+test('P1-1 无 DEEPSEEK_API_KEY → 不发起任何网络请求，回退纯函数', async () => {
+  const savedKey = process.env.DEEPSEEK_API_KEY;
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error('不应发起网络请求');
+  };
+
+  try {
+    delete process.env.DEEPSEEK_API_KEY;
+    writeEpisodic({ agentId: AGENT_NO_KEY, content: `[${DOMAIN}] 无 key 场景下的史料。`, importance: 0.5 });
+    // 不注入 llmSummarizer → 走默认实现（createLlmSummarizer），无 key 应在碰网络前就放弃。
+    const res = await consolidate(AGENT_NO_KEY, { days: 7 });
+    assert.equal(fetchCalls, 0, '无 key 时绝不能发起网络请求');
+    assert.ok(res.written.length >= 1, '回退纯函数仍应产出 semantic');
+    const { semantic } = readMemory(AGENT_NO_KEY, { domain: DOMAIN });
+    assert.match(semantic[0].understanding, /聚合草稿/, '应走纯函数聚合');
+    assert.equal(semantic[0].confidence, 0.6);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = savedKey;
+  }
+});
+
+test('P1-1 createLlmSummarizer 默认实现：走 /chat/completions、deepseek-v4-flash、json_object，置信度夹 0~1', async () => {
+  let captured = null;
+  const fakeFetch = async (url, init) => {
+    captured = { url, init };
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: '{"understanding":"要点X","confidence":1.4,"doubts":["疑点"],"evidenceIds":[1,2]}',
+            },
+          },
+        ],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  };
+  const summarizer = createLlmSummarizer({ apiKey: 'test-key', fetchImpl: fakeFetch });
+  const draft = await summarizer([
+    { id: 1, content: '[x] 甲', source: 'perceive', importance: 0.9, created_at: '2026-08-01 10:00:00' },
+    { id: 2, content: '[x] 乙', source: 'feedback', importance: 0.5, created_at: '2026-08-02 10:00:00' },
+  ]);
+
+  assert.ok(captured.url.endsWith('/chat/completions'), '应走标准 /chat/completions');
+  assert.equal(captured.init.headers.Authorization, 'Bearer test-key');
+  const body = JSON.parse(captured.init.body);
+  assert.equal(body.model, 'deepseek-v4-flash', '模型应为 deepseek-v4-flash（旧模型已弃用）');
+  assert.deepEqual(body.response_format, { type: 'json_object' }, '应强制 JSON 返回');
+
+  assert.equal(draft.understanding, '要点X');
+  assert.equal(draft.confidence, 1, 'LLM 自评 1.4 应被夹到 0~1 上限');
+  assert.deepEqual(draft.evidenceIds, [1, 2]);
+  assert.deepEqual(draft.sources, ['perceive', 'feedback']);
+  assert.equal(draft.count, 2);
 });
 
 // ── 验收 2：episodic 超 TTL 删除原文，semantic 保留理解 ─────────────

@@ -68,7 +68,7 @@ export default function Home() {
           ) : feed.length === 0 && hero.length === 0 ? (
             <EmptyState icon="✍️" title="暂无文章" hint="专业 Agent 正在撰稿中，稍后再来看看。" />
           ) : (
-            feed.map((a) => <ArticleCard key={a.id} article={a} hot={false} />)
+            feed.map((a) => <ArticleCard key={a.id} article={a} hot={feed[0]?.id === a.id} />)
           )}
         </div>
         <Sidebar hot={hot} agents={agents} />

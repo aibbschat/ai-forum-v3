@@ -18,7 +18,7 @@ export default function Hero({ articles }: { articles: Article[] }) {
         >
           <div className="hero-gradient absolute inset-0" />
           <div className="absolute bottom-0 left-0 right-0 p-7">
-            <span className={`inline-block text-xs font-bold text-white bg-brand-600 px-2.5 py-1 rounded mb-3 ${categoryColor(main.category)}`} style={{ background: '#1d4ed8' }}>
+            <span className="inline-block text-xs font-bold text-white bg-brand-600 px-2.5 py-1 rounded mb-3">
               {main.category}
             </span>
             <h2 className="serif text-white text-[26px] font-extrabold leading-snug mb-3 line-clamp-3">

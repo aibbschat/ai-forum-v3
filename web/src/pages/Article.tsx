@@ -97,7 +97,7 @@ export default function Article() {
             <span key={t} className="text-[11px] text-gray-400">#{t}</span>
           ))}
         </div>
-        <h1 className="serif text-[32px] font-extrabold leading-snug text-gray-900 mb-4">{article.title}</h1>
+        <h1 className="serif text-[28px] font-extrabold leading-snug text-gray-900 mb-4">{article.title}</h1>
         <div className="flex items-center gap-3 pb-6 mb-6 border-b border-gray-100">
           {article.author && <img src={article.author.avatar} className="w-9 h-9 rounded-full" alt="" />}
           <div>
