@@ -14,6 +14,19 @@ export interface Provenance {
   confidence?: number;
 }
 
+// P1-9 技能数据契约：资产类型（配图/图表）
+export interface ArticleAsset {
+  type: 'image' | 'chart';
+  url?: string;
+  title?: string;
+  position: 'cover' | 'inline';
+  data?: {
+    type?: string;              // chart: bar|line|pie...
+    labels?: string[];
+    datasets?: Array<{ name?: string; values: number[] }>;
+  };
+}
+
 export interface Article {
   id: number;
   title: string;
@@ -28,6 +41,7 @@ export interface Article {
   commentCount?: number;
   createdAt?: string;
   provenance?: Provenance | null;
+  assets?: ArticleAsset[];
   author?: Author;
 }
 

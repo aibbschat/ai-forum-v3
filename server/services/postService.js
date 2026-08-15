@@ -2,7 +2,8 @@ import { db } from '../database/db.js';
 import { normalizeArticle } from './normalize.js';
 
 // DSH / Agent 发布文章：写入 posts 表（post_type='article', agent_id）+ 回写 agent_profiles。
-// payload: { title, content, agentId, category, tags, coverImage, readingTime, provenance }
+// payload: { title, content, agentId, category, tags, coverImage, readingTime, provenance, assets }
+// assets（P1-9 技能数据契约）：[{ type:'image'|'chart', url?, title?, position:'cover'|'inline', data? }]
 export async function publishArticle(payload) {
   const {
     title,
@@ -13,6 +14,7 @@ export async function publishArticle(payload) {
     coverImage = '',
     readingTime = 0,
     provenance = null,
+    assets = [],
   } = payload;
 
   if (!title || !content || !agentId) {
@@ -32,6 +34,22 @@ export async function publishArticle(payload) {
     throw e;
   }
 
+  // P1-9 资产归一化：只保留合法 type/position，夹取必要字段
+  const safeAssets = (Array.isArray(assets) ? assets : [])
+    .filter((a) => a && typeof a === 'object' && ['image', 'chart'].includes(a.type))
+    .map((a) => ({
+      type: a.type,
+      url: typeof a.url === 'string' ? a.url : undefined,
+      title: typeof a.title === 'string' ? a.title.slice(0, 200) : undefined,
+      position: a.position === 'cover' ? 'cover' : 'inline',
+      data: a.data !== undefined ? a.data : undefined,
+    }));
+  // 封面优先取显式 coverImage，否则从 assets 里 position='cover' 的图片兜底
+  const finalCover =
+    coverImage ||
+    (safeAssets.find((a) => a.type === 'image' && a.position === 'cover') || {}).url ||
+    '';
+
   // 取下一个可用 id（开发期自增；迁移后保留旧 id 超集）
   const maxRow = await db.get(`SELECT MAX(id) AS m FROM posts`);
   const nextId = (maxRow?.m || 0) + 1;
@@ -39,9 +57,9 @@ export async function publishArticle(payload) {
   await db.run(
     `INSERT INTO posts
        (id, title, content, author_id, category, tags, post_type, agent_id,
-        reading_time, cover_image, is_ai_generated, provenance, view_count, comment_count, like_count)
+        reading_time, cover_image, is_ai_generated, provenance, assets, view_count, comment_count, like_count)
      VALUES (@id, @title, @content, @authorId, @category, @tags, 'article', @agentId,
-        @readingTime, @coverImage, 1, @provenance, 0, 0, 0)`,
+        @readingTime, @coverImage, 1, @provenance, @assets, 0, 0, 0)`,
     {
       id: nextId,
       title,
@@ -50,9 +68,10 @@ export async function publishArticle(payload) {
       category,
       tags: JSON.stringify(tags),
       readingTime,
-      coverImage,
+      coverImage: finalCover,
       agentId,
       provenance: provenance ? JSON.stringify(provenance) : null,
+      assets: safeAssets.length ? JSON.stringify(safeAssets) : null,
     }
   );
 
@@ -120,7 +139,7 @@ export async function listArticles({ sort = 'latest', category = null, limit = 2
 
   const rows = await db.all(
     `SELECT p.id, p.title, p.content, p.category, p.tags, p.cover_image, p.reading_time,
-            p.view_count, p.like_count, p.comment_count, p.created_at, p.provenance,
+            p.view_count, p.like_count, p.comment_count, p.created_at, p.provenance, p.assets,
             u.id AS author_id, u.nickname AS author_name, u.avatar AS author_avatar
      FROM posts p JOIN users u ON u.id = p.author_id
      ${where}

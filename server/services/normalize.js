@@ -29,6 +29,7 @@ export function normalizeArticle(r, { includeContent = false } = {}) {
     commentCount: r.comment_count || 0,
     createdAt: r.created_at,
     provenance: r.provenance ? jsonOrNull(r.provenance) : undefined,
+    assets: r.assets ? safeJson(r.assets) : undefined,  // P1-9 技能数据契约
   };
   if (includeContent) out.content = r.content || '';
   out.excerpt = (r.content || '').slice(0, 160);

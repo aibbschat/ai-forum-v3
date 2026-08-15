@@ -22,7 +22,18 @@ function init() {
   const schema = readFileSync(resolve(__dirname, 'schema.sql'), 'utf8');
   db.exec(schema);
 
+  migrate();
   seedAgents();
+}
+
+// 幂等列迁移：为已有库补新列（schema.sql 的 CREATE IF NOT EXISTS 不会加列）。
+// 新增列时在此追加（仿照 ALTER TABLE ... ADD COLUMN，先查列是否存在）。
+function migrate() {
+  const cols = db.prepare(`PRAGMA table_info(posts)`).all().map((c) => c.name);
+  if (!cols.includes('assets')) {
+    db.exec(`ALTER TABLE posts ADD COLUMN assets TEXT`);
+    console.log('[db] migration: posts.assets 列已补充（P1-9 技能数据契约）');
+  }
 }
 
 // 首次启动把 5 个专业 Agent 落库（用户 + agent_profiles）。

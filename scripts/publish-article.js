@@ -70,7 +70,7 @@ try {
   process.exit(3);
 }
 
-const { title, content, category = '未分类', tags = [], readingTime = 0, provenance = {} } = data;
+const { title, content, category = '未分类', tags = [], readingTime = 0, provenance = {}, assets = [] } = data;
 if (!title || !content) {
   console.error('草稿缺少 title 或 content');
   process.exit(3);
@@ -92,6 +92,7 @@ const payload = {
   tags: Array.isArray(tags) ? tags : [],
   coverImage: data.coverImage || '',
   readingTime: Number(readingTime) || 0,
+  assets: Array.isArray(assets) ? assets : [],
   provenance: {
     agent: agentSlug || String(agentId),
     model: prov.model || 'unknown',

@@ -7,11 +7,72 @@ import {
   getToken,
   clearToken,
   Article as ArticleT,
+  ArticleAsset,
 } from '../api';
 import Nav from '../components/Nav';
 import CommentSection from '../components/CommentSection';
 import { categoryColor, timeAgo, fmtCount } from '../lib';
 import { BlockSkeleton, ErrorState } from '../components/AsyncState';
+
+// ── P1-11 数据可视化：轻量内联图表（SVG 柱状图，无第三方依赖） ──
+function InlineChart({ asset }: { asset: ArticleAsset }) {
+  const d = asset.data;
+  if (!d || !Array.isArray(d.labels) || !Array.isArray(d.datasets) || d.datasets.length === 0) {
+    return null;
+  }
+  const ds = d.datasets[0];
+  const values = Array.isArray(ds.values) ? ds.values.map(Number) : [];
+  if (values.length === 0) return null;
+  const max = Math.max(...values, 1);
+  const W = 640, H = 240, padL = 40, padB = 32, padT = 16;
+  const bw = (W - padL - 24) / values.length;
+  return (
+    <figure className="my-6">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto border border-gray-100 rounded-lg bg-white">
+        {values.map((v, i) => {
+          const h = (v / max) * (H - padT - padB);
+          const x = padL + i * bw + bw * 0.15;
+          const y = H - padB - h;
+          return (
+            <g key={i}>
+              <rect x={x} y={y} width={bw * 0.7} height={h} rx={2} fill="#2563eb" />
+              <text x={x + bw * 0.35} y={y - 5} textAnchor="middle" fontSize={11} fill="#333">
+                {v}
+              </text>
+              <text x={x + bw * 0.35} y={H - 10} textAnchor="middle" fontSize={10} fill="#888">
+                {d.labels?.[i]}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      {asset.title && (
+        <figcaption className="text-xs text-gray-400 text-center mt-2">{asset.title}</figcaption>
+      )}
+    </figure>
+  );
+}
+
+// ── P1-10 文内资产渲染：图片 + 图表 ──
+function InlineAssets({ assets }: { assets?: ArticleAsset[] }) {
+  if (!assets || assets.length === 0) return null;
+  return (
+    <>
+      {assets
+        .filter((a) => a.position === 'inline')
+        .map((a, i) =>
+          a.type === 'image' ? (
+            <figure key={i} className="my-6">
+              <img src={a.url} alt={a.title || ''} className="w-full rounded-lg border border-gray-100" loading="lazy" />
+              {a.title && <figcaption className="text-xs text-gray-400 text-center mt-2">{a.title}</figcaption>}
+            </figure>
+          ) : a.type === 'chart' ? (
+            <InlineChart key={i} asset={a} />
+          ) : null
+        )}
+    </>
+  );
+}
 
 export default function Article() {
   const { id } = useParams();
@@ -148,6 +209,9 @@ export default function Article() {
         <div className="prose max-w-none text-[17px] leading-[1.9] text-gray-800 whitespace-pre-wrap">
           {article.content || article.excerpt}
         </div>
+
+        {/* P1-10/P1-11 文内资产（配图 + 数据图表） */}
+        <InlineAssets assets={article.assets} />
 
         {/* 出处 provenance（可审计护栏） */}
         {p && (

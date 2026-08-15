@@ -275,3 +275,89 @@ test('评论点赞：无 token → 401；有 token → 切换 + 计数', async (
   assert.equal(off.body.liked, false);
   assert.equal(off.body.likeCount, 0);
 });
+
+// ── P1-9/P1-10/P1-11 技能数据契约：assets 配图 + 图表 ─────────────
+test('发布带 assets 的文章：封面兜底 + assets 落库 + 详情返回 camelCase', async () => {
+  const payload = {
+    title: '契约测试：带配图与图表的文章',
+    content: '正文内容，包含技能产出。',
+    agentId,
+    category: '财经',
+    tags: ['图表', '测试'],
+    assets: [
+      { type: 'image', url: 'https://example.com/cover.png', title: '封面图', position: 'cover' },
+      { type: 'image', url: 'https://example.com/inline.png', title: '文内图', position: 'inline' },
+      {
+        type: 'chart',
+        title: 'AI 芯片市占率',
+        position: 'inline',
+        data: { type: 'bar', labels: ['华为', '寒武纪'], datasets: [{ name: '市占率', values: [43, 11] }] },
+      },
+    ],
+  };
+
+  const ok = await request(app)
+    .post('/api/internal/dsh/publish')
+    .set('X-Internal-Token', 'test-internal-token')
+    .send(payload);
+  assert.equal(ok.status, 201);
+  const withAssetsId = ok.body.id;
+
+  // 详情：assets 数组存在、封面从 assets 兜底、字段 camelCase
+  const detail = await request(app).get(`/api/posts/${withAssetsId}`);
+  assert.equal(detail.status, 200);
+  assert.ok(Array.isArray(detail.body.assets));
+  assert.equal(detail.body.assets.length, 3);
+  assert.equal(detail.body.coverImage, 'https://example.com/cover.png'); // 封面从 assets 兜底
+  const chart = detail.body.assets.find((a) => a.type === 'chart');
+  assert.ok(chart);
+  assert.equal(chart.position, 'inline');
+  assert.ok(chart.data);
+  assert.deepEqual(chart.data.labels, ['华为', '寒武纪']);
+  assertCamelCaseKeys(detail.body.assets[0]);
+
+  // 列表也带 assets（listArticles 显式 SELECT 已含 assets）
+  const list = await request(app).get('/api/posts?sort=latest&limit=50');
+  assert.equal(list.status, 200);
+  const found = list.body.articles.find((a) => a.id === withAssetsId);
+  assert.ok(found);
+  assert.ok(Array.isArray(found.assets));
+  assert.equal(found.assets.length, 3);
+});
+
+test('assets 非法输入被过滤：坏 type 丢弃、坏 position 归 inline、非数组安全', async () => {
+  const payload = {
+    title: '契约测试：assets 过滤',
+    content: '正文',
+    agentId,
+    category: '科技',
+    assets: [
+      { type: 'video', url: 'x', position: 'cover' },   // 非法 type → 丢弃
+      { type: 'image', url: 'a.png', position: 'weird' }, // 非法 position → inline
+      { type: 'image', url: 'b.png', position: 'inline', title: 123 }, // title 非法类型 → undefined
+      null,                                             // 非对象 → 丢弃
+      'string',                                         // 非对象 → 丢弃
+    ],
+  };
+  const ok = await request(app)
+    .post('/api/internal/dsh/publish')
+    .set('X-Internal-Token', 'test-internal-token')
+    .send(payload);
+  assert.equal(ok.status, 201);
+
+  const detail = await request(app).get(`/api/posts/${ok.body.id}`);
+  assert.ok(Array.isArray(detail.body.assets));
+  assert.equal(detail.body.assets.length, 2); // 只有 2 个合法 image
+  assert.equal(detail.body.assets[0].position, 'inline'); // weird → inline
+  // 封面兜底只认 position='cover' 的图片；本用例无 cover → 封面为空
+  assert.equal(detail.body.coverImage, '');
+
+  // assets 非数组（undefined）→ 安全，不发
+  const noAssets = await request(app)
+    .post('/api/internal/dsh/publish')
+    .set('X-Internal-Token', 'test-internal-token')
+    .send({ title: '无 assets', content: '正文', agentId, category: '科技' });
+  assert.equal(noAssets.status, 201);
+  const nd = await request(app).get(`/api/posts/${noAssets.body.id}`);
+  assert.equal(nd.body.assets, undefined);
+});

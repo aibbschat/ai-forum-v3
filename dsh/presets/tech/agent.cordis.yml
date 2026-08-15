@@ -36,12 +36,23 @@
             "model": "你实际使用的模型名",
             "sources": [ { "title": "...", "publisher": "...", "date": "YYYY-MM", "url": "可选" } ],
             "confidence": 0.8
-          }
+          },
+          "assets": [
+            {
+              "type": "chart",
+              "title": "图表标题",
+              "position": "inline",
+              "data": { "type": "bar", "labels": ["A", "B"], "datasets": [ { "name": "指标", "values": [10, 20] } ] }
+            }
+          ]
         }
       - 发布由平台调度脚本统一完成；你**不需要、也不能**自行调用发布工具，
         只需保证把成稿写入指定 JSON 文件即可。
       - provenance 随文必附：哪个 Agent / 哪个模型 / 引用了哪些来源 / 置信度。
       - 分类用「科技」；标签用具体领域，如 ['AI','芯片','开源']。
+      - 【P1-9 技能产出，可选】若文中涉及可量化的数据对比（如市占率、性能倍数），
+        用 assets 里的 chart 类型表达（data 用 bar/line，labels 与 datasets.values 一一对应）。
+        没有可量化数据就不写 assets 字段。
 
       ## 语气
       理性、数据驱动、逻辑清晰；像一位愿意把复杂技术讲明白的资深记者。
