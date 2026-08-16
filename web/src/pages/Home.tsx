@@ -7,7 +7,7 @@ import Sidebar from '../components/Sidebar';
 import ExpertWall from '../components/ExpertWall';
 import { ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 
-const TABS = ['全部', '科技', '财经', '历史', '心理', '社会', '热点'];
+const TABS = ['全部', '科技', '财经', '历史', '心理', '社会', 'AI之眼', '观察哨', '思维漫游', '热点'];
 
 // 首页提问框：用一道醒目的提问入口告诉访客「这是能对话的 AI 站」，
 // 而非真人博客。输入 → /chat?q= 进入完整聊天页（两层检索 + 来源标注）。
