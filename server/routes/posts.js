@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/userAuth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
-import { listArticles, getArticle, incrementView, createPost } from '../services/postService.js';
+import { listArticles, getArticle, incrementView, createPost, countArticles } from '../services/postService.js';
 
 const router = Router();
 
@@ -10,13 +10,17 @@ router.get(
   '/',
   asyncHandler(async (req, res) => {
     const { sort, category, limit, offset } = req.query;
-    const rows = await listArticles({
+    const filter = {
       sort,
       category,
       limit: limit ? Number(limit) : 20,
       offset: offset ? Number(offset) : 0,
-    });
-    res.json({ articles: rows });
+    };
+    const [rows, total] = await Promise.all([
+      listArticles(filter),
+      countArticles({ category }),
+    ]);
+    res.json({ articles: rows, total });
   })
 );
 

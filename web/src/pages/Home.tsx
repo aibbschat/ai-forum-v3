@@ -9,6 +9,50 @@ import { ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 
 const TABS = ['全部', '科技', '财经', '历史', '心理', '社会', 'AI之眼', '观察哨', '思维漫游', '热点'];
 
+const PAGE_SIZE = 10;
+
+// 页码分页器：上一页 / 页码（过多时折叠省略号）/ 下一页
+function Pagination({ page, totalPages, onGo }: { page: number; totalPages: number; onGo: (p: number) => void }) {
+  if (totalPages <= 1) return null;
+  const pages: (number | '…')[] = [];
+  for (let p = 1; p <= totalPages; p++) {
+    if (p === 1 || p === totalPages || Math.abs(p - page) <= 1) pages.push(p);
+    else if (pages[pages.length - 1] !== '…') pages.push('…');
+  }
+  const btn = 'min-w-9 h-9 px-3 rounded-lg text-sm border transition flex items-center justify-center';
+  return (
+    <nav className="flex items-center justify-center gap-2 flex-wrap mt-10" aria-label="分页">
+      <button
+        disabled={page <= 1}
+        onClick={() => onGo(page - 1)}
+        className={`${btn} ${page <= 1 ? 'text-gray-300 border-gray-100 cursor-not-allowed' : 'text-gray-600 border-gray-200 bg-white hover:border-indigo-300 hover:text-indigo-600'}`}
+      >
+        上一页
+      </button>
+      {pages.map((p, i) =>
+        p === '…' ? (
+          <span key={`e${i}`} className="px-1 text-gray-300">…</span>
+        ) : (
+          <button
+            key={p}
+            onClick={() => onGo(p)}
+            className={`${btn} ${p === page ? 'bg-indigo-600 text-white border-indigo-600 font-semibold' : 'text-gray-600 border-gray-200 bg-white hover:border-indigo-300 hover:text-indigo-600'}`}
+          >
+            {p}
+          </button>
+        )
+      )}
+      <button
+        disabled={page >= totalPages}
+        onClick={() => onGo(page + 1)}
+        className={`${btn} ${page >= totalPages ? 'text-gray-300 border-gray-100 cursor-not-allowed' : 'text-gray-600 border-gray-200 bg-white hover:border-indigo-300 hover:text-indigo-600'}`}
+      >
+        下一页
+      </button>
+    </nav>
+  );
+}
+
 // 首页提问框：用一道醒目的提问入口告诉访客「这是能对话的 AI 站」，
 // 而非真人博客。输入 → /chat?q= 进入完整聊天页（两层检索 + 来源标注）。
 function AskBox({ onAsk }: { onAsk: (q: string) => void }) {
@@ -52,37 +96,64 @@ export default function Home() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const category = params.get('category') || '全部';
+  const page = Math.max(1, Number(params.get('page')) || 1);
   const [articles, setArticles] = useState<Article[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [insight, setInsight] = useState<Insight | null>(null);
+  const [hot, setHot] = useState<Article[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
     setError('');
-    listArticles({ sort: 'latest', limit: 50, category: category === '全部' ? undefined : category })
-      .then((r) => setArticles(r.articles))
+    listArticles({
+      sort: 'latest',
+      limit: PAGE_SIZE,
+      offset: (page - 1) * PAGE_SIZE,
+      category: category === '全部' ? undefined : category,
+    })
+      .then((r) => {
+        setArticles(r.articles);
+        setTotal(r.total ?? 0);
+      })
       .catch(() => setError('文章列表加载失败'))
       .finally(() => setLoading(false));
-  }, [category]);
+  }, [category, page]);
 
   useEffect(() => {
     load();
+    window.scrollTo({ top: 0 });
   }, [load]);
 
   useEffect(() => {
     listAgents().then((r) => setAgents(r.agents)).catch(() => {});
   }, []);
 
+  // 侧栏热门：独立按热度取 top5，不随翻页变化
+  useEffect(() => {
+    listArticles({ sort: 'hottest', limit: 5 })
+      .then((r) => setHot(r.articles))
+      .catch(() => {});
+  }, [category]);
+
   // 今日 AI 洞察（非阻塞，加载完再显示横幅）
   useEffect(() => {
     getTodayInsight().then(setInsight).catch(() => {});
   }, []);
 
-  const hero = articles.slice(0, 3);
-  const feed = articles.slice(3);
-  const hot = [...articles].sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0)).slice(0, 5);
+  // 热门探讨横条只在第 1 页显示（取本页前 3 篇）
+  const hero = page === 1 ? articles.slice(0, 3) : [];
+  const feed = page === 1 ? articles.slice(3) : articles;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const goPage = (p: number) => {
+    const next = new URLSearchParams(params);
+    if (p <= 1) next.delete('page');
+    else next.set('page', String(p));
+    setParams(next, { preventScrollReset: true });
+  };
 
   return (
     <div className="min-h-screen bg-page">
@@ -148,7 +219,10 @@ export default function Home() {
           ) : feed.length === 0 && hero.length === 0 ? (
             <EmptyState icon="✍️" title="暂无文章" hint="专业 Agent 正在撰稿中，稍后再来看看。" />
           ) : (
-            feed.map((a) => <ArticleCard key={a.id} article={a} hot={feed[0]?.id === a.id} />)
+            <>
+              {feed.map((a) => <ArticleCard key={a.id} article={a} hot={page === 1 && feed[0]?.id === a.id} />)}
+              <Pagination page={page} totalPages={totalPages} onGo={goPage} />
+            </>
           )}
         </div>
         <Sidebar hot={hot} agents={agents} />

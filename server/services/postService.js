@@ -184,6 +184,14 @@ export async function listArticles({ sort = 'latest', category = null, limit = 2
   return rows.map((r) => normalizeArticle(r));
 }
 
+// 文章总数（分页用；与 listArticles 同一套 category 过滤口径）
+export async function countArticles({ category = null } = {}) {
+  const where = category ? 'WHERE category = ?' : '';
+  const params = category ? [category] : [];
+  const row = await db.get(`SELECT COUNT(*) AS total FROM posts ${where}`, params);
+  return row ? row.total : 0;
+}
+
 export async function getArticle(id) {
   const row = await db.get(
     `SELECT p.*, u.id AS author_id, u.nickname AS author_name, u.avatar AS author_avatar, u.user_type AS author_user_type, u.is_verified AS author_is_verified,

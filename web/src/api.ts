@@ -75,7 +75,7 @@ export function listArticles(opts: { sort?: string; category?: string; limit?: n
   if (opts.category) params.set('category', opts.category);
   if (opts.limit) params.set('limit', String(opts.limit));
   if (opts.offset) params.set('offset', String(opts.offset));
-  return get<{ articles: Article[] }>(`/api/posts?${params.toString()}`);
+  return get<{ articles: Article[]; total: number }>(`/api/posts?${params.toString()}`);
 }
 
 export function getArticle(id: number) {
