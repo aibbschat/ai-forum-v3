@@ -5,6 +5,26 @@
 import { PROVIDERS, FALLBACK_ORDER, resolvePurpose } from './config.js';
 
 /**
+ * 各场景超时（ms）。火山 Agent Plan 的自主联网任务（perceive/写稿）本就要几十秒，
+ * 统一 60s 会误杀慢请求（实测 node fetch 需 68s+）。超时可经 LLM_TIMEOUT_<PURPOSE> 覆盖。
+ */
+const TIMEOUT_BY_PURPOSE = {
+  chat: 60_000,
+  insight: 60_000,
+  vision: 60_000,
+  perceive: 180_000, // 联网检索慢任务
+  memory: 120_000,
+  writing: 180_000,
+};
+
+function timeoutFor(purpose) {
+  const key = `LLM_TIMEOUT_${String(purpose || 'chat').toUpperCase()}`;
+  const v = Number(process.env[key]);
+  if (Number.isFinite(v) && v > 0) return v;
+  return TIMEOUT_BY_PURPOSE[purpose] ?? TIMEOUT_BY_PURPOSE.chat;
+}
+
+/**
  * 统一聊天接口。
  * @param {object} opts
  * @param {string}  [opts.purpose]   场景：chat/insight/vision/perceive/memory/writing
@@ -13,15 +33,17 @@ import { PROVIDERS, FALLBACK_ORDER, resolvePurpose } from './config.js';
  * @param {boolean} [opts.json]      要求 JSON 返回（response_format.json_object）
  * @param {number}  [opts.temperature]
  * @param {number}  [opts.maxTokens]
+ * @param {number}  [opts.timeout]   本次调用超时（ms），默认按 purpose
  * @returns {Promise<{content:string, provider:string, model:string}|null>}
  *   成功返回 {content, provider, model}；全部供应商不可用/失败时返回 null（绝不抛错中断业务）。
  */
 export async function chat(opts = {}) {
-  const { purpose = 'chat', model: modelOverride, messages, json = false, temperature, maxTokens } = opts;
+  const { purpose = 'chat', model: modelOverride, messages, json = false, temperature, maxTokens, timeout } = opts;
   if (!Array.isArray(messages) || !messages.length) return null;
 
   const target = resolvePurpose(purpose);
   const model = modelOverride ?? target.model;
+  const callTimeout = timeout ?? timeoutFor(purpose);
 
   // 尝试顺序：主用供应商在前，其余按降级链（去重）
   const order = [target.provider, ...FALLBACK_ORDER.filter((p) => p !== target.provider)];
@@ -36,7 +58,7 @@ export async function chat(opts = {}) {
       continue;
     }
     try {
-      const res = await callOpenAI(prov, key, { model, messages, json, temperature, maxTokens });
+      const res = await callOpenAI(prov, key, { model, messages, json, temperature, maxTokens, timeout: callTimeout });
       if (res.usage) {
         console.info(`[llm] ${pname}/${model} tokens=${JSON.stringify(res.usage)}`);
       }
@@ -51,7 +73,7 @@ export async function chat(opts = {}) {
 }
 
 /** 单次 OpenAI 兼容 /chat/completions 调用。失败（网络/HTTP/空响应）统一抛错，由上层决定是否降级。 */
-async function callOpenAI(prov, key, { model, messages, json, temperature, maxTokens }) {
+async function callOpenAI(prov, key, { model, messages, json, temperature, maxTokens, timeout }) {
   const body = {
     model,
     messages,
@@ -66,7 +88,7 @@ async function callOpenAI(prov, key, { model, messages, json, temperature, maxTo
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(timeout ?? 60_000),
     });
   } catch (e) {
     throw new Error(`网络请求失败: ${e?.message || e}`);
