@@ -137,6 +137,7 @@ export async function answerQuestion(question) {
   if (!q) return { answer: '请输入你的问题。', fromWeb: false };
 
   const { contexts, sources } = await retrieveInSite(q);
+  console.log('[chat][answer] contexts=', contexts.length, 'firstContentLen=', (contexts[0] || '').length);
 
   // Layer 1：站内命中足够 → 站内 RAG 总结
   if (contexts.length > 0) {
