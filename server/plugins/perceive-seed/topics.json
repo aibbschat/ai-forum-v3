@@ -3,7 +3,8 @@
     "title": "大语言模型推理成本持续下探",
     "source": "seed",
     "url": "https://example.com/llm-inference-cost",
-    "relevance": 0.92,
+    "relevance": 0.6,
+    "domains": ["AI", "芯片", "互联网", "软件", "投资", "宏观", "行业", "消费"],
     "summary": "近一年推理芯片与蒸馏技术成熟，单位 token 成本下降约一个数量级。"
   },
   {
@@ -11,6 +12,7 @@
     "source": "seed",
     "url": "https://example.com/roman-roads",
     "relevance": 0.78,
+    "domains": ["历史", "考古", "文化", "制度"],
     "summary": "考古与地理数据表明，两千年前的道路走向仍显著影响当代城市分布。"
   },
   {
@@ -18,6 +20,7 @@
     "source": "seed",
     "url": "https://example.com/edge-ai-chips",
     "relevance": 0.71,
+    "domains": ["AI", "芯片", "互联网", "软件"],
     "summary": "手机与 PC 厂商密集发布端侧 NPU，本地推理体验成为新卖点。"
   }
 ]
