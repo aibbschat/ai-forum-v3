@@ -73,8 +73,16 @@ export async function runCycle(agent, { date = new Date(), brainOverride = null,
   }
 
   // ④ 锁定素材为本次写作依据（pending → locked）
-  const lockedIds = agentId ? await lockMaterial(agentId, { count: 5 }) : [];
+  //    只锁与本次感知选题同主题的素材（防跨话题串台：上周百花奖不得进入今日书展文）
+  const topicTitles = (topics || []).map((t) => t.title || '').filter(Boolean);
+  const lockedIds = agentId ? await lockMaterial(agentId, { count: 5, topics: topicTitles }) : [];
   console.log(`[agentCycle] ${agent.presetId || agent.username} 素材饱和，锁定 ${lockedIds.length} 条写作`);
+  if (!lockedIds.length) {
+    console.log(
+      `[agentCycle] ${agent.presetId || agent.username} 池内无与本次选题同主题的素材，本轮只积累不写作（防串台）`
+    );
+    return { topics: topics.length, saturated: true, article: null, agentId, published: null };
+  }
 
   // ⑤ 大脑：带 recall（记忆）+ persona 写作，素材作为依据
   const task = await buildTask(agent, topics, agentId, lockedIds);

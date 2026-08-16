@@ -17,6 +17,8 @@ import {
   consolidate,
   summarizeEpisodics,
   createLlmSummarizer,
+  lockMaterial,
+  listMaterialPool,
   SUSPECT_THRESHOLD,
 } from '../services/memory/index.js';
 
@@ -393,4 +395,46 @@ test('非法入参被拒（agentId / 空内容）', async () => {
     () => writeSemantic({ agentId: AGENT_MISC, domain: 'd', understanding: '' }),
     /understanding/
   );
+});
+
+// ── 主题聚焦锁定（2026-08-16 修复：防跨话题串台）───────────────────
+const AGENT_LOCK = 9006; // 主题锁定专用（避开 AGENT_LLM=9005）
+
+test('lockMaterial 按选题关键词只锁同主题素材，跨主题素材留在池中', async () => {
+  const db = getDb();
+  // 同主题两条：今日书展 / 莫言；跨主题两条：百花奖 / LLM 成本
+  await writeEpisodic({ agentId: AGENT_LOCK, content: '[新华网] 2026上海书展：AI书籍集中涌现，读者排队预约莫言新书《人呐》', source: 'perceive', importance: 0.7, status: 'pending' });
+  await writeEpisodic({ agentId: AGENT_LOCK, content: '[上观] 书展现场：AI 冲击下深度阅读为何依然珍贵', source: 'perceive', importance: 0.6, status: 'pending' });
+  await writeEpisodic({ agentId: AGENT_LOCK, content: '[央广] 百花奖与CMG电影文化嘉年华：票根经济带火暑期文旅', source: 'perceive', importance: 0.8, status: 'pending' });
+  await writeEpisodic({ agentId: AGENT_LOCK, content: '[行业] 大语言模型推理成本持续下探', source: 'perceive', importance: 0.9, status: 'pending' });
+
+  const ids = await lockMaterial(AGENT_LOCK, { count: 5, topics: ['书展 莫言 新书', 'AI 书籍 排队 预约'] });
+
+  assert.equal(ids.length, 2, '应只锁定与选题同主题的 2 条书展素材');
+  const locked = await listMaterialPool(AGENT_LOCK, { status: 'locked' });
+  assert.equal(locked.length, 2);
+  assert.ok(locked.every((m) => /书展|莫言|AI 书/.test(m.content)), '锁定的素材都应属书展主题');
+
+  // 跨主题素材仍是 pending，未被锁定
+  const pending = await listMaterialPool(AGENT_LOCK, { status: 'pending' });
+  assert.ok(pending.some((m) => /百花奖/.test(m.content)), '百花奖素材应仍在 pending');
+  assert.ok(pending.some((m) => /推理成本/.test(m.content)), 'LLM 成本素材应仍在 pending');
+});
+
+test('lockMaterial 无同主题素材时返回空（本轮不写，防串台）', async () => {
+  await writeEpisodic({ agentId: AGENT_LOCK, content: '[央广] 百花奖与CMG电影文化嘉年华：票根经济', source: 'perceive', importance: 0.8, status: 'pending' });
+  const ids = await lockMaterial(AGENT_LOCK, { count: 5, topics: ['完全无关的核聚变发电技术'] });
+  assert.deepEqual(ids, [], '无匹配素材应返回空，让本轮只积累不写作');
+  const still = await listMaterialPool(AGENT_LOCK, { status: 'pending' });
+  assert.ok(still.some((m) => /百花奖/.test(m.content)), '百花奖素材应未被锁定');
+});
+
+test('lockMaterial 不传 topics 时保持旧行为（按 importance 锁前 count 条）', async () => {
+  const db = getDb();
+  await writeEpisodic({ agentId: AGENT_LOCK, content: '[测试] 主题 A 素材', source: 'perceive', importance: 0.5, status: 'pending' });
+  await writeEpisodic({ agentId: AGENT_LOCK, content: '[测试] 主题 B 素材', source: 'perceive', importance: 0.6, status: 'pending' });
+  const ids = await lockMaterial(AGENT_LOCK, { count: 2 });
+  assert.equal(ids.length, 2, '不传 topics 应锁前 2 条');
+  const locked = await listMaterialPool(AGENT_LOCK, { status: 'locked' });
+  assert.equal(locked.length >= 2, true);
 });

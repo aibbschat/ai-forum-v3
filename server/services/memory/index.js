@@ -165,14 +165,67 @@ export async function materialSaturation(agentId, { minCount = 3, minScore = 1.5
 }
 
 /**
+ * 把中文文本拆成检索词（去标点 + 中文二元组 + 空格分词），用于素材相关性匹配。
+ * 与 chatService.toTerms 同思路：OR 检索比整句 LIKE 更可能命中。
+ */
+function toMatchTerms(text) {
+  const cleaned = (text || '').replace(/[？?！!，,。.、：:；;""''（）()【】\[\]《》<>/\\|+\-_*=~`@#$%^&]/g, ' ').trim();
+  const terms = new Set();
+  cleaned.split(/\s+/).forEach((t) => {
+    if (t.length >= 2) terms.add(t);
+  });
+  const cjk = cleaned.replace(/[a-zA-Z0-9\s]/g, '');
+  for (let i = 0; i + 2 <= cjk.length; i++) {
+    const bg = cjk.slice(i, i + 2);
+    if (/[一-龥]{2}/.test(bg)) terms.add(bg);
+  }
+  return Array.from(terms);
+}
+
+/**
  * 锁定素材为写作依据（pending → locked）。
  * 发布成功后调用 markMaterialUsed 把同一批标为 used（防重复）。
  * @param {number} agentId
- * @param {{count?:number}} [opts] 锁定条数
+ * @param {{count?:number, topics?:string[]}} [opts]
+ *   topics：本次选题关键词（来自当次感知），传入后只锁定与选题【同主题】的素材，
+ *   避免把跨话题的历史 pending 素材（如上周百花奖）串进这篇文章。
+ *   不传 topics → 保持旧行为（按 importance 锁前 count 条）。
  * @returns {Promise<number[]>} 锁定的素材 id 列表
  */
-export async function lockMaterial(agentId, { count = 5 } = {}) {
+export async function lockMaterial(agentId, { count = 5, topics = null } = {}) {
   const id = requireAgentId(agentId);
+  // 相关主题锁定：拉取更多候选，用选题关键词打分筛出同主题簇
+  if (Array.isArray(topics) && topics.length > 0) {
+    const terms = new Set();
+    for (const t of topics) toMatchTerms(t).forEach((w) => terms.add(w));
+    const termList = Array.from(terms);
+    if (termList.length) {
+      const pool = await listMaterialPool(id, { status: 'pending', limit: 20 });
+      if (pool.length === 0) return [];
+      // 按「命中词数」打分；命中多词者优先（主题更贴合）
+      const scored = pool
+        .map((m) => {
+          const text = m.content || '';
+          let hit = 0;
+          for (const w of termList) if (text.includes(w)) hit += 1;
+          return { m, hit };
+        })
+        .filter((x) => x.hit > 0)
+        .sort((a, b) => b.hit - a.hit || b.m.importance - a.m.importance);
+      if (scored.length === 0) {
+        console.log(`[memory] lockMaterial(${id}) 池中无与选题「${topics.join(' / ')}」相关的素材，本轮不锁（素材继续积累）`);
+        return [];
+      }
+      const picked = scored.slice(0, count).map((x) => x.m.id);
+      await db.run(
+        `UPDATE memory_episodic SET status = 'locked' WHERE agent_id = ? AND id IN (${picked.map(() => '?').join(',')})`,
+        [id, ...picked]
+      );
+      return picked;
+    }
+  }
+
+  // 旧行为：无 topics / 无词，按 importance 锁前 count 条
   const pool = await listMaterialPool(id, { status: 'pending', limit: count });
   if (pool.length === 0) return [];
   const ids = pool.map((m) => m.id);
