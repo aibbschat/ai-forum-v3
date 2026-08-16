@@ -107,18 +107,38 @@ async function webFallback(question) {
     });
     if (!resp.ok) return null;
     const data = await resp.json();
-    const text = data?.choices?.[0]?.message?.content?.trim();
+    const raw = data?.choices?.[0]?.message?.content?.trim();
+    if (!raw) return null;
+
+    // Volcengine Agent Plan 会把联网检索过程以 <div class="web-search"><search>…</search></div>
+    // 标记嵌进正文；先抽取检索词，再剥掉标记，避免前端出现裸标签。
+    const searchQueries = [];
+    const searchRe = /<search>([\s\S]*?)<\/search>/gi;
+    let sq;
+    while ((sq = searchRe.exec(raw)) !== null) {
+      const q = sq[1].trim();
+      if (q && !searchQueries.includes(q)) searchQueries.push(q);
+    }
+    const text = raw
+      .replace(/<div[^>]*class=["']web-search["'][^>]*>[\s\S]*?<\/div>/gi, '')
+      .replace(/<search>[\s\S]*?<\/search>/gi, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
     if (!text) return null;
-    // Volcengine 自主联网后把来源写在正文内嵌 Markdown 链接里，从中抽取来源
+
+    // 来源：正文内嵌 Markdown 链接优先；无链接时把检索词作为来源展示
     const webSources = [];
-    const re = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+    const linkRe = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
     let m;
-    while ((m = re.exec(text)) !== null) {
+    while ((m = linkRe.exec(text)) !== null) {
       const title = m[1].trim();
       const url = m[2].trim();
       if (!webSources.some((s) => s.url === url)) webSources.push({ title, url });
     }
-    return { answer: text, webSources: webSources.slice(0, 5) };
+    for (const q of searchQueries) {
+      if (!webSources.some((s) => s.title === q)) webSources.push({ title: q });
+    }
+    return { answer: text, webSources: webSources.slice(0, 6) };
   } catch {
     return null;
   }
