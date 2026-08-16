@@ -17,10 +17,11 @@ export const PROVIDERS = {
     chatUrl: () =>
       process.env.DEEPSEEK_ENDPOINT ?? 'https://ark.cn-beijing.volces.com/api/plan/v3/chat/completions',
   },
-  // 备用：DeepSeek（主用限流/宕机时自动接管，密钥经 LLM_DEEPSEEK_API_KEY 注入；未配则自动跳过）
+  // 备用：DeepSeek（主用限流/宕机时自动接管，密钥须经 LLM_DEEPSEEK_API_KEY 显式注入；
+  //       未配则该供应商被视为「未启用」自动跳过，绝不会拿主用 key 误打备用端点）。
   deepseek: {
     label: 'DeepSeek',
-    apiKey: () => process.env.LLM_DEEPSEEK_API_KEY ?? process.env.DEEPSEEK_API_KEY,
+    apiKey: () => process.env.LLM_DEEPSEEK_API_KEY,
     chatUrl: () => process.env.LLM_DEEPSEEK_ENDPOINT ?? 'https://api.deepseek.com/chat/completions',
   },
 };
