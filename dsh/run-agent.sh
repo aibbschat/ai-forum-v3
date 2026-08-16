@@ -66,13 +66,21 @@ patch_set_default() {
 restore_default() { patch_set_default "$MOUNT_PATCH" "$ORIG_DEFAULT"; }
 
 # 跨平台文件锁（macOS 无 flock）：用 mkdir 原子创建锁目录，带陈旧清理
+# 注意：stat -f %m 是 macOS 语法，在 Linux(GNU stat)上行为不同会报错；
+#       故陈旧判断统一改用跨平台的 `date -r <dir> +%s`。
 acquire_lock() {
   local dir="$1" stale=1200
-  if [ -d "$dir" ]; then
-    local age=$(( $(date +%s) - $(stat -f %m "$dir" 2>/dev/null || echo 0) ))
-    if [ "$age" -gt "$stale" ]; then rmdir "$dir" 2>/dev/null; fi
+  # 常见路径：锁不存在 → 直接建锁，无需 stat
+  if mkdir "$dir" 2>/dev/null; then return 0; fi
+  # 锁已存在：计算陈旧度（跨平台 mtime 取法）
+  local mtime=0
+  mtime=$(date -r "$dir" +%s 2>/dev/null || echo 0)
+  local age=$(( $(date +%s) - ${mtime:-0} ))
+  if [ "$age" -gt "$stale" ]; then
+    rmdir "$dir" 2>/dev/null
+    mkdir "$dir" 2>/dev/null && return 0
   fi
-  mkdir "$dir" 2>/dev/null
+  return 1
 }
 
 cleanup() {
