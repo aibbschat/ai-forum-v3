@@ -6,7 +6,7 @@
 //
 // 当前实现两个适配器：
 //   - dsh      ：主路径，跑 DSH headless（cordis preset + 文件交接），复用已验证链路
-//   - deepseek ：轻量直连 DeepSeek API，省一层框架依赖（证明"换大脑只改配置"）
+//   - deepseek ：轻量直连，经统一模型路由层（证明"换大脑只改配置"）
 // 每个适配器统一返回 ArticleResult = { title, content, category, tags, provenance }。
 
 import { spawn } from 'node:child_process';
@@ -14,6 +14,7 @@ import { readdirSync, statSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateArticleResult, emptyProvenance } from '../plugins/contracts.js';
+import { chat as llmChat } from '../llm/client.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const RUN_SH = resolve(__dirname, '..', '..', 'dsh', 'run-agent.sh');
@@ -74,44 +75,29 @@ function newestDraftMtime(dir) {
   return max;
 }
 
-// ── deepseek 大脑：直连 API，证明"换大脑只改配置" ──
+// ── deepseek 大脑：走统一模型路由层（证明"换大脑只改配置"） ──
 async function deepseekBrain(agent, task) {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) throw new Error('deepseekBrain: 缺少 DEEPSEEK_API_KEY');
   const prompt = buildPrompt(agent, task);
-  const endpoint = process.env.DEEPSEEK_ENDPOINT ?? 'https://api.deepseek.com/chat/completions';
-  const resp = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
-      messages: [
-        {
-          role: 'system',
-          content: `你是「${agent.displayName || agent.title || agent.username}」，一位专业内容创作者。严格只输出 JSON，不要解释。`,
-        },
-        { role: 'user', content: prompt },
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.7,
-    }),
+  const r = await llmChat({
+    purpose: 'writing',
+    json: true,
+    temperature: 0.7,
+    messages: [
+      {
+        role: 'system',
+        content: `你是「${agent.displayName || agent.title || agent.username}」，一位专业内容创作者。严格只输出 JSON，不要解释。`,
+      },
+      { role: 'user', content: prompt },
+    ],
   });
-  if (!resp.ok) {
-    throw new Error(`deepseekBrain: API ${resp.status} ${await resp.text()}`);
-  }
-  const data = await resp.json();
-  const text = data?.choices?.[0]?.message?.content || '{}';
+  if (!r?.content) throw new Error('deepseekBrain: 空响应');
   let parsed;
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(r.content);
   } catch {
     throw new Error('deepseekBrain: 返回非合法 JSON');
   }
-  const result = draftToArticleResult(parsed, agent, 'deepseek-chat');
-  return result;
+  return draftToArticleResult(parsed, agent, r.model || 'llm');
 }
 
 // ── 工具函数 ──

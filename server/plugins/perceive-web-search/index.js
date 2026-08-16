@@ -2,18 +2,17 @@
 // 感知源①：联网检索（TECH-SPEC §7.3 接缝①「web_search 或 RSS」）。
 // default export 实现 perceive 契约：返回 3~maxTopics 条 Topic。
 //
-// ⚠️ 实现路径（2026-08-16 切换 Volcengine Agent Plan）：
-//   走 Volcengine Agent Plan 的 OpenAI 兼容路由（base 见 config.js 的 PERCEIVE_WEB_SEARCH_ENDPOINT，
-//   再拼 /chat/completions）。Agent Plan 自带自主联网能力，无需显式 web_search 工具，
-//   直接按指令返回 JSON 数组（见 callDeepSeekSearch）。
-//   模型默认 ark-code-latest（Auto 路由）。鉴权用 DEEPSEEK_API_KEY（已改为 Volcengine Key）。
+// 实现路径（2026-08-16 收口统一模型路由层 server/llm）：
+//   经 llm.chat({ purpose:'perceive' }) 调用，多供应商可插拔 + 自动降级。
+//   自主联网由供应商决定（Volcengine Agent Plan 默认开启），直接按指令返回 JSON 数组。
 //
 // 铁律：本源【绝不抛错中断编排器】。任何网络/解析失败都返回空 topics，
 //       由 service/perception/index.js 的 try/catch 做单源隔离（§16.8）。
 
 import { getConfig } from './config.js';
+import { chat as llmChat } from '../../llm/client.js';
 
-const SOURCE = '联网检索 (Volcengine Agent Plan)';
+const SOURCE = '联网检索 (统一模型路由层)';
 
 /** 从文本中尽力抽取第一个 JSON 数组。 */
 function extractJsonArray(text) {
@@ -99,28 +98,16 @@ async function callDeepSeekSearch(agent, date, cfg) {
     `{"title":"主题标题","url":"来源链接(可选)","relevance":0.0~1.0,"summary":"一句话摘要"}，` +
     `共 3~${cfg.maxTopics} 条，按相关性降序。不要输出任何额外文字或解释。`;
 
-  const resp = await fetch(`${cfg.endpoint}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${cfg.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: cfg.model,
-      max_tokens: cfg.maxTokens,
-      messages: [{ role: 'user', content: prompt }],
-    }),
+  // 走统一模型路由层（自主联网由供应商决定；Volcengine Agent Plan 默认开启）
+  const r = await llmChat({
+    purpose: 'perceive',
+    maxTokens: cfg.maxTokens,
+    messages: [{ role: 'user', content: prompt }],
   });
+  if (!r?.content) return [];
 
-  if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status}: ${(await resp.text().catch(() => '')).slice(0, 200)}`);
-  }
-
-  const data = await resp.json();
-  const text = data?.choices?.[0]?.message?.content ?? '';
-
-  // Volcengine Agent Plan 自主联网后，按指令在正文里直接吐 JSON 数组（路径 A）
-  const parsed = extractJsonArray(text);
+  // 模型按指令在正文里直接吐 JSON 数组（路径 A）
+  const parsed = extractJsonArray(r.content);
   if (parsed && parsed.length) {
     const topics = parsed.map((t, i) => toTopic(t, 0.9 - i * 0.1)).filter(Boolean);
     return await enrichTopics(topics, cfg); // 素材库：抓全文
@@ -149,12 +136,8 @@ const plugin = {
   type: 'perceive',
   async perceive(agent, date = new Date()) {
     const cfg = getConfig();
-    // 无 key：优雅降级为空，不触发任何网络（避免无谓失败）
-    if (!cfg.apiKey) {
-      console.warn('[perceive-web-search] 未设置 DEEPSEEK_API_KEY，跳过该源');
-      return [];
-    }
     try {
+      // 无可用供应商时 llm.chat 返回 null，callDeepSeekSearch 自然返回空（绝不向上抛）
       return await callDeepSeekSearch(agent, date, cfg);
     } catch (e) {
       // 单源故障：返回空，绝不向上抛（编排器另有隔离层）

@@ -7,9 +7,8 @@
 
 import { db, isMaria } from '../database/db.js';
 import { listArticles } from './postService.js';
+import { chat as llmChat } from '../llm/client.js';
 
-const DEEPSEEK_ENDPOINT = process.env.DEEPSEEK_ENDPOINT ?? 'https://api.deepseek.com/chat/completions';
-const MODEL = process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
 const CACHE_HOURS = 6;
 const FALLBACK = 'AI 圈驻站专家持续产出跨领域专业洞察，欢迎探索。';
 
@@ -49,11 +48,8 @@ export async function getTodayInsight() {
   return { text, generatedAt: null, cached: false };
 }
 
-/** 调用 DeepSeek 基于最新文章生成一句导语；任何异常返回 null（由调用方回退）。 */
+/** 调用统一模型路由层生成一句导语；任何异常返回 null（由调用方回退）。 */
 async function generateInsight() {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) return null;
-
   const articles = await listArticles({ sort: 'latest', limit: 8 });
   if (!articles?.length) return null;
 
@@ -66,33 +62,22 @@ async function generateInsight() {
     '点出今天的专业看点。\n要求：客观平实、不标题党、不用问句、不要出现“今日”二字。\n文章：\n' +
     bullets;
 
-  // deepseek-v4-flash 为推理模型，常把 token 花在 reasoning 上；
-  // 预算不足会导致 content 为空，故用递增预算重试（1500→3000）确保产出。
-  const budgets = [1500, 3000];
-  for (const maxTokens of budgets) {
-    let resp;
+  // 推理模型预算不足会导致 content 为空，故用递增预算重试（1500→3000）确保产出。
+  for (const maxTokens of [1500, 3000]) {
     try {
-      resp = await fetch(DEEPSEEK_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: MODEL,
-          messages: [
-            { role: 'system', content: '你是严谨的中文专业内容编辑，只输出一句导语，不要解释、不要引号。' },
-            { role: 'user', content: prompt },
-          ],
-          max_tokens: maxTokens,
-          temperature: 0.6,
-        }),
+      const r = await llmChat({
+        purpose: 'insight',
+        maxTokens,
+        temperature: 0.6,
+        messages: [
+          { role: 'system', content: '你是严谨的中文专业内容编辑，只输出一句导语，不要解释、不要引号。' },
+          { role: 'user', content: prompt },
+        ],
       });
+      if (r?.content) return r.content.replace(/^["'「『]|["'」』]$/g, '');
     } catch {
-      continue;
+      // 重试更大预算 / 下一家供应商
     }
-    if (!resp.ok) continue;
-
-    const data = await resp.json().catch(() => null);
-    const raw = data?.choices?.[0]?.message?.content?.trim();
-    if (raw) return raw.replace(/^["'「『]|["'」』]$/g, '');
   }
   return null;
 }

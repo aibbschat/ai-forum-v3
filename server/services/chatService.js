@@ -9,9 +9,7 @@
 // - ark-code-latest 走 Auto 路由；保留递增预算重试（1500→3000）以兼容推理模型预算行为。
 
 import { search } from './searchService.js';
-
-const DEEPSEEK_ENDPOINT = process.env.DEEPSEEK_ENDPOINT ?? 'https://api.deepseek.com/chat/completions';
-const MODEL = process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
+import { chat as llmChat } from '../llm/client.js';
 
 /** 把自然语言问题拆成检索词（去标点 + 中文二元 + 空格分词），用于 OR 检索。 */
 function toTerms(q) {
@@ -59,89 +57,68 @@ async function retrieveInSite(question) {
   return { contexts, sources };
 }
 
-/** 调用 DeepSeek chat/completions（带推理模型预算重试）。 */
+/** Layer1 站内总结：走统一模型路由层（多供应商自动降级）。 */
 async function callDeepSeek(messages, { temperature = 0.5 } = {}) {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) return null;
   for (const maxTokens of [1500, 3000]) {
-    let resp;
     try {
-      resp = await fetch(DEEPSEEK_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: MODEL, messages, max_tokens: maxTokens, temperature }),
-      });
+      const r = await llmChat({ purpose: 'chat', messages, temperature, maxTokens });
+      if (r?.content) return r.content;
     } catch {
-      continue;
+      // 尝试更大预算重试（兼容推理模型预算不足导致空响应）
     }
-    if (!resp.ok) continue;
-    const data = await resp.json().catch(() => null);
-    const raw = data?.choices?.[0]?.message?.content?.trim();
-    if (raw) return raw;
   }
   return null;
 }
 
-/** 联网兜底：调 Volcengine Agent Plan（OpenAI 兼容路由）自主联网检索，返回 { answer, webSources }。 */
+/** 联网兜底：走统一模型路由层（Volcengine Agent Plan 自主联网，自动降级备用供应商）。
+ *  返回 { answer, webSources }，并清洗 Agent Plan 内联的联网检索标记。 */
 async function webFallback(question) {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) return null;
-  try {
-    const resp = await fetch(DEEPSEEK_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 1500,
-        temperature: 0.5,
-        messages: [
-          {
-            role: 'system',
-            content:
-              '你是 AI 圈联网问答助手。请联网检索后，用中文专业、客观地回答用户问题，去 AI 味、不标题党。' +
-              '若引用了网页，请在回答中以内嵌 Markdown 链接 [标题](URL) 标注来源（可多条）。',
-          },
-          { role: 'user', content: question },
-        ],
-      }),
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    const raw = data?.choices?.[0]?.message?.content?.trim();
-    if (!raw) return null;
+  const r = await llmChat({
+    purpose: 'chat',
+    maxTokens: 1500,
+    temperature: 0.5,
+    messages: [
+      {
+        role: 'system',
+        content:
+          '你是 AI 圈联网问答助手。请联网检索后，用中文专业、客观地回答用户问题，去 AI 味、不标题党。' +
+          '若引用了网页，请在回答中以内嵌 Markdown 链接 [标题](URL) 标注来源（可多条）。',
+      },
+      { role: 'user', content: question },
+    ],
+  });
+  if (!r?.content) return null;
+  const raw = r.content;
 
-    // Volcengine Agent Plan 会把联网检索过程以 <div class="web-search"><search>…</search></div>
-    // 标记嵌进正文；先抽取检索词，再剥掉标记，避免前端出现裸标签。
-    const searchQueries = [];
-    const searchRe = /<search>([\s\S]*?)<\/search>/gi;
-    let sq;
-    while ((sq = searchRe.exec(raw)) !== null) {
-      const q = sq[1].trim();
-      if (q && !searchQueries.includes(q)) searchQueries.push(q);
-    }
-    const text = raw
-      .replace(/<div[^>]*class=["']web-search["'][^>]*>[\s\S]*?<\/div>/gi, '')
-      .replace(/<search>[\s\S]*?<\/search>/gi, '')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-    if (!text) return null;
-
-    // 来源：正文内嵌 Markdown 链接优先；无链接时把检索词作为来源展示
-    const webSources = [];
-    const linkRe = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
-    let m;
-    while ((m = linkRe.exec(text)) !== null) {
-      const title = m[1].trim();
-      const url = m[2].trim();
-      if (!webSources.some((s) => s.url === url)) webSources.push({ title, url });
-    }
-    for (const q of searchQueries) {
-      if (!webSources.some((s) => s.title === q)) webSources.push({ title: q });
-    }
-    return { answer: text, webSources: webSources.slice(0, 6) };
-  } catch {
-    return null;
+  // Volcengine Agent Plan 会把联网检索过程以 <div class="web-search"><search>…</search></div>
+  // 标记嵌进正文；先抽取检索词，再剥掉标记，避免前端出现裸标签。
+  const searchQueries = [];
+  const searchRe = /<search>([\s\S]*?)<\/search>/gi;
+  let sq;
+  while ((sq = searchRe.exec(raw)) !== null) {
+    const q = sq[1].trim();
+    if (q && !searchQueries.includes(q)) searchQueries.push(q);
   }
+  const text = raw
+    .replace(/<div[^>]*class=["']web-search["'][^>]*>[\s\S]*?<\/div>/gi, '')
+    .replace(/<search>[\s\S]*?<\/search>/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  if (!text) return null;
+
+  // 来源：正文内嵌 Markdown 链接优先；无链接时把检索词作为来源展示
+  const webSources = [];
+  const linkRe = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+  let m;
+  while ((m = linkRe.exec(text)) !== null) {
+    const title = m[1].trim();
+    const url = m[2].trim();
+    if (!webSources.some((s) => s.url === url)) webSources.push({ title, url });
+  }
+  for (const q of searchQueries) {
+    if (!webSources.some((s) => s.title === q)) webSources.push({ title: q });
+  }
+  return { answer: text, webSources: webSources.slice(0, 6) };
 }
 
 /**

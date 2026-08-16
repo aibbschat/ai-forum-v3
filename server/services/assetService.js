@@ -7,9 +7,7 @@
 //   2. 封面：按分类+标题生成本地 SVG data URI（零依赖、可控美观、无 CDN）
 // 铁律：任何失败一律静默降级（无图），绝不阻塞发布。
 
-const DEEPSEEK_ENDPOINT =
-  process.env.DEEPSEEK_ENDPOINT ?? 'https://api.deepseek.com/chat/completions';
-const MODEL = process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
+import { chat as llmChat } from '../llm/client.js';
 
 // ---------------------------------------------------------------------------
 // 1. chart 提取（LLM 驱动，可注入）
@@ -34,11 +32,8 @@ export async function extractChartsFromText(article, { llmExtractor } = {}) {
   }
 }
 
-/** 默认 LLM 提取器（DeepSeek chat/completions + json_object）。无 key 直接跳过。 */
+/** 默认 LLM 提取器：走统一路由层（json_object）。无可用供应商时返回空，由上层静默降级。 */
 async function defaultLlmExtractor(text) {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) return { charts: [] };
-
   const prompt = `你是数据可视化助手。从下面的文章正文中提取可量化的对比数据，生成 1-3 个图表。
 要求：
 - 只提取正文明确给出的数字对比（如市占率变化、营收/利润增长、性能倍数、多主体/多年份对比）
@@ -46,25 +41,19 @@ async function defaultLlmExtractor(text) {
 - 优先选最有说服力的 1-2 组；没有可量化的对比数据就返回空数组
 - 只输出 JSON，格式：{"charts":[{"title":"...","labels":["..."],"values":[10,20]}]}`;
 
-  const resp = await fetch(DEEPSEEK_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [
-        { role: 'system', content: '你只输出合法 JSON，不输出任何其他内容。' },
-        { role: 'user', content: `${prompt}\n\n正文：\n${text}` },
-      ],
-      response_format: { type: 'json_object' },
-      max_tokens: 800,
-      temperature: 0.2,
-    }),
+  const r = await llmChat({
+    purpose: 'vision',
+    json: true,
+    maxTokens: 800,
+    temperature: 0.2,
+    messages: [
+      { role: 'system', content: '你只输出合法 JSON，不输出任何其他内容。' },
+      { role: 'user', content: `${prompt}\n\n正文：\n${text}` },
+    ],
   });
-  if (!resp.ok) throw new Error(`llm_http_${resp.status}`);
-  const j = await resp.json();
-  const raw = j?.choices?.[0]?.message?.content;
-  if (!raw) throw new Error('empty_llm_output');
-  return JSON.parse(raw);
+  // 无供应商 / 空响应 → 返回空，由 extractChartsFromText 静默降级 []
+  if (!r?.content) return { charts: [] };
+  return JSON.parse(r.content);
 }
 
 /** 归一化 LLM 输出为合规 chart assets（契约白名单校验）。 */
