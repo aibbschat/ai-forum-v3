@@ -51,6 +51,6 @@ export async function searchArticlesByTerms(conds, params) {
      ORDER BY p.created_at DESC LIMIT 8`,
     params
   );
-  return rows.map((a) => normalizeArticle(a, true));
+  return rows.map((a) => normalizeArticle(a, { includeContent: true }));
 }
 
