@@ -14,22 +14,45 @@ const DEEPSEEK_ENDPOINT = process.env.DEEPSEEK_ENDPOINT ?? 'https://api.deepseek
 const DEEPSEEK_ANTHROPIC = process.env.DEEPSEEK_ANTHROPIC_ENDPOINT ?? 'https://api.deepseek.com/anthropic/v1/messages';
 const MODEL = process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
 
-/** 站内检索 + 拼上下文。 */
+/** 把自然语言问题拆成检索词（去标点 + 中文二元 + 空格分词），用于 OR 检索。 */
+function toTerms(q) {
+  const cleaned = (q || '').replace(/[？?！!，,。.、：:；;""''（）()【】\[\]《》<>/\\|+\-_*=~`@#$%^&]/g, ' ').trim();
+  const terms = new Set();
+  // 空格/分隔符分词（含英文词）
+  cleaned.split(/\s+/).forEach((t) => {
+    if (t.length >= 2) terms.add(t);
+  });
+  // 中文二元组（相邻两字），捕获「明朝」「财政」这类核心词
+  const cjk = cleaned.replace(/[a-zA-Z0-9\s]/g, '');
+  for (let i = 0; i + 2 <= cjk.length; i++) {
+    const bg = cjk.slice(i, i + 2);
+    if (/[一-龥]{2}/.test(bg)) terms.add(bg);
+  }
+  return Array.from(terms).slice(0, 6);
+}
+
+/** 站内检索 + 拼上下文。多词 OR 检索，避免「整句 LIKE」搜不到。 */
 async function retrieveInSite(question) {
-  const { articles } = await search({ q: question, type: 'article', limit: 8 });
-  if (!articles?.length) return { contexts: [], sources: [] };
+  const terms = toTerms(question);
+  if (!terms.length) return { contexts: [], sources: [] };
+
+  // 构造 OR 检索：每个词匹配 title 或 content
+  const conds = [];
+  const params = [];
+  for (const t of terms) {
+    conds.push('(p.title LIKE ? OR p.content LIKE ?)');
+    params.push(`%${t}%`, `%${t}%`);
+  }
+  const rows = await (await import('./searchService.js')).searchArticlesByTerms(conds, params);
+  if (!rows.length) return { contexts: [], sources: [] };
 
   const contexts = [];
   const sources = [];
-  for (const a of articles.slice(0, 6)) {
+  for (const a of rows.slice(0, 6)) {
     const text = (a.content || '').replace(/\s+/g, ' ').slice(0, 600);
     if (text.length < 20) continue;
     contexts.push(`【文章】《${a.title}》· 作者：${a.author?.name || '未知'}\n${text}`);
-    sources.push({
-      title: a.title,
-      author: a.author?.name || '未知',
-      articleId: a.id,
-    });
+    sources.push({ title: a.title, author: a.author?.name || '未知', articleId: a.id });
   }
   return { contexts, sources };
 }
