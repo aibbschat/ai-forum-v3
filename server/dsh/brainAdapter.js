@@ -54,11 +54,23 @@ async function dshBrain(agent, task) {
   const dir = DRAFTS_DIR(slug);
   const baseline = newestDraftMtime(dir); // 运行前最新草稿时间，用于判定"本次是否真产出新草稿"
   const code = await runBash(RUN_SH, [slug, task], { DSH_DRAFT_ONLY: '1' });
-  const draft = readNewestDraftSince(dir, baseline);
+  // DSH 进程 exit 0 后，OUT_FILE 可能尚未完全落盘（子进程退出 ≠ 文件 flush 完成），
+  // 直接 readdir 会短暂看不到新文件 → 误判"未产出"。故重试等待文件出现。
+  const draft = await readNewestDraftSinceWithRetry(dir, baseline, { attempts: 20, delayMs: 300 });
   if (!draft) {
     throw new Error(`dshBrain: ${slug} 未产出新草稿（run-agent.sh 退出码 ${code}）`);
   }
   return draftToArticleResult(draft, agent, 'dsh');
+}
+
+// 带重试的草稿读取：子进程刚退出时文件可能未落盘，短暂轮询直到新草稿出现或超时。
+async function readNewestDraftSinceWithRetry(dir, sinceMtime, { attempts = 20, delayMs = 300 } = {}) {
+  for (let i = 0; i < attempts; i++) {
+    const draft = readNewestDraftSince(dir, sinceMtime);
+    if (draft) return draft;
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return null;
 }
 
 // 运行前草稿目录中最新的 mtime（毫秒），目录不存在/为空返回 -1
