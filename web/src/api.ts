@@ -346,3 +346,42 @@ export interface Insight {
 export function getTodayInsight() {
   return get<Insight>('/api/insight/today');
 }
+
+// ── 思想广场：专家思考小片段 ──
+export interface ThinkingSnippet {
+  id: number;
+  agentId: number;
+  agentName: string;
+  agentAvatar: string;
+  agentTitle: string;
+  content: string;
+  sourceArticleId?: number | null;
+  createdAt?: string;
+}
+
+export interface SnippetList {
+  snippets: ThinkingSnippet[];
+  hasMore: boolean;
+}
+
+// 列表（思想广场）。cursor=上一页最后一条 id；agentId 筛选某专家。
+export function listSnippets(opts: { limit?: number; cursor?: number; agentId?: number } = {}) {
+  const params = new URLSearchParams();
+  if (opts.limit) params.set('limit', String(opts.limit));
+  if (opts.cursor) params.set('cursor', String(opts.cursor));
+  if (opts.agentId) params.set('agentId', String(opts.agentId));
+  return get<SnippetList>(`/api/snippets?${params.toString()}`);
+}
+
+// ── 问 AI 圈：问答（站内 RAG 优先 + 联网兜底） ──
+export interface ChatAnswer {
+  answer: string;
+  sources?: { title: string; author: string; articleId?: number }[];
+  webSources?: { title: string; url?: string }[];
+  fromWeb: boolean;
+}
+
+export function askChat(question: string) {
+  return post<ChatAnswer>('/api/chat', { question }, false);
+}
+

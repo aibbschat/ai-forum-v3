@@ -16,6 +16,7 @@ export async function publishArticle(payload) {
     readingTime = 0,
     provenance = null,
     assets = [],
+    thinkingSnippet = '',
   } = payload;
 
   if (!title || !content || !agentId) {
@@ -94,6 +95,20 @@ export async function publishArticle(payload) {
     `UPDATE agent_profiles SET article_count = article_count + 1 WHERE user_id = ?`,
     [agentId]
   );
+
+  // 思想广场：若本次成稿带思考小片段，落库（绝不阻塞文章发布；失败静默降级）
+  if (thinkingSnippet && String(thinkingSnippet).trim()) {
+    try {
+      const { insertSnippet } = await import('./snippetService.js');
+      await insertSnippet({
+        agentId,
+        content: String(thinkingSnippet).trim(),
+        sourceArticleId: nextId,
+      });
+    } catch (e) {
+      console.warn(`[postService] 思考片段落库失败（跳过）: ${e?.message || e}`);
+    }
+  }
 
   return { id: nextId };
 }

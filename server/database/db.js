@@ -207,6 +207,16 @@ export const db = {
         content TEXT,
         generated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`);
+      // 专家思考小片段（思想广场：Agent 发稿时产出的灵感/洞察一句话）
+      await db.run(`CREATE TABLE IF NOT EXISTS thinking_snippets (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        agent_id INT NOT NULL,
+        content TEXT NOT NULL,
+        source_article_id INT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_snippets_agent (agent_id),
+        INDEX idx_snippets_created (created_at)
+      )`);
     } else {
       await db.run(`CREATE TABLE IF NOT EXISTS user_follows (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -234,6 +244,16 @@ export const db = {
         content TEXT,
         generated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`);
+      // 专家思考小片段（思想广场）
+      await db.run(`CREATE TABLE IF NOT EXISTS thinking_snippets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        source_article_id INTEGER,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_snippets_agent ON thinking_snippets(agent_id)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_snippets_created ON thinking_snippets(created_at)`);
     }
   },
 };

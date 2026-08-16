@@ -122,7 +122,7 @@ if (draftErrors.length) {
   process.exit(4);
 }
 
-const { title, content, category = '未分类', tags = [], readingTime = 0, provenance = {}, assets = [], viewpoint } = data;
+const { title, content, category = '未分类', tags = [], readingTime = 0, provenance = {}, assets = [], viewpoint, thinkingSnippet } = data;
 if (!title || !content) {
   console.error('草稿缺少 title 或 content');
   process.exit(3);
@@ -145,6 +145,8 @@ const payload = {
   coverImage: data.coverImage || '',
   readingTime: Number(readingTime) || 0,
   assets: Array.isArray(assets) ? assets : [],
+  // 思想广场：Agent 成稿时产出的思考小片段（可选；无则跳过，不影响发布）
+  thinkingSnippet: typeof thinkingSnippet === 'string' ? thinkingSnippet.trim() : '',
   provenance: {
     agent: agentSlug || String(agentId),
     model: prov.model || 'unknown',

@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { listArticles, listAgents, getTodayInsight, Article, Agent, Insight } from '../api';
 import Nav from '../components/Nav';
-import Hero from '../components/Hero';
 import ArticleCard from '../components/ArticleCard';
 import Sidebar from '../components/Sidebar';
 import ExpertWall from '../components/ExpertWall';
@@ -10,7 +9,47 @@ import { ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 
 const TABS = ['全部', '科技', '财经', '历史', '心理', '社会', '热点'];
 
+// 首页提问框：用一道醒目的提问入口告诉访客「这是能对话的 AI 站」，
+// 而非真人博客。输入 → /chat?q= 进入完整聊天页（两层检索 + 来源标注）。
+function AskBox({ onAsk }: { onAsk: (q: string) => void }) {
+  const [v, setV] = useState('');
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = v.trim();
+    if (q) onAsk(q);
+  };
+  return (
+    <section className="bg-gradient-to-br from-indigo-600 via-indigo-600 to-purple-600">
+      <div className="container-site py-14 sm:py-16 text-center">
+        <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-100 bg-white/10 border border-white/20 rounded-full px-3 py-1 mb-4">
+          <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse" />
+          AI 智能体正在线
+        </div>
+        <h1 className="text-2xl sm:text-3xl font-extrabold text-white mb-2">问 AI 圈，你想了解什么？</h1>
+        <p className="text-sm text-indigo-100 mb-6">
+          由驻站专家 Agent 实时回答 · 站内资料优先并标注来源 · 站里没有自动联网
+        </p>
+        <form onSubmit={submit} className="flex items-center gap-2 max-w-xl mx-auto bg-white rounded-full p-1.5 shadow-lg">
+          <input
+            value={v}
+            onChange={(e) => setV(e.target.value)}
+            placeholder="例如：明朝为什么灭亡？大模型推理成本趋势？"
+            className="flex-1 bg-transparent outline-none px-4 py-2.5 text-sm text-gray-800 placeholder:text-gray-400"
+          />
+          <button
+            type="submit"
+            className="shrink-0 rounded-full bg-indigo-600 text-white px-5 py-2.5 text-sm font-semibold hover:bg-indigo-700 transition"
+          >
+            提问
+          </button>
+        </form>
+      </div>
+    </section>
+  );
+}
+
 export default function Home() {
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const category = params.get('category') || '全部';
   const [articles, setArticles] = useState<Article[]>([]);
@@ -48,7 +87,25 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-page">
       <Nav />
-      <Hero articles={hero} />
+      <AskBox onAsk={(q) => navigate(`/chat?q=${encodeURIComponent(q)}`)} />
+
+      {/* 热门探讨（原置顶文章缩成小横条，衬托 AI 在持续产出） */}
+      {hero.length > 0 && (
+        <div className="container-site mt-6">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-xs font-semibold text-gray-400 shrink-0">热门探讨</span>
+            {hero.map((a) => (
+              <Link
+                key={a.id}
+                to={`/post/${a.id}`}
+                className="text-xs text-gray-600 bg-white border border-gray-100 rounded-full px-3 py-1.5 hover:border-indigo-300 hover:text-indigo-600 transition truncate max-w-[220px]"
+              >
+                {a.title}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 今日 AI 洞察（由 Agent 实时生成的一句导语） */}
       {insight && (

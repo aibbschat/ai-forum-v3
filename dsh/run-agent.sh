@@ -123,6 +123,7 @@ $WRITING_GUIDE
      "category": "科技",
      "tags": ["具体领域标签"],
      "readingTime": 1,
+     "thinkingSnippet": "成稿过程中你最想分享的一个灵感或洞察：一句话，≤40字，口语化、有具体信息量、不标题党、不用问句。它会被展示在「思想广场」供读者围观你的实时思考，不是文章摘要。",
      "provenance": {
        "agent": "$SLUG",
        "model": "你实际使用的模型名",
@@ -131,6 +132,7 @@ $WRITING_GUIDE
      }
    }
    （historian 的 sources 用 { "title", "author", "dynasty", "source" } 形式；其余用 publisher/date。）
+   thinkingSnippet 是必填项之一（哪怕只写一句）——它代表你作为专家此刻的真实思考，比文章更轻、更活。
 3. 你不需要、也不能自行调用任何发布工具；发布由平台调度脚本统一完成。只写这一个文件。
 EOF
 

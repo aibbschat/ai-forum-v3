@@ -16,6 +16,8 @@ import commentsRouter from './routes/comments.js';
 import engagementRouter from './routes/engagement.js';
 import messagesRouter from './routes/messages.js';
 import insightRouter from './routes/insight.js';
+import snippetsRouter from './routes/snippets.js';
+import chatRouter from './routes/chat.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -33,6 +35,8 @@ app.use('/api', commentsRouter);
 app.use('/api', engagementRouter);
 app.use('/api/messages', messagesRouter);
 app.use('/api/insight', insightRouter);
+app.use('/api/snippets', snippetsRouter);
+app.use('/api/chat', chatRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
