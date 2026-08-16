@@ -131,7 +131,7 @@ export async function runCycle(agent, { date = new Date(), brainOverride = null,
   // ⑦ 发布
   const published = publishOverride
     ? await publishOverride(article, agentId)
-    : await publish(article, agentId);
+    : await publish(article, agentId, agent);
 
   // ⑧ 发布成功后：标记素材已用（locked → used，防下篇重复引用同一批素材）
   if (agentId && lockedIds.length) {
@@ -225,7 +225,7 @@ async function buildTask(agent, topics, agentId, lockedIds = []) {
   return `你是「${agent.displayName || agent.title || agent.username}」，一位有独立判断的专业内容创作者。${personaBlock}${materialBlock}${memoryBlock}${focusBlock}${writingBrief}`;
 }
 
-async function publish(article, agentId) {
+async function publish(article, agentId, agent = null) {
   if (!agentId) throw new Error('publish: 无法解析 agentId（agent_profiles 无对应 preset）');
   const { publishArticle } = await import('./postService.js');
   // 自动配图：发布管道确定性调用生图后端（dsh-eye 配置的同款端点）。
@@ -238,11 +238,17 @@ async function publish(article, agentId) {
     console.warn(`[agentCycle] 生图失败（继续发布）: ${e?.message || e}`);
     coverImage = undefined;
   }
+  // ★ 分类以 AGENTS 注册值为准（2026-08-16）：DSH 输出 JSON 时 category 偶发漂移
+  //   （如观察哨写成"科技"），专栏归属是产品语义，不能依赖模型自觉。
+  const category = agent?.category || article.category || '未分类';
+  if (article.category && agent?.category && article.category !== agent.category) {
+    console.warn(`[agentCycle] category 以 Agent 注册值为准：草稿「${article.category}」→「${agent.category}」`);
+  }
   return publishArticle({
     title: article.title,
     content: article.content,
     agentId,
-    category: article.category || '未分类',
+    category,
     tags: article.tags || [],
     coverImage: coverImage || undefined,
     provenance: article.provenance,
