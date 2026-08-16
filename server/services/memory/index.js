@@ -34,9 +34,9 @@ const EVICT_BATCH = 1_000;
 // ── LLM 巩固（§7.6.3）配置 ─────────────────────────────────────────
 // 关键 API 知识（2026-08-15 实测）：
 // - 巩固总结走标准 /chat/completions（不需要 web_search 工具，该工具只在 Anthropic 兼容路由）。
-// - deepseek-chat / deepseek-reasoner 已于 2026-07-24 弃用，模型用 deepseek-v4-flash。
-const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com/chat/completions';
-const DEEPSEEK_MODEL = 'deepseek-v4-flash';
+// - deepseek-chat / deepseek-reasoner 已于 2026-07-24 弃用；端点/模型现读 env（DEEPSEEK_ENDPOINT / DEEPSEEK_MODEL），默认仍指向 DeepSeek，生产切到 Volcengine Agent Plan。
+const DEEPSEEK_ENDPOINT = process.env.DEEPSEEK_ENDPOINT ?? 'https://api.deepseek.com/chat/completions';
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
 const LLM_TIMEOUT_MS = 30_000;
 
 /** 检索加权表达式：importance × recency，recency = 1/(1+距今天数)。 */
@@ -566,7 +566,7 @@ function parseLlmJson(raw) {
  * 使 consolidate() 对 LLM / 纯函数两条路径的消费方式一致。
  *
  * 实现要点：
- * - 走 DeepSeek 标准 /chat/completions（不需要 web_search 工具），模型 deepseek-v4-flash。
+ * - 走标准 /chat/completions（不需要 web_search 工具），端点/模型读 env（DEEPSEEK_ENDPOINT / DEEPSEEK_MODEL）。
  * - response_format: { type: 'json_object' } 强制 JSON 返回；Node 22 内置 fetch。
  * - 无 DEEPSEEK_API_KEY 或无 fetch → 抛错（consolidate 捕获后回退纯函数，不发起网络）。
  * - 一次调用总结一组 rows；空组直接返回纯函数空草稿。

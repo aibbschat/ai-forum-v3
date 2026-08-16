@@ -1,21 +1,19 @@
 // server/plugins/perceive-web-search/index.js
-// 感知源①：DeepSeek 联网检索（TECH-SPEC §7.3 接缝①「web_search 或 RSS」）。
+// 感知源①：联网检索（TECH-SPEC §7.3 接缝①「web_search 或 RSS」）。
 // default export 实现 perceive 契约：返回 3~maxTopics 条 Topic。
 //
-// ⚠️ 实现路径（2026-08-15 真 key 实测修正）：
-//   DeepSeek 标准 /chat/completions 的 tools 只支持 type:"function"，
-//   tools:[{type:"web_search"}] 会 400（unknown variant `web_search`, expected `function`）。
-//   官方原生联网搜索走 **Anthropic 兼容路由**（Claude Code 官方集成同款）：
-//   POST https://api.deepseek.com/anthropic/v1/messages
-//   tools:[{type:"web_search_20250305", name:"web_search"}] → 返回
-//   server_tool_use（检索动作）+ web_search_tool_result（结果块）+ text（模型总结）。
+// ⚠️ 实现路径（2026-08-16 切换 Volcengine Agent Plan）：
+//   走 Volcengine Agent Plan 的 OpenAI 兼容路由（base 见 config.js 的 PERCEIVE_WEB_SEARCH_ENDPOINT，
+//   再拼 /chat/completions）。Agent Plan 自带自主联网能力，无需显式 web_search 工具，
+//   直接按指令返回 JSON 数组（见 callDeepSeekSearch）。
+//   模型默认 ark-code-latest（Auto 路由）。鉴权用 DEEPSEEK_API_KEY（已改为 Volcengine Key）。
 //
 // 铁律：本源【绝不抛错中断编排器】。任何网络/解析失败都返回空 topics，
 //       由 service/perception/index.js 的 try/catch 做单源隔离（§16.8）。
 
 import { getConfig } from './config.js';
 
-const SOURCE = 'DeepSeek web_search';
+const SOURCE = '联网检索 (Volcengine Agent Plan)';
 
 /** 从文本中尽力抽取第一个 JSON 数组。 */
 function extractJsonArray(text) {
@@ -101,48 +99,33 @@ async function callDeepSeekSearch(agent, date, cfg) {
     `{"title":"主题标题","url":"来源链接(可选)","relevance":0.0~1.0,"summary":"一句话摘要"}，` +
     `共 3~${cfg.maxTopics} 条，按相关性降序。不要输出任何额外文字或解释。`;
 
-  const resp = await fetch(`${cfg.endpoint}/v1/messages`, {
+  const resp = await fetch(`${cfg.endpoint}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${cfg.apiKey}`,
-      'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
       model: cfg.model,
       max_tokens: cfg.maxTokens,
-      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
       messages: [{ role: 'user', content: prompt }],
     }),
   });
 
   if (!resp.ok) {
-    throw new Error(`DeepSeek HTTP ${resp.status}: ${(await resp.text().catch(() => '')).slice(0, 200)}`);
+    throw new Error(`HTTP ${resp.status}: ${(await resp.text().catch(() => '')).slice(0, 200)}`);
   }
 
   const data = await resp.json();
-  const blocks = Array.isArray(data?.content) ? data.content : [];
+  const text = data?.choices?.[0]?.message?.content ?? '';
 
-  // 路径 A：模型在最终 text 里按指令直接吐 JSON 数组
-  const text = blocks.filter((b) => b?.type === 'text').map((b) => b.text).join('\n');
+  // Volcengine Agent Plan 自主联网后，按指令在正文里直接吐 JSON 数组（路径 A）
   const parsed = extractJsonArray(text);
   if (parsed && parsed.length) {
     const topics = parsed.map((t, i) => toTopic(t, 0.9 - i * 0.1)).filter(Boolean);
     return await enrichTopics(topics, cfg); // 素材库：抓全文
   }
-
-  // 路径 B：从 web_search_tool_result 块抽取原始检索结果（去重、截取 maxTopics）
-  const results = [];
-  for (const b of blocks) {
-    if (b?.type === 'web_search_tool_result' && Array.isArray(b.content)) {
-      for (const c of b.content) {
-        const t = toTopic(c, 0.85);
-        if (t && !results.some((r) => r.title === t.title)) results.push(t);
-      }
-    }
-  }
-  const topics = results.slice(0, cfg.maxTopics);
-  return await enrichTopics(topics, cfg); // 素材库：抓全文
+  return [];
 }
 
 /**

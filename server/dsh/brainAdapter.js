@@ -79,14 +79,15 @@ async function deepseekBrain(agent, task) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) throw new Error('deepseekBrain: 缺少 DEEPSEEK_API_KEY');
   const prompt = buildPrompt(agent, task);
-  const resp = await fetch('https://api.deepseek.com/chat/completions', {
+  const endpoint = process.env.DEEPSEEK_ENDPOINT ?? 'https://api.deepseek.com/chat/completions';
+  const resp = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'deepseek-chat',
+      model: process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
       messages: [
         {
           role: 'system',

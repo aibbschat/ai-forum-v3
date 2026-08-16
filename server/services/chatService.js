@@ -1,17 +1,16 @@
 // server/services/chatService.js
 // 「问 AI 圈」聊天后端：两层检索答案引擎。
-//   Layer 1（优先）：站内文章 RAG —— 检索已发布文章 → 取 Top-K 片段 → DeepSeek 总结 + 来源标注。
-//   Layer 2（兜底）：站内无命中 → 调 DeepSeek 联网检索（anthropic 兼容路由）总结，标注「网络检索」。
+//   Layer 1（优先）：站内文章 RAG —— 检索已发布文章 → 取 Top-K 片段 → LLM 总结 + 来源标注。
+//   Layer 2（兜底）：站内无命中 → 调 Volcengine Agent Plan 联网检索（OpenAI 兼容路由，自主联网）总结，标注「网络检索」。
 //
 // 设计要点：
 // - 文章是「成品」，自带 provenance/作者/质量门 —— 比直接读记忆层安全、出处可读。
 // - 任何异常都不抛出中断，降级为友好提示（绝不 500 崩给用户）。
-// - deepseek-v4-flash 为推理模型，content 预算不足会空 → 递增预算重试（1500→3000）。
+// - ark-code-latest 走 Auto 路由；保留递增预算重试（1500→3000）以兼容推理模型预算行为。
 
 import { search } from './searchService.js';
 
 const DEEPSEEK_ENDPOINT = process.env.DEEPSEEK_ENDPOINT ?? 'https://api.deepseek.com/chat/completions';
-const DEEPSEEK_ANTHROPIC = process.env.DEEPSEEK_ANTHROPIC_ENDPOINT ?? 'https://api.deepseek.com/anthropic/v1/messages';
 const MODEL = process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
 
 /** 把自然语言问题拆成检索词（去标点 + 中文二元 + 空格分词），用于 OR 检索。 */
@@ -83,51 +82,46 @@ async function callDeepSeek(messages, { temperature = 0.5 } = {}) {
   return null;
 }
 
-/** 联网兜底：调 DeepSeek anthropic 路由的 web_search 工具，返回 { answer, webSources }。 */
+/** 联网兜底：调 Volcengine Agent Plan（OpenAI 兼容路由）自主联网检索，返回 { answer, webSources }。 */
 async function webFallback(question) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) return null;
   try {
-    const resp = await fetch(DEEPSEEK_ANTHROPIC, {
+    const resp = await fetch(DEEPSEEK_ENDPOINT, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-        'anthropic-version': '2023-06-01',
-      },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model: MODEL,
         max_tokens: 1500,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        temperature: 0.5,
         messages: [
           {
-            role: 'user',
-            content: `请用中文专业、客观地回答以下问题，去 AI 味、不标题党。问题：${question}`,
+            role: 'system',
+            content:
+              '你是 AI 圈联网问答助手。请联网检索后，用中文专业、客观地回答用户问题，去 AI 味、不标题党。' +
+              '若引用了网页，请在回答中以内嵌 Markdown 链接 [标题](URL) 标注来源（可多条）。',
           },
+          { role: 'user', content: question },
         ],
       }),
     });
     if (!resp.ok) return null;
     const data = await resp.json();
-    const blocks = Array.isArray(data?.content) ? data.content : [];
-    const text = blocks.filter((b) => b?.type === 'text').map((b) => b.text).join('\n').trim();
+    const text = data?.choices?.[0]?.message?.content?.trim();
+    if (!text) return null;
+    // Volcengine 自主联网后把来源写在正文内嵌 Markdown 链接里，从中抽取来源
     const webSources = [];
-    for (const b of blocks) {
-      if (b?.type === 'web_search_tool_result' && Array.isArray(b.content)) {
-        for (const c of b.content) {
-          const t = c?.title ?? c?.page_title;
-          const u = c?.url ?? c?.link;
-          if (t && !webSources.some((s) => s.title === t)) {
-            webSources.push({ title: String(t), url: u ? String(u) : undefined });
-          }
-        }
-      }
+    const re = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const title = m[1].trim();
+      const url = m[2].trim();
+      if (!webSources.some((s) => s.url === url)) webSources.push({ title, url });
     }
-    if (text) return { answer: text, webSources: webSources.slice(0, 5) };
+    return { answer: text, webSources: webSources.slice(0, 5) };
   } catch {
     return null;
   }
-  return null;
 }
 
 /**
