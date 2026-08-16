@@ -44,6 +44,7 @@ async function retrieveInSite(question) {
     params.push(`%${t}%`, `%${t}%`);
   }
   const rows = await (await import('./searchService.js')).searchArticlesByTerms(conds, params);
+  console.log('[chat][retrieve] terms=', JSON.stringify(terms), 'rows=', rows.length);
   if (!rows.length) return { contexts: [], sources: [] };
 
   const contexts = [];
