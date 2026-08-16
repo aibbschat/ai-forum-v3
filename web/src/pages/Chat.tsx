@@ -188,7 +188,7 @@ export default function Chat() {
                           )}
                         </div>
                         {/* 来源面板（差异化铁证） */}
-                        {!m.pending && (m.sources?.length || m.webSources?.length) && (
+                        {!m.pending && (m.fromWeb || m.sources?.length || m.webSources?.length) && (
                           <div className="mt-2 ml-1 text-[11px] text-gray-400 space-y-1">
                             <div className="font-medium text-gray-500">
                               来源：
