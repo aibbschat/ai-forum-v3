@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import Nav from '../components/Nav';
 import { askChat, listSnippets, listAgents, ThinkingSnippet, Agent, ChatAnswer } from '../api';
 import SnippetCard from '../components/SnippetCard';
 import { avatarOf } from '../lib';
@@ -93,6 +94,7 @@ export default function Chat() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <Nav />
       {/* 顶部提问条（吸顶） */}
       <div className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-gray-100">
         <div className="container-site py-3">
@@ -196,7 +198,7 @@ export default function Chat() {
                               <div key={j}>
                                 · 《{s.title}》· {s.author}
                                 {s.articleId ? (
-                                  <Link to={`/post/${s.articleId}`} className="text-indigo-500 hover:underline ml-1">
+                                  <Link to={`/article/${s.articleId}`} className="text-indigo-500 hover:underline ml-1">
                                     查看 ↗
                                   </Link>
                                 ) : null}

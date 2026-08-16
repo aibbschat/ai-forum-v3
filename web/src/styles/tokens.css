@@ -154,3 +154,159 @@ body {
 .article-content table { width: 100%; border-collapse: collapse; margin: 1.2em 0; font-size: 0.95em; }
 .article-content th, .article-content td { border: 1px solid var(--color-border); padding: 0.5em 0.8em; text-align: left; }
 .article-content th { background: #f8fafc; font-weight: 700; }
+
+/* ═══════════════════════════════════════════════════════════════
+   思想广场：沉浸式「星空思考流」主题
+   一条思考占一行，整列徐徐上浮循环；星尘闪烁 + 流星划过（灵感闪过）。
+   ═══════════════════════════════════════════════════════════════ */
+.cosmic {
+  position: relative;
+  min-height: calc(100vh - 3.5rem); /* 减去顶部导航高度 */
+  overflow: hidden;
+  color: #e7e9ff;
+  background:
+    radial-gradient(1100px 560px at 18% -8%, rgba(99, 102, 241, 0.20), transparent 60%),
+    radial-gradient(900px 520px at 88% 8%, rgba(168, 85, 247, 0.14), transparent 55%),
+    linear-gradient(180deg, #0b1026 0%, #0e1230 45%, #090c20 100%);
+}
+
+/* 星尘颗粒层 */
+.cosmic-stars { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.cosmic-stars .star {
+  position: absolute;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0.7;
+  animation-name: starTwinkle;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.6);
+}
+@keyframes starTwinkle {
+  0%, 100% { opacity: 0.15; transform: scale(0.6); }
+  50% { opacity: 0.9; transform: scale(1.15); }
+}
+
+/* 流星层（灵感闪过） */
+.cosmic-metors { position: absolute; inset: 0; pointer-events: none; z-index: 1; overflow: hidden; }
+.cosmic-meteor {
+  position: absolute;
+  width: 2px; height: 2px;
+  opacity: 0;
+  animation-name: meteorFly;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+.cosmic-meteor::after {
+  content: '';
+  position: absolute;
+  top: 50%; left: 0;
+  width: 130px; height: 1.5px;
+  transform: translateY(-50%) rotate(20deg);
+  transform-origin: left center;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0));
+  border-radius: 2px;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+}
+@keyframes meteorFly {
+  0% { opacity: 0; transform: translate(0, 0) rotate(20deg); }
+  6% { opacity: 1; }
+  18% { opacity: 1; }
+  24% { opacity: 0; transform: translate(58vw, 24vh) rotate(20deg); }
+  100% { opacity: 0; transform: translate(58vw, 24vh) rotate(20deg); }
+}
+
+/* 思考流：整列上浮、无缝循环 */
+.thought-stream {
+  position: relative;
+  z-index: 2;
+  height: calc(100vh - 17rem);
+  min-height: 420px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 9%, #000 90%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 9%, #000 90%, transparent 100%);
+}
+.thought-track {
+  display: flex;
+  flex-direction: column;
+  animation-name: floatUp;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+.thought-stream:hover .thought-track { animation-play-state: paused; }
+@keyframes floatUp {
+  from { transform: translateY(0); }
+  to { transform: translateY(-50%); }
+}
+
+/* 单条思考卡片 */
+.thought-item {
+  margin-bottom: 14px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 3px solid rgba(129, 140, 248, 0.6);
+  background: rgba(255, 255, 255, 0.04);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  transition: background 0.25s, border-color 0.25s;
+}
+.thought-item:hover {
+  background: rgba(129, 140, 248, 0.12);
+  border-color: rgba(129, 140, 248, 0.45);
+}
+.thought-name {
+  font-size: 0.82rem;
+  color: #a9b0e6;
+  letter-spacing: 0.02em;
+  margin-bottom: 8px;
+}
+.thought-name b { color: #c7ccff; font-weight: 600; }
+.thought-title { color: #8089c4; margin-left: 2px; }
+.thought-content {
+  font-size: 1.1rem;
+  line-height: 1.65;
+  color: #eef0ff;
+}
+.thought-expand {
+  margin-top: 12px;
+  font-size: 0.8rem;
+  color: #9aa2ff;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.2s;
+}
+.thought-expand:hover { color: #c7ccff; }
+
+/* 暗色筛选芯片 */
+.cosmic-chip {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-radius: 9999px;
+  padding: 7px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #c7ccff;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+.cosmic-chip:hover { border-color: rgba(129, 140, 248, 0.5); }
+.cosmic-chip.active {
+  background: rgba(129, 140, 248, 0.85);
+  color: #fff;
+  border-color: rgba(129, 140, 248, 0.85);
+}
+
+/* 尊重「减少动态效果」偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .thought-track, .cosmic-stars .star, .cosmic-meteor { animation: none !important; }
+  .thought-stream { overflow-y: auto; }
+}

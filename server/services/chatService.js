@@ -46,6 +46,9 @@ async function retrieveInSite(question) {
   const rows = await (await import('./searchService.js')).searchArticlesByTerms(conds, params);
   if (!rows.length) return { contexts: [], sources: [] };
 
+  // 召回优先：SQL 已按多词 OR 命中，这里直接取前 6 篇拼上下文。
+  // 相关性由 answerQuestion 里的 LLM「[有资料]/[无资料]」结构化判定把关，
+  // 避免词面打分误杀（如单篇仅命中一个主题词）或漏杀（如撞到常用 2 字碎片）。
   const contexts = [];
   const sources = [];
   for (const a of rows.slice(0, 6)) {
@@ -137,7 +140,7 @@ export async function answerQuestion(question) {
 
   const { contexts, sources } = await retrieveInSite(q);
 
-  // Layer 1：站内命中足够 → 站内 RAG 总结
+  // Layer 1：站内命中 → 站内 RAG 总结（经相关性打分过滤后）
   if (contexts.length > 0) {
     const contextText = contexts.join('\n\n---\n\n');
     const sys = [
@@ -147,7 +150,7 @@ export async function answerQuestion(question) {
       '1. 不编造资料之外的具体事实；资料不足时，明确指出「站内资料有限」。',
       '2. 涉及历史/数据类内容，保持严谨，不夸大、不绝对化。',
       '3. 在回答末尾另起一行，用「来源：《标题》· 作者」列出你参考的文章（可多条）。',
-      '4. 若资料与问题无关，诚实说明并建议用户改用站内搜索或去相关板块。',
+      '4. 若站内资料与问题无关、或不足以回答，请在第一行输出「【无资料】」并简要说明，不要强行作答。',
     ].join('\n');
     const user = `站内资料：\n${contextText}\n\n用户问题：${q}`;
 
@@ -157,9 +160,22 @@ export async function answerQuestion(question) {
     ]);
 
     if (answer) {
-      return { answer, sources: sources.slice(0, 5), fromWeb: false };
+      // 站内资料判定为无关/不足 → 改走联网兜底，保证「站内答不了也能给答案」
+      if (!answer.trimStart().startsWith('【无资料】')) {
+        return { answer, sources: sources.slice(0, 5), fromWeb: false };
+      }
     }
-    // 生成失败但有资料 → 退化为直接给资料列表
+    // 走到这里：要么生成失败，要么判定无资料 → 尝试联网兜底
+    const web = await webFallback(q);
+    if (web) return { answer: web.answer, webSources: web.webSources, fromWeb: true };
+    if (answer) {
+      return {
+        answer: answer.replace(/^【无资料】\s*/, ''),
+        sources: sources.slice(0, 5),
+        fromWeb: false,
+      };
+    }
+    // 生成失败且有资料 → 退化为直接给资料列表
     return {
       answer: '站内找到相关资料，但总结生成失败。你可以查看以下文章：',
       sources,
@@ -167,7 +183,7 @@ export async function answerQuestion(question) {
     };
   }
 
-  // Layer 2：站内无命中 → 联网兜底
+  // Layer 2：站内零命中 → 联网兜底
   const web = await webFallback(q);
   if (web) {
     return { answer: web.answer, webSources: web.webSources, fromWeb: true };

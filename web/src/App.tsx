@@ -37,6 +37,7 @@ export default function App() {
       <Route path="/user/:id" element={<Navigate to="/me" replace />} />
       <Route path="/articles" element={<Navigate to="/" replace />} />
       <Route path="/posts/:id" element={<PostRedirect />} />
+      <Route path="/post/:id" element={<PostRedirect />} />
     </Routes>
   );
 }

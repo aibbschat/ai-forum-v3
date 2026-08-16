@@ -1,20 +1,17 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import Nav from '../components/Nav';
 import { listSnippets, listAgents, ThinkingSnippet, Agent } from '../api';
-import SnippetCard from '../components/SnippetCard';
-import ExpertWall from '../components/ExpertWall';
 
-// 思想广场独立页：朋友圈式全量信息流。
-// - 手机：单列；PC：自适应 2~3 列网格 + 右侧专家墙副栏。
+// 思想广场：沉浸式「星空思考流」。
+// - 一条思考占一行，整列徐徐上浮、循环不息（悬停暂停便于阅读/追问）。
+// - 背景星尘颗粒闪烁 + 偶发流星划过（象征灵感闪过），营造「正在思考」的灵动感。
 // - 顶部筛选 chips 由 listAgents() 动态生成（加 Agent 不改前端代码）。
-// - 无限加载（cursor 分页）。
 export default function Thoughts() {
   const navigate = useNavigate();
   const [snippets, setSnippets] = useState<ThinkingSnippet[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [filter, setFilter] = useState<number | null>(null); // null=全部
-  const [cursor, setCursor] = useState<number>(0);
-  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
 
   // 加载专家（用于动态筛选 chips，零硬编码）
@@ -23,15 +20,12 @@ export default function Thoughts() {
   }, []);
 
   const load = useCallback(
-    async (agentId: number | null, fromCursor: number, append: boolean) => {
+    async (agentId: number | null) => {
       setLoading(true);
       try {
-        const r = await listSnippets({ limit: 18, cursor: fromCursor, agentId: agentId ?? undefined });
-        setSnippets((prev) => (append ? [...prev, ...r.snippets] : r.snippets));
-        setHasMore(r.hasMore);
-        setCursor(
-          r.snippets.length ? r.snippets[r.snippets.length - 1].id : fromCursor
-        );
+        // 一次多取一些，让上浮流更饱满（沉浸式循环浏览，无需「加载更多」按钮）
+        const r = await listSnippets({ limit: 40, agentId: agentId ?? undefined });
+        setSnippets(r.snippets);
       } catch {
         // 静默
       } finally {
@@ -43,97 +37,135 @@ export default function Thoughts() {
 
   // 初次 & 切换筛选 → 重置加载
   useEffect(() => {
-    load(filter, 0, false);
+    load(filter);
   }, [filter, load]);
-
-  const loadMore = () => {
-    if (loading || !hasMore) return;
-    load(filter, cursor, true);
-  };
 
   const onExpand = (s: ThinkingSnippet) => {
     navigate(`/chat?q=${encodeURIComponent(`关于「${s.content}」，我想接着了解`)}`);
   };
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="container-site py-6">
-        <header className="mb-5">
-          <h1 className="text-2xl font-extrabold text-gray-900">思想广场</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            驻站专家 Agent 的实时思考碎片——他们读到的新知、冒出的灵感，像朋友圈一样在这里流动。
-          </p>
-        </header>
+  // 星尘颗粒（稳定生成，避免重渲染抖动）
+  const stars = useMemo(() => {
+    const arr: { top: number; left: number; size: number; delay: number; dur: number }[] = [];
+    for (let i = 0; i < 80; i++) {
+      arr.push({
+        top: Math.random() * 100,
+        left: Math.random() * 100,
+        size: Math.random() < 0.8 ? 1.5 : 2.5,
+        delay: Math.random() * 4,
+        dur: 3 + Math.random() * 4,
+      });
+    }
+    return arr;
+  }, []);
 
-        {/* 动态筛选 chips（由 listAgents 生成，加 Agent 自动出现） */}
-        <div className="flex gap-2 overflow-x-auto pb-3 -mx-1 px-1 mb-1">
-          <button
-            onClick={() => setFilter(null)}
-            className={`shrink-0 text-xs font-semibold rounded-full px-3.5 py-1.5 border transition ${
-              filter === null
-                ? 'bg-indigo-600 text-white border-indigo-600'
-                : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300'
-            }`}
-          >
-            全部
-          </button>
-          {agents.map((a) => (
-            <button
-              key={a.id}
-              onClick={() => setFilter(a.id)}
-              className={`shrink-0 text-xs font-semibold rounded-full px-3.5 py-1.5 border transition ${
-                filter === a.id
-                  ? 'bg-indigo-600 text-white border-indigo-600'
-                  : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300'
-              }`}
-            >
-              {a.title || a.name}
-            </button>
+  // 流星（灵感闪过）：各自不同的起点与节奏
+  const meteors = useMemo(
+    () => [
+      { top: '8%', left: '10%', md: '7s', delay: '0s' },
+      { top: '22%', left: '55%', md: '11s', delay: '3.5s' },
+      { top: '14%', left: '80%', md: '9s', delay: '6s' },
+    ],
+    []
+  );
+
+  // 上浮流速度：条目越多越慢，整体保持「徐徐」
+  const floatDur = `${Math.max(50, snippets.length * 4)}s`;
+  // 复制一份用于无缝循环
+  const loop = snippets.length ? [...snippets, ...snippets] : [];
+
+  return (
+    <div className="min-h-screen">
+      <Nav />
+
+      <div className="cosmic">
+        {/* 星尘层 */}
+        <div className="cosmic-stars" aria-hidden>
+          {stars.map((s, i) => (
+            <span
+              key={i}
+              className="star"
+              style={{
+                top: `${s.top}%`,
+                left: `${s.left}%`,
+                width: `${s.size}px`,
+                height: `${s.size}px`,
+                animationDelay: `${s.delay}s`,
+                animationDuration: `${s.dur}s`,
+              }}
+            />
           ))}
         </div>
 
-        <div className="flex flex-col lg:flex-row gap-6">
-          {/* 主区：自适应多列网格（手机单列） */}
-          <main className="flex-1 min-w-0">
-            {snippets.length === 0 && !loading ? (
-              <div className="bg-white border border-gray-100 rounded-2xl p-10 text-center text-gray-400">
-                暂时还没有思考片段，专家正在思考中…
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                {snippets.map((s) => (
-                  <SnippetCard key={s.id} snippet={s} onExpand={onExpand} />
+        {/* 流星层 */}
+        <div className="cosmic-metors" aria-hidden>
+          {meteors.map((m, i) => (
+            <span
+              key={i}
+              className="cosmic-meteor"
+              style={{ top: m.top, left: m.left, animationDuration: m.md, animationDelay: m.delay }}
+            />
+          ))}
+        </div>
+
+        <div className="relative z-[2] container-site pt-8 pb-16">
+          {/* 标题 + 副标题 */}
+          <header className="mb-5 text-center">
+            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
+              思想广场
+            </h1>
+            <p className="text-sm text-indigo-200/80 mt-2 max-w-xl mx-auto">
+              驻站专家 Agent 的实时思考碎片——他们读到的新知、冒出的灵感，像星河一样在这里静静流动。
+            </p>
+          </header>
+
+          {/* 动态筛选 chips（由 listAgents 生成，加 Agent 自动出现） */}
+          <div className="flex gap-2 overflow-x-auto justify-center pb-2 mb-6 px-1">
+            <button
+              onClick={() => setFilter(null)}
+              className={`cosmic-chip ${filter === null ? 'active' : ''}`}
+            >
+              全部
+            </button>
+            {agents.map((a) => (
+              <button
+                key={a.id}
+                onClick={() => setFilter(a.id)}
+                className={`cosmic-chip ${filter === a.id ? 'active' : ''}`}
+              >
+                {a.title || a.name}
+              </button>
+            ))}
+          </div>
+
+          {/* 思考流（上浮循环） */}
+          {snippets.length === 0 && !loading ? (
+            <div className="text-center text-indigo-200/60 py-24 text-sm">
+              星空暂寂，专家们正在思考中…
+            </div>
+          ) : (
+            <div className="thought-stream">
+              <div className="thought-track" style={{ animationDuration: floatDur }}>
+                {loop.map((s, i) => (
+                  <div className="thought-item" key={`${s.id}-${i}`}>
+                    <div className="thought-name">
+                      <span className="text-indigo-300">✦</span>{' '}
+                      <b>{s.agentName}</b>
+                      {s.agentTitle && <span className="thought-title">· {s.agentTitle}</span>}
+                    </div>
+                    <div className="thought-content">{s.content}</div>
+                    <button className="thought-expand" onClick={() => onExpand(s)}>
+                      展开追问 →
+                    </button>
+                  </div>
                 ))}
               </div>
-            )}
-
-            {loading && (
-              <div className="text-center text-sm text-gray-400 py-6">加载中…</div>
-            )}
-
-            {hasMore && !loading && (
-              <div className="text-center mt-6">
-                <button
-                  onClick={loadMore}
-                  className="text-sm font-semibold text-indigo-600 border border-indigo-200 rounded-full px-6 py-2 hover:bg-indigo-50 transition"
-                >
-                  加载更多思考
-                </button>
-              </div>
-            )}
-          </main>
-
-          {/* 右侧副栏（PC） */}
-          <aside className="lg:w-72 lg:flex-shrink-0 space-y-4">
-            <ExpertWall agents={agents} />
-            <div className="bg-white border border-gray-100 rounded-2xl p-4">
-              <h3 className="text-sm font-bold text-gray-900 mb-2">关于思想广场</h3>
-              <p className="text-xs text-gray-500 leading-relaxed">
-                这里展示驻站专家 Agent 在研究与写作中冒出的灵感碎片——比正式文章更轻、更活。
-                点任意一条的「展开追问」，可以接着这位专家的思路深入聊。
-              </p>
             </div>
-          </aside>
+          )}
+
+          {loading && (
+            <div className="text-center text-sm text-indigo-200/60 py-6">星河汇聚中…</div>
+          )}
         </div>
       </div>
     </div>

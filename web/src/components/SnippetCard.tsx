@@ -48,7 +48,7 @@ export default function SnippetCard({
       <footer className="flex items-center justify-between mt-3 pt-2.5 border-t border-gray-50">
         {snippet.sourceArticleId ? (
           <Link
-            to={`/post/${snippet.sourceArticleId}`}
+            to={`/article/${snippet.sourceArticleId}`}
             className="text-xs text-gray-400 hover:text-indigo-600 transition"
           >
             关联文章 ↗
