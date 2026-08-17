@@ -148,6 +148,41 @@ export async function listMaterialPool(agentId, { status = 'pending', limit = 50
 }
 
 /**
+ * 判断某条感知素材是否已在该 Agent 的素材池中（任意状态：pending/locked/used）。
+ *
+ * 用于防止静态 seed 主题 / 重复 web_search 结果每轮被当作"新素材"反复入库，
+ * 进而导致同一选题被反复写作（历史考据官曾把"古罗马道路"写了两次、"龙凤"写了三次）。
+ *
+ * 匹配策略：取素材文本前 N 字做包含匹配。perceive 入库的 content 形如
+ *   "[seed] 古罗马道路网……：<摘要>（url）"
+ * 标题部分稳定，用前 40 字 LIKE 即可拦住同一条 seed 的重复入库，
+ * 又不会因摘要微调而误判为全新素材。
+ *
+ * @param {number} agentId
+ * @param {string} content
+ * @param {{withinDays?:number}} [opts] 只查最近 N 天（TTL 内），默认 30
+ * @returns {Promise<boolean>}
+ */
+export async function materialExists(agentId, content, { withinDays = 30 } = {}) {
+  const id = requireAgentId(agentId);
+  const text = String(content || '').trim();
+  if (!text) return false;
+  // 用前 40 个字符作为指纹（够覆盖"[source] 标题"部分）
+  const fingerprint = text.slice(0, 40).replace(/[%_\\]/g, (m) => '\\' + m);
+  // 窗口起点在 JS 侧算成 UTC 字符串，避免 SQLite/MariaDB 时间方言差异
+  const since = new Date(Date.now() - withinDays * 86400000).toISOString().slice(0, 19).replace('T', ' ');
+  const row = await db.get(
+    `SELECT 1 AS hit FROM memory_episodic
+      WHERE agent_id = ? AND source = 'perceive'
+        AND content LIKE ? ESCAPE '\\'
+        AND created_at >= ?
+      LIMIT 1`,
+    [id, `%${fingerprint}%`, since]
+  );
+  return !!row;
+}
+
+/**
  * 素材饱和判断：待用素材（pending）按 importance 加权累计，达到阈值即"有把握可写"。
  * @param {number} agentId
  * @param {{minCount?:number, minScore?:number}} [opts]

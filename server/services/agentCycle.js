@@ -35,27 +35,45 @@ export async function runCycle(agent, { date = new Date(), brainOverride = null,
   const { topics } = await perceiveWorld(agent, date);
 
   const agentId = await resolveAgentId(agent);
-  const { writeEpisodic } = await import('../services/memory/index.js');
+  const { writeEpisodic, materialExists } = await import('../services/memory/index.js');
 
   // ② 素材入池：感知到的主题作为素材写进 episodic（source='perceive', status='pending'），
   //    持续积累——这就是"素材库"。本次感知不立即写，等素材饱和。
   if (agentId && topics.length) {
-    const avgRel = topics.reduce((s, t) => s + (t.relevance || 0.5), 0) / topics.length;
+    let inserted = 0;
+    let skipped = 0;
+    const seenThisRun = new Set(); // 本轮内也去重（web_search 与 seed 可能撞题）
     // 每条素材独立入库（而非合并一条），供素材池按条锁定/标记
     for (const t of topics) {
+      // 本轮内同标题跳过
+      const titleKey = String(t.title || '').trim().slice(0, 40);
+      if (titleKey && seenThisRun.has(titleKey)) {
+        skipped++;
+        continue;
+      }
       // 素材内容：优先全文（fullText，感知层抓取），否则摘要（summary）
       // 2026-08-15：素材库要"够分析"，不能只给 280 字概括
       const body = t.fullText || t.summary || '';
+      const content = `[${t.source}] ${t.title}${body ? '：' + body.slice(0, 2500) : ''}${t.url ? `（${t.url}）` : ''}`;
+      // 跨轮去重：静态 seed 主题每轮都会被重新感知，若已在素材池（任意状态）
+      // 或近期已写过，就不再重复入库——否则同一选题会被反复写作（见历史考据官重复事件）。
+      if (await materialExists(agentId, content, { withinDays: 30 })) {
+        skipped++;
+        if (titleKey) seenThisRun.add(titleKey);
+        continue;
+      }
       await writeEpisodic({
         agentId,
-        content: `[${t.source}] ${t.title}${body ? '：' + body.slice(0, 2500) : ''}${t.url ? `（${t.url}）` : ''}`,
+        content,
         source: 'perceive',
         importance: t.relevance ?? 0.5,
         status: 'pending', // 素材待用
       });
+      inserted++;
+      if (titleKey) seenThisRun.add(titleKey);
     }
     console.log(
-      `[agentCycle] ${agent.presetId || agent.username} 感知素材入库 ${topics.length} 条（pending）`
+      `[agentCycle] ${agent.presetId || agent.username} 感知素材入库 ${inserted} 条（跳过重复 ${skipped} 条）`
     );
   }
 
