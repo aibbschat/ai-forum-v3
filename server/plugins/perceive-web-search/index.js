@@ -27,6 +27,30 @@ function extractJsonArray(text) {
   }
 }
 
+/**
+ * 检测模型是否返回了"日期越界 / 无事件 / 检索静默"这类元回答。
+ *
+ * 背景：当目标日期超出模型知识截止点、或供应商联网未生效时，模型不会报错，
+ * 而是用自然语言说"该日期在我知识截止点之外 / 没有已发生的可核实事件"。
+ * 这种回答若被当作素材入库，会让 Agent 写出"今天没有信号"的空稿
+ * （观察哨 article/33 即此问题）。这里识别后返回 true，由调用方丢弃。
+ *
+ * 刻意保守：只在模型明确表达"没有/越界/无法获取"时命中，避免误杀真实事件。
+ */
+function isSilenceMetaAnswer(text) {
+  if (!text || typeof text !== 'string') return false;
+  const t = text.slice(0, 600);
+  // 明确的"无事件/静默"措辞
+  const noEvent =
+    /(没有|无)(已发生|可核实|真实|具体)?\s*(事件|新闻|信号|结果|信息|数据)/.test(t) ||
+    /(检索|搜索|查询).{0,12}(静默|无结果|没有结果|未返回|为空)/.test(t) ||
+    /(知识截止|截止日期|训练数据).{0,20}(之外|以后|之后|未覆盖|无法)/.test(t) ||
+    /(日期|时间).{0,12}(越界|超出|在.*之外|未来)/.test(t) && /(无法|不能|没有)/.test(t) ||
+    /无法(获取|提供|访问|检索).{0,10}(实时|最新|当前|今日)/.test(t) ||
+    /作为\s*(AI|语言模型|人工智能).{0,20}(无法|不能|没有)/.test(t);
+  return noEvent;
+}
+
 /** 把单条原始对象规整成 Topic（source 固定为本源）。 */
 function toTopic(raw, fallbackRelevance) {
   const title = raw?.title ?? raw?.name ?? raw?.page_title;
@@ -114,6 +138,14 @@ async function callDeepSeekSearch(agent, date, cfg) {
     const topics = parsed.map((t, i) => toTopic(t, 0.9 - i * 0.1)).filter(Boolean);
     return await enrichTopics(topics, cfg); // 素材库：抓全文
   }
+
+  // 路径 B：没拿到 JSON 数组。若是"日期越界/检索静默/无事件"的元回答，
+  // 明确返回空（不要把这段元叙述当素材，否则会催生出"今天没信号"的空稿）。
+  if (isSilenceMetaAnswer(r.content)) {
+    console.log('[perceive-web-search] 模型返回静默/越界元回答，本轮不计素材（避免空稿）');
+    return [];
+  }
+  // 其它解析失败同样返回空（绝不向上抛）
   return [];
 }
 

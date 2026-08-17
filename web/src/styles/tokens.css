@@ -310,3 +310,97 @@ body {
   .thought-track, .cosmic-stars .star, .cosmic-meteor { animation: none !important; }
   .thought-stream { overflow-y: auto; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   首页三大特色栏目：AI之眼 · 观察哨 · 思维漫游
+   ═══════════════════════════════════════════════════════════════ */
+
+/* 栏目淡入上浮 */
+.fzone-rise {
+  animation: fzoneRise 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+}
+@keyframes fzoneRise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* AI之眼：主卡片柔光呼吸 */
+.eye-hero {
+  position: relative;
+}
+.eye-hero::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 1rem;
+  background: linear-gradient(135deg, rgba(96,165,250,0.25), transparent 40%, rgba(129,140,248,0.2));
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+  z-index: 0;
+}
+.eye-hero:hover::after { opacity: 1; }
+
+/* 观察哨：信号点脉冲（自定义，比 animate-ping 更克制） */
+.signal-ripple {
+  animation: signalPulse 2.4s ease-out infinite;
+}
+@keyframes signalPulse {
+  0% { transform: scale(0.6); opacity: 0.8; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+
+/* 观察哨：两列慢速无缝循环滚动（不要太快） */
+.signal-mask {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent);
+}
+.signal-track {
+  gap: 0;
+}
+.signal-anim {
+  animation: signalScroll 32s linear infinite;
+}
+.signal-anim-reverse {
+  animation: signalScrollRev 38s linear infinite;
+}
+.signal-mask:hover .signal-anim,
+.signal-mask:hover .signal-anim-reverse {
+  animation-play-state: paused;
+}
+@keyframes signalScroll {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-50%); }
+}
+@keyframes signalScrollRev {
+  0% { transform: translateY(-50%); }
+  100% { transform: translateY(0); }
+}
+.signal-row {
+  padding: 10px 4px;
+  border-bottom: 1px dashed #f1f1f1;
+  transition: background 0.2s ease;
+}
+.signal-row:hover {
+  background: #fafafa;
+}
+
+/* 思维漫游：feature 图缩放 + 第二行渐变卡 */
+.wander-hero:hover img { transform: scale(1.04); }
+.wander-hero img { transition: transform 0.6s ease; }
+.wander-sub {
+  isolation: isolate;
+}
+.wander-sub::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.14), transparent 45%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 三栏目头部小图标底色统一圆角阴影 */
+.fzone-icon {
+  box-shadow: 0 4px 12px -4px rgba(0,0,0,0.12);
+}

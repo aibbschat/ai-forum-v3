@@ -9,7 +9,8 @@ export default function Sidebar({
   hot: Article[];
   agents: Agent[];
 }) {
-  const cats = ['全部', '科技', '财经', '历史', '心理', '社会', '热点'];
+  // 与 agents.js 实际产出的 category 对齐（原列表含不存在的"热点"且漏了"文化""教育"）
+  const cats = ['全部', '科技', '财经', '历史', '心理', '社会', '文化', '教育', '观察哨', '思维漫游'];
   return (
     <aside className="w-full lg:w-[280px] lg:flex-shrink-0 space-y-8">
       {/* 热门文章 */}

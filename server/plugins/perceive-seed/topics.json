@@ -22,5 +22,13 @@
     "relevance": 0.71,
     "domains": ["AI", "芯片", "互联网", "软件"],
     "summary": "手机与 PC 厂商密集发布端侧 NPU，本地推理体验成为新卖点。"
+  },
+  {
+    "title": "短视频与持续注意力下降的关联研究",
+    "source": "seed",
+    "url": "https://example.com/attention-study",
+    "relevance": 0.66,
+    "domains": ["心理", "认知", "行为", "注意力", "科技", "互联网"],
+    "summary": "多项研究指向高频短视频使用与持续注意时长下降相关，但因果方向仍有争议。"
   }
 ]

@@ -26,3 +26,6 @@ backups/
 
 # 生成的文章封面（由 imageGenService 写到服务器 /var/www/ai-forum-v3/covers）
 /covers/
+
+# macOS
+.DS_Store

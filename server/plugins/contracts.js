@@ -49,6 +49,49 @@ export function validateArticleResult(a) {
   return true;
 }
 
+/**
+ * 判断本轮是否应"轮空不发"。
+ *
+ * 背景：观察哨这类信号栏，在四路检索静默 / 没有可核实事件时，
+ * 大脑本应跳过，却可能把"没有信号"本身写成一篇元评论发出去（见 article/33）。
+ * 这里提供两道闸：
+ *   1. 显式信号：大脑在结果里给 skip=true + reason（推荐路径，prompt 可引导）。
+ *   2. 文本兜底：标题/正文出现明确的"无信号/轮空/静默且无事件"模式时拦截。
+ *
+ * 注意：刻意保守，只拦"明确表达没有可发内容"的稿子，避免误杀正常文章。
+ *
+ * @param {object} article 大脑产出
+ * @returns {{skip:boolean, reason?:string}}
+ */
+export function detectSkip(article) {
+  if (!article) return { skip: true, reason: '空产出' };
+
+  // ① 显式 skip 标志
+  if (article.skip === true) {
+    return { skip: true, reason: String(article.skipReason || article.reason || '大脑主动轮空') };
+  }
+
+  const title = String(article.title || '');
+  const content = String(article.content || '');
+  const head = content.slice(0, 400); // 只看开头，避免正文举例时误伤
+
+  // ② 标题明确声明"没有信号/轮空"
+  //    形如：「四路检索静默，本期唯一信号是"没有信号"」
+  const noSignalInTitle =
+    /(没有信号|无信号|本期无|无可.*信号|唯一信号是[“"']?没有|检索静默|四路.*静默|今日无|本期轮空|暂停更新)/.test(title);
+
+  // 正文开头同时出现"静默/无事件"且明确"无可核实事件"才算，降低误杀
+  const silentAndNoEvent =
+    /(检索静默|四路.*静默|信息真空|无已发生|无可核实|没有可核实|无新增信号)/.test(head) &&
+    /(没有|无).{0,12}(信号|事件|可核实|新增)/.test(head);
+
+  if (noSignalInTitle || silentAndNoEvent) {
+    return { skip: true, reason: '检测到"无信号/轮空"内容，不发布' };
+  }
+
+  return { skip: false };
+}
+
 /** 提取 Agent 判断（供记忆沉淀，活智能体）：优先 viewpoint，否则回退内容首段。 */
 export function extractViewpoint(article) {
   if (!article) return '';

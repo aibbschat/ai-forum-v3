@@ -90,6 +90,21 @@ export async function runCycle(agent, { date = new Date(), brainOverride = null,
     ? await brainOverride(agent, task)
     : await (await import('../dsh/brainAdapter.js')).runAgent(agent, task);
 
+  // ⑤.5 轮空检测：大脑判断"无信号/无话可说"时不发布（如观察哨四路检索静默）。
+  //     历史 bug：观察哨把"没有信号"本身写成元评论发出（article/33）。
+  const { detectSkip } = await import('../plugins/contracts.js');
+  const skip = detectSkip(article);
+  if (skip.skip) {
+    console.log(
+      `[agentCycle] ${agent.presetId || agent.username} 本轮轮空不发布：${skip.reason}`
+    );
+    // 锁定的素材标记已用，避免下一轮用同一批"空素材"反复触发空稿。
+    if (agentId && lockedIds.length) {
+      await markMaterialUsed(agentId, lockedIds);
+    }
+    return { topics: topics.length, saturated: true, article: null, skipped: true, reason: skip.reason, agentId, published: null };
+  }
+
   // ⑥ 记忆写入：成稿 + 理解沉淀（防重复：recall 时能看到"写过什么/怎么判断"）
   const { extractViewpoint } = await import('../plugins/contracts.js');
   if (agentId) {

@@ -4,10 +4,12 @@ import { listArticles, listAgents, getTodayInsight, Article, Agent, Insight } fr
 import Nav from '../components/Nav';
 import ArticleCard from '../components/ArticleCard';
 import Sidebar from '../components/Sidebar';
-import ExpertWall from '../components/ExpertWall';
+import FeatureZones from '../components/FeatureZones';
 import { ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 
-const TABS = ['全部', '科技', '财经', '历史', '心理', '社会', 'AI之眼', '观察哨', '思维漫游', '热点'];
+// 栏目 Tab：必须与 server/dsh/agents.js 实际产出的 category 对齐，
+// 否则点进去是空栏目（历史 bug：曾含不存在的"热点"，却漏掉有文章的"文化""教育"）。
+const TABS = ['全部', '科技', '财经', '历史', '心理', '社会', '文化', '教育', '观察哨', '思维漫游'];
 
 const PAGE_SIZE = 10;
 
@@ -101,6 +103,10 @@ export default function Home() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [insight, setInsight] = useState<Insight | null>(null);
   const [hot, setHot] = useState<Article[]>([]);
+  // 三大特色栏目：AI之眼 / 观察哨 / 思维漫游
+  const [eye, setEye] = useState<Article[]>([]);
+  const [watchtower, setWatchtower] = useState<Article[]>([]);
+  const [wander, setWander] = useState<Article[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -138,14 +144,29 @@ export default function Home() {
       .catch(() => {});
   }, [category]);
 
+  // 三大特色栏目（AI之眼/观察哨/思维漫游）：各取最新若干篇，仅首页加载
+  useEffect(() => {
+    const zones: { cat: string; set: (a: Article[]) => void; limit: number }[] = [
+      { cat: 'AI之眼', set: setEye, limit: 4 },
+      { cat: '观察哨', set: setWatchtower, limit: 6 },
+      { cat: '思维漫游', set: setWander, limit: 3 },
+    ];
+    zones.forEach(({ cat, set, limit }) => {
+      listArticles({ sort: 'latest', category: cat, limit })
+        .then((r) => set(r.articles))
+        .catch(() => {});
+    });
+  }, []);
+
   // 今日 AI 洞察（非阻塞，加载完再显示横幅）
   useEffect(() => {
     getTodayInsight().then(setInsight).catch(() => {});
   }, []);
 
-  // 热门探讨横条只在第 1 页显示（取本页前 3 篇）
-  const hero = page === 1 ? articles.slice(0, 3) : [];
-  const feed = page === 1 ? articles.slice(3) : articles;
+  // 热门探讨横条：用独立的热门数据（hot），不再裁切最新帖，
+  // 否则最新文章会被顶部小横条截走而不进入帖子流（Bug 修复）。
+  const hero = page === 1 ? hot.slice(0, 3) : [];
+  const feed = articles;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const goPage = (p: number) => {
@@ -191,8 +212,8 @@ export default function Home() {
         </div>
       )}
 
-      {/* 驻站专家墙 */}
-      <ExpertWall agents={agents} />
+      {/* 三大特色栏目：AI之眼 · 观察哨 · 思维漫游（替代原驻站专家墙） */}
+      {page === 1 && <FeatureZones eye={eye} watchtower={watchtower} wander={wander} />}
 
       {/* 分类 Tab */}
       <div className="container-site">

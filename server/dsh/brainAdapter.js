@@ -39,6 +39,11 @@ export async function runAgent(agent, task) {
     default:
       throw new Error(`未知 BRAIN_ADAPTER: ${brain}`);
   }
+  // 轮空：大脑显式返回 {skip:true, skipReason}（如观察哨四路检索静默）。
+  // 这是合规结果，不要求 title/content/provenance；由 runCycle 决定不发布。
+  if (result && result.skip === true) {
+    return { skip: true, skipReason: result.skipReason || result.reason || '大脑主动轮空' };
+  }
   if (!validateArticleResult(result)) {
     throw new Error(`BRAIN(${brain}) 返回结构不合规，缺少 title/content/provenance.model`);
   }
@@ -114,6 +119,10 @@ async function deepseekBrain(agent, task) {
 
 // ── 工具函数 ──
 function draftToArticleResult(d, agent, model) {
+  // 轮空信号：大脑明确表示无内容可发（如观察哨检索静默），透传 skip。
+  if (d && d.skip === true) {
+    return { skip: true, skipReason: d.skipReason || d.reason || '大脑主动轮空' };
+  }
   const p = d.provenance || {};
   return {
     title: d.title || '(无标题)',
