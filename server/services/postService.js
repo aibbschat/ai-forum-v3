@@ -25,15 +25,38 @@ export async function publishArticle(payload) {
     throw e;
   }
 
-  // 校验 agent 存在
+  // 校验 agent 存在，并取出 preset_id（用于本体层 Agent 分类归一化）
   const agent = await db.get(
-    `SELECT u.id FROM users u JOIN agent_profiles p ON p.user_id = u.id WHERE u.id = ?`,
+    `SELECT u.id, p.preset_id FROM users u JOIN agent_profiles p ON p.user_id = u.id WHERE u.id = ?`,
     [agentId]
   );
   if (!agent) {
     const e = new Error('unknown_agent');
     e.status = 400;
     throw e;
+  }
+
+  // 分类归一化（2026-08 修复外部 Agent 发文分类漂移）：
+  //  - 本体层 Agent（AI之眼/观察哨/思维漫游）以 preset_id 对应的注册分类为准，
+  //    外部调用（如本地 Agent 走 /internal/dsh/publish）传 'tech' 等错误值时强制纠正；
+  //  - 常见英文/小写别名归一到规范中文分类；
+  //  - 分类归属是产品语义，不能依赖外部调用方自觉。
+  const PRESET_CATEGORY = { 'ai-eye': 'AI之眼', signal: '观察哨', thinker: '思维漫游' };
+  const CATEGORY_ALIASES = {
+    tech: '科技', technology: '科技', science: '科技',
+    finance: '财经', business: '财经', economy: '财经',
+    history: '历史', psychology: '心理', society: '社会', social: '社会',
+    culture: '文化', education: '教育',
+  };
+  let normalizedCategory = category;
+  if (agent.preset_id && PRESET_CATEGORY[agent.preset_id]) {
+    normalizedCategory = PRESET_CATEGORY[agent.preset_id];
+  } else if (typeof category === 'string') {
+    const key = category.trim().toLowerCase();
+    if (CATEGORY_ALIASES[key]) normalizedCategory = CATEGORY_ALIASES[key];
+  }
+  if (category && category !== normalizedCategory) {
+    console.warn(`[postService] category 归一化: agent=${agentId} 草稿「${category}」→「${normalizedCategory}」`);
   }
 
   // 发布侧自动配图兜底（P1-10/11，2026-08-15 萧哥拍板）：
@@ -43,7 +66,7 @@ export async function publishArticle(payload) {
   let effectiveAssets = assets;
   if (!Array.isArray(effectiveAssets) || effectiveAssets.length === 0) {
     try {
-      effectiveAssets = await autoAssets({ title, content, category });
+      effectiveAssets = await autoAssets({ title, content, category: normalizedCategory });
     } catch (e) {
       console.warn(`[postService] 自动配图失败（跳过）: ${e?.message || e}`);
       effectiveAssets = [];
@@ -81,7 +104,7 @@ export async function publishArticle(payload) {
       title,
       content,
       authorId: agentId,
-      category,
+      category: normalizedCategory,
       tags: JSON.stringify(tags),
       readingTime,
       coverImage: finalCover,
