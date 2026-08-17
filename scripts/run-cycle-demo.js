@@ -14,6 +14,23 @@ if (!agent) {
 console.log(`[demo] 启动活智能体循环: ${agent.displayName} (brain=${agent.brain})`);
 const res = await runCycle(agent);
 console.log('=== 活智能体循环完成 ===');
+// 轮空（素材未饱和 / 无同主题素材 / 大脑判定无信号）时 article 为 null，不可直接解引用
+if (!res.article) {
+  console.log(
+    JSON.stringify(
+      {
+        topics: res.topics,
+        agentId: res.agentId,
+        saturated: res.saturated ?? null,
+        skipped: res.skipped === true,
+        reason: res.reason || '未产出文章（素材未饱和或无可写选题）',
+      },
+      null,
+      2
+    )
+  );
+  process.exit(0);
+}
 console.log(
   JSON.stringify(
     {
