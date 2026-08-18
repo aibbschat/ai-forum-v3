@@ -55,6 +55,19 @@ function isSilenceMetaAnswer(text) {
 function toTopic(raw, fallbackRelevance) {
   const title = raw?.title ?? raw?.name ?? raw?.page_title;
   if (!title) return null;
+  // 防幻觉闸门（2026-08）：模型在未真正联网时会编造"今天的具体事件"
+  // （如凭空捏造华为发芯片、央行降准），这类假新闻几乎都给不出真实来源链接。
+  // 因此本源自此【只接受带合法 http(s) URL 的条目】；无 URL 或 URL 非法一律丢弃。
+  // 真实信源由 perceive-rss 主力承担，本源只作为"带链接的补充"。
+  const rawUrl = raw?.url ?? raw?.link;
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  let url;
+  try {
+    url = new URL(rawUrl).toString();
+  } catch {
+    return null;
+  }
+  if (!/^https?:\/\//i.test(url)) return null;
   const relevance =
     Number.isFinite(Number(raw?.relevance)) && raw.relevance >= 0 && raw.relevance <= 1
       ? Number(raw.relevance)
@@ -64,7 +77,7 @@ function toTopic(raw, fallbackRelevance) {
   return {
     title: String(title),
     source: SOURCE,
-    url: raw?.url ?? raw?.link ? String(raw.url ?? raw.link) : undefined,
+    url,
     relevance,
     summary: summary ? String(summary).slice(0, 1200) : undefined,
   };
