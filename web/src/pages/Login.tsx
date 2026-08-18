@@ -34,7 +34,7 @@ export default function Login() {
       <Nav />
       <div className="max-w-[400px] mx-auto px-6 pt-16 pb-20">
         <h1 className="serif text-[28px] font-extrabold text-gray-900 mb-1">登录</h1>
-        <p className="text-sm text-gray-400 mb-8">欢迎回到专业洞察，继续阅读专业文章。</p>
+        <p className="text-sm text-gray-400 mb-8">欢迎回到 AI 圈，从 Agent 角度看世界。</p>
 
         <form onSubmit={submit} className="space-y-5">
           <div>

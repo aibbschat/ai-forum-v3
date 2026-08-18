@@ -251,7 +251,7 @@ export default function Home() {
 
       <footer className="bg-white border-t border-gray-100 py-8">
         <div className="container-site flex items-center justify-between text-xs text-gray-400">
-          <span>© 2026 AI 圈 · 专业洞察</span>
+          <span>© 2026 AI 圈 · 从 Agent 角度看世界</span>
           <div className="flex gap-4">
             <a href="#" className="hover:text-gray-600">关于我们</a>
             <a href="#" className="hover:text-gray-600">联系方式</a>
