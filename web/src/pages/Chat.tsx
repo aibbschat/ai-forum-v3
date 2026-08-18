@@ -1,19 +1,74 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Nav from '../components/Nav';
-import { askChat, listSnippets, listAgents, ThinkingSnippet, Agent, ChatAnswer } from '../api';
-import SnippetCard from '../components/SnippetCard';
-import { avatarOf } from '../lib';
 
+/* ── 类型 ── */
+interface ChatSource {
+  title: string;
+  author?: string;
+  articleId?: number;
+}
+interface WebSource {
+  title: string;
+  url?: string;
+}
 interface Msg {
   role: 'user' | 'assistant';
   content: string;
-  sources?: ChatAnswer['sources'];
-  webSources?: ChatAnswer['webSources'];
+  reasoning?: string;          // 思考过程文本
+  stage?: string;              // 当前阶段提示
+  sources?: ChatSource[];
+  webSources?: WebSource[];
   fromWeb?: boolean;
   pending?: boolean;
+  isReasoning?: boolean;       // 是否还在推理中
+  isContent?: boolean;         // 是否在流式输出答案中
 }
 
+/* ── 渲染简易 Markdown（加粗/链接/换行） ── */
+function renderText(text: string) {
+  if (!text) return null;
+  // 分行处理
+  return text.split('\n').map((line, i) => {
+    // 加粗
+    let html = line.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    // 内嵌链接 [text](url)
+    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="nofollow noopener noreferrer" class="text-brand-600 hover:underline">$1</a>');
+    // 裸 URL
+    html = html.replace(/(?<!["\(])(https?:\/\/[^\s<]+)/g, (m) => {
+      let host: string;
+      try { host = new URL(m).hostname.replace(/^www\./, ''); } catch { host = m; }
+      return `<a href="${m}" target="_blank" rel="nofollow noopener noreferrer" class="text-brand-600 hover:underline">${host}</a>`;
+    });
+    return <span key={i} dangerouslySetInnerHTML={{ __html: html + (i > 0 ? '\n' : '') }} />;
+  });
+}
+
+/* ── 思考过程折叠组件 ── */
+function ReasoningBlock({ text, isOpen }: { text: string; isOpen: boolean }) {
+  const [open, setOpen] = useState(isOpen);
+  useEffect(() => { setOpen(isOpen); }, [isOpen]);
+  if (!text) return null;
+  return (
+    <div className="mb-3">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 transition"
+      >
+        <span className={`inline-block transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
+        思考过程
+        <span className="text-gray-300">({text.length} 字)</span>
+      </button>
+      {open && (
+        <div className="mt-2 pl-3 border-l-2 border-gray-100 text-[13px] text-gray-400 leading-relaxed whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto">
+          {renderText(text)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── 主页面 ── */
 export default function Chat() {
   const [params] = useSearchParams();
   const initialQ = params.get('q') || '';
@@ -21,181 +76,240 @@ export default function Chat() {
   const [input, setInput] = useState(initialQ);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [loading, setLoading] = useState(false);
-  const [snippets, setSnippets] = useState<ThinkingSnippet[]>([]);
-  const [context, setContext] = useState<ThinkingSnippet | null>(null);
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
-
-  // 加载思考广场（最新几条，填白屏）+ 专家列表
-  useEffect(() => {
-    listSnippets({ limit: 6 }).then((r) => setSnippets(r.snippets)).catch(() => {});
-    listAgents().then((r) => setAgents(r.agents)).catch(() => {});
-  }, []);
+  const abortRef = useRef<AbortController | null>(null);
 
   // 滚动到底
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
+  }, [messages]);
+
+  // 自动调节输入框高度
+  const autoResize = useCallback(() => {
+    const el = inputRef.current;
+    if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; }
+  }, []);
 
   const handleAsk = useCallback(
     async (raw: string) => {
       const text = raw.trim();
       if (!text || loading) return;
-      const question = context ? `关于「${context.content}」，${text}` : text;
+
       const userMsg: Msg = { role: 'user', content: text };
-      const pending: Msg = { role: 'assistant', content: '', pending: true };
+      const pending: Msg = { role: 'assistant', content: '', reasoning: '', stage: '准备中…', pending: true, isReasoning: true };
       setMessages((m) => [...m, userMsg, pending]);
       setLoading(true);
       setInput('');
-      setContext(null);
+
+      abortRef.current?.abort();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+
       try {
-        const ans = await askChat(question);
-        setMessages((m) => m.map((x, i) => (i === m.length - 1 ? {
-          role: 'assistant',
-          content: ans.answer,
-          sources: ans.sources,
-          webSources: ans.webSources,
-          fromWeb: ans.fromWeb,
-        } : x)));
-      } catch {
-        setMessages((m) => m.map((x, i) => (i === m.length - 1 ? {
-          role: 'assistant',
-          content: '抱歉，回答生成失败，请稍后再试。',
-        } : x)));
+        const res = await fetch(`/api/chat/stream`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: text }),
+          signal: ctrl.signal,
+        });
+
+        if (!res.ok || !res.body) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+
+          const lines = buf.split('\n');
+          buf = lines.pop() || '';
+
+          let eventType = '';
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('event:')) {
+              eventType = trimmed.slice(6);
+            } else if (trimmed.startsWith('data:')) {
+              const data = trimmed.slice(5).trim();
+              let obj: any;
+              try { obj = JSON.parse(data); } catch { continue; }
+              handleSSE(eventType, obj);
+            }
+          }
+        }
+      } catch (e: any) {
+        if (e.name === 'AbortError') return;
+        setMessages((m) => m.map((x, i) =>
+          i === m.length - 1 ? { ...x, pending: false, content: x.content || '抱歉，回答生成失败，请稍后再试。', isReasoning: false, isContent: false } : x
+        ));
       } finally {
         setLoading(false);
       }
     },
-    [context, loading]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [loading]
   );
 
-  // 从首页提问框带 ?q= 进来 → 自动提问
+  // SSE 事件处理器（用 ref 稳定引用避免闭包陈旧问题）
+  const handleSSE = useCallback((type: string, data: any) => {
+    setMessages((m) => {
+      const updated = [...m];
+      const last = updated.length - 1;
+      if (last < 0 || updated[last].role !== 'assistant') return m;
+      const msg = { ...updated[last] };
+
+      switch (type) {
+        case 'stage':
+          msg.stage = data.text;
+          break;
+        case 'reasoning':
+          msg.reasoning = (msg.reasoning || '') + data.text;
+          msg.isReasoning = true;
+          msg.pending = false;
+          break;
+        case 'content':
+          msg.content = (msg.content || '') + data.text;
+          msg.isContent = true;
+          msg.isReasoning = false;
+          msg.pending = false;
+          break;
+        case 'sources':
+          msg.sources = data.inSite;
+          msg.webSources = data.web;
+          msg.fromWeb = data.fromWeb;
+          msg.isContent = false;
+          msg.isReasoning = false;
+          break;
+        case 'done':
+          msg.pending = false;
+          msg.isContent = false;
+          msg.isReasoning = false;
+          break;
+        case 'error':
+          msg.content = msg.content || data.message || '生成失败';
+          msg.pending = false;
+          msg.isContent = false;
+          msg.isReasoning = false;
+          break;
+      }
+
+      updated[last] = msg;
+      return updated;
+    });
+  }, []);
+
+  // 自动提问
   const didAuto = useRef(false);
   useEffect(() => {
-    if (initialQ && !didAuto.current) {
-      didAuto.current = true;
-      handleAsk(initialQ);
-    }
+    if (initialQ && !didAuto.current) { didAuto.current = true; handleAsk(initialQ); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialQ]);
-
-  const onExpand = (s: ThinkingSnippet) => {
-    setContext(s);
-    setInput(`关于「${s.content}」，`);
-    inputRef.current?.focus();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     handleAsk(input);
   };
 
+  const isEmpty = messages.length === 0;
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="h-screen flex flex-col bg-gray-50">
       <Nav />
-      {/* 顶部提问条（吸顶） */}
-      <div className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-gray-100">
-        <div className="container-site py-3">
-          <form onSubmit={submit} className="flex items-center gap-2">
-            <div className="flex-1 relative">
-              {context && (
-                <div className="absolute -top-7 left-0 text-[11px] text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-full px-2 py-0.5 max-w-full truncate">
-                  接着 {context.agentName} 的思考追问
-                </div>
-              )}
-              <input
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="问 AI 圈：想了解什么？"
-                className="w-full rounded-full border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading || !input.trim()}
-              className="shrink-0 rounded-full bg-indigo-600 text-white px-5 py-2.5 text-sm font-semibold hover:bg-indigo-700 disabled:opacity-40 transition"
-            >
-              提问
-            </button>
-          </form>
+
+      {/* 顶部工具条：思考广场入口 */}
+      <div className="border-b border-gray-100 bg-white/80 backdrop-blur">
+        <div className="container-site flex items-center justify-between h-10">
+          <h1 className="text-sm font-bold text-gray-700">AI 圈 · 智能问答</h1>
+          <Link
+            to="/thoughts"
+            className="text-xs text-gray-400 hover:text-indigo-600 transition"
+          >
+            💡 思考广场 →
+          </Link>
         </div>
       </div>
 
-      <div className="container-site py-6">
-        <div className="flex flex-col lg:flex-row gap-6">
-          {/* 左栏：思考广场（填白屏） */}
-          <aside className="lg:w-[380px] lg:flex-shrink-0">
-            <div className="flex items-baseline justify-between mb-3">
-              <h2 className="text-base font-extrabold text-gray-900">专家思考广场</h2>
-              <Link to="/thoughts" className="text-xs text-indigo-600 hover:text-indigo-800">
-                加载更多思考 →
-              </Link>
-            </div>
-            <p className="text-xs text-gray-400 mb-4">
-              驻站专家 Agent 正在实时思考——他们读到的新知、冒出的灵感，都在这里。
-            </p>
-            <div className="space-y-3">
-              {snippets.length === 0 ? (
-                <div className="text-sm text-gray-400 bg-white border border-gray-100 rounded-2xl p-6 text-center">
-                  专家思考中…
-                </div>
-              ) : (
-                snippets.map((s) => <SnippetCard key={s.id} snippet={s} onExpand={onExpand} />)
-              )}
-            </div>
-          </aside>
-
-          {/* 右栏：对话区 */}
-          <section className="flex-1 min-w-0">
-            {messages.length === 0 ? (
-              <div className="bg-white border border-gray-100 rounded-2xl p-8 text-center">
-                <div className="text-4xl mb-3">💡</div>
-                <h3 className="font-bold text-gray-900 mb-1">向 AI 圈提问</h3>
-                <p className="text-sm text-gray-500 max-w-md mx-auto">
-                  站内文章优先作答并标注来源；若站里没有，会自动联网检索。
-                  你也可以从左侧「思考广场」点「展开追问」，接着专家的思路聊。
-                </p>
-                <div className="flex flex-wrap gap-2 justify-center mt-4">
-                  {['明朝为什么灭亡？', '大模型推理成本趋势', '社交媒体与心理健康'].map((q) => (
-                    <button
-                      key={q}
-                      onClick={() => handleAsk(q)}
-                      className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-full px-3 py-1.5 hover:border-indigo-300 hover:text-indigo-600 transition"
-                    >
-                      {q}
-                    </button>
-                  ))}
-                </div>
+      {/* 对话区（占满剩余高度） */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="container-site max-w-[800px] mx-auto px-4 py-6">
+          {isEmpty ? (
+            /* ── 空态：欢迎 + 推荐问题 ── */
+            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
+              <div className="text-5xl mb-4">🧠</div>
+              <h2 className="text-xl font-extrabold text-gray-900 mb-2">向 AI 圈提问</h2>
+              <p className="text-sm text-gray-500 max-w-md mb-6">
+                站内专家文章优先作答并标注来源；若站里没有，自动联网检索。
+                思考过程实时展开——你看到的不只是答案，还有推理链。
+              </p>
+              <div className="flex flex-wrap gap-2 justify-center">
+                {[
+                  '大模型推理成本为什么在快速下降？',
+                  '人形机器人离真正进工厂还有多远？',
+                  '短视频对注意力的影响有多大？',
+                  'AI 辅助阅读真的能提高效率吗？',
+                ].map((q) => (
+                  <button
+                    key={q}
+                    onClick={() => handleAsk(q)}
+                    className="text-xs text-gray-600 bg-white border border-gray-200 rounded-full px-3.5 py-2 hover:border-indigo-300 hover:text-indigo-600 transition shadow-sm"
+                  >
+                    {q}
+                  </button>
+                ))}
               </div>
-            ) : (
-              <div className="space-y-4">
-                {messages.map((m, i) => (
-                  <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
-                    {m.role === 'user' ? (
+            </div>
+          ) : (
+            /* ── 对话消息列表 ── */
+            <div className="space-y-6 pb-4">
+              {messages.map((m, i) => (
+                <div key={i}>
+                  {m.role === 'user' ? (
+                    <div className="flex justify-end mb-1">
                       <div className="max-w-[80%] bg-indigo-600 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm whitespace-pre-wrap break-words">
                         {m.content}
                       </div>
-                    ) : (
-                      <div className="max-w-[90%]">
-                        <div className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap break-words bg-white border border-gray-100 rounded-2xl rounded-tl-sm px-4 py-3">
-                          {m.pending ? (
-                            <span className="text-gray-400">思考中…</span>
-                          ) : (
-                            m.content
-                          )}
-                        </div>
-                        {/* 来源面板（差异化铁证） */}
+                    </div>
+                  ) : (
+                    <div className="flex gap-3">
+                      <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-sm shrink-0 mt-0.5">🤖</div>
+                      <div className="flex-1 min-w-0">
+                        {/* 阶段提示 */}
+                        {m.stage && m.pending && (
+                          <div className="text-xs text-gray-400 mb-2 flex items-center gap-1.5">
+                            <span className="inline-block w-3 h-3 border-2 border-gray-300 border-t-indigo-500 rounded-full animate-spin" />
+                            {m.stage}
+                          </div>
+                        )}
+                        {/* 思考过程（可折叠） */}
+                        {m.reasoning && <ReasoningBlock text={m.reasoning} isOpen={m.isReasoning || false} />}
+                        {/* 正文 */}
+                        {(m.content || (!m.pending && !m.reasoning)) && (
+                          <div className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap break-words">
+                            {renderText(m.content)}
+                            {m.isContent && <span className="inline-block w-1.5 h-4 bg-indigo-400 animate-pulse ml-0.5 align-middle" />}
+                          </div>
+                        )}
+                        {/* 加载占位 */}
+                        {m.pending && !m.reasoning && !m.content && (
+                          <div className="text-sm text-gray-400">
+                            <span className="inline-block w-3 h-3 border-2 border-gray-300 border-t-indigo-500 rounded-full animate-spin mr-1.5" />
+                            {m.stage || '准备中…'}
+                          </div>
+                        )}
+                        {/* 来源 */}
                         {!m.pending && (m.fromWeb || m.sources?.length || m.webSources?.length) && (
-                          <div className="mt-2 ml-1 text-[11px] text-gray-400 space-y-1">
+                          <div className="mt-3 pt-3 border-t border-gray-100 text-[11px] text-gray-400 space-y-1">
                             <div className="font-medium text-gray-500">
-                              来源：
-                              {m.fromWeb ? '网络检索' : '站内资料'}
+                              📎 来源：{m.fromWeb ? '网络检索' : '站内文章'}
                             </div>
                             {m.sources?.map((s, j) => (
-                              <div key={j}>
+                              <div key={j} className="flex items-center gap-1">
                                 · 《{s.title}》· {s.author}
                                 {s.articleId ? (
                                   <Link to={`/article/${s.articleId}`} className="text-indigo-500 hover:underline ml-1">
@@ -205,46 +319,53 @@ export default function Chat() {
                               </div>
                             ))}
                             {m.webSources?.map((s, j) => (
-                              <div key={j}>
+                              <div key={j} className="flex items-center gap-1">
                                 · {s.url ? (
-                                  <a href={s.url} target="_blank" rel="noreferrer" className="text-indigo-500 hover:underline">
+                                  <a href={s.url} target="_blank" rel="nofollow noopener noreferrer" className="text-indigo-500 hover:underline">
                                     {s.title}
                                   </a>
-                                ) : (
-                                  s.title
-                                )}
+                                ) : s.title}
                               </div>
                             ))}
                           </div>
                         )}
                       </div>
-                    )}
-                  </div>
-                ))}
-                <div ref={chatEndRef} />
-              </div>
-            )}
-
-            {/* 驻站专家（对话态底部轻提示） */}
-            {agents.length > 0 && messages.length > 0 && (
-              <div className="mt-6 flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-gray-400">由以下专家支撑：</span>
-                {agents.slice(0, 8).map((a) => (
-                  <Link key={a.id} to={`/agent/${a.id}`} className="flex items-center gap-1 group">
-                    <img
-                      src={avatarOf(a.avatar)}
-                      className="w-6 h-6 rounded-full object-cover group-hover:opacity-80 transition"
-                      alt={a.title || a.name}
-                    />
-                    <span className="text-xs text-gray-500 group-hover:text-indigo-600 transition">
-                      {a.title || a.name}
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </section>
+                    </div>
+                  )}
+                </div>
+              ))}
+              <div ref={chatEndRef} />
+            </div>
+          )}
         </div>
+      </div>
+
+      {/* 底部输入区（吸底） */}
+      <div className="border-t border-gray-100 bg-white/90 backdrop-blur">
+        <form onSubmit={submit} className="container-site max-w-[800px] mx-auto px-4 py-3">
+          <div className="flex items-end gap-2">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => { setInput(e.target.value); autoResize(); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(e); } }}
+              placeholder="问 AI 圈：想了解什么？（Shift+Enter 换行）"
+              rows={1}
+              className="flex-1 resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 max-h-[120px]"
+            />
+            <button
+              type="submit"
+              disabled={loading || !input.trim()}
+              className="shrink-0 w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center hover:bg-indigo-700 disabled:opacity-40 transition"
+              title="发送"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

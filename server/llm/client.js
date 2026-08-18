@@ -102,3 +102,106 @@ async function callOpenAI(prov, key, { model, messages, json, temperature, maxTo
   if (!content) throw new Error('模型返回内容为空');
   return { content, usage: data?.usage };
 }
+
+/**
+ * 流式聊天接口（SSE）。
+ * 按 SSE 规范逐行推送事件，客户端可实时渲染思考过程 + 答案。
+ *
+ * SSE 事件格式（每行 `event:<type>\ndata:<json>\n\n`）：
+ *   event:reasoning  data:{ "text": "思考片段" }
+ *   event:content    data:{ "text": "答案片段" }
+ *   event:done       data:{ "usage": {...} }
+ *   event:error      data:{ "message": "错误描述" }
+ *
+ * 回调 `onEvent({ type, data })` 在收到每种事件时被调用。
+ * @returns {Promise<{content:string, reasoningChunks:string[], usage:object|null}|null>}
+ */
+export async function chatStream(opts = {}, onEvent) {
+  const { purpose = 'chat', model: modelOverride, messages, temperature, maxTokens, timeout } = opts;
+  if (!Array.isArray(messages) || !messages.length) return null;
+
+  const target = resolvePurpose(purpose);
+  const model = modelOverride ?? target.model;
+  const callTimeout = timeout ?? timeoutFor(purpose);
+  const order = [target.provider, ...FALLBACK_ORDER.filter((p) => p !== target.provider)];
+
+  let lastErr;
+  for (const pname of order) {
+    const prov = PROVIDERS[pname];
+    if (!prov) continue;
+    const key = prov.apiKey();
+    if (!key) continue;
+    try {
+      const result = await streamOpenAI(prov, key, { model, messages, temperature, maxTokens, timeout: callTimeout }, onEvent);
+      return { ...result, provider: pname, model };
+    } catch (e) {
+      lastErr = e;
+      console.warn(`[llm-stream] ${pname} 调用失败: ${e?.message || e}`);
+    }
+  }
+  if (lastErr) {
+    onEvent?.({ type: 'error', data: { message: lastErr.message } });
+    console.error(`[llm-stream] 全部供应商失败: ${lastErr?.message || lastErr}`);
+  }
+  return null;
+}
+
+/** OpenAI 兼容流式调用，逐 chunk 解析 SSE，回调 onEvent。 */
+async function streamOpenAI(prov, key, { model, messages, temperature, maxTokens, timeout }, onEvent) {
+  const body = { model, messages, temperature: temperature ?? 0.5, max_tokens: maxTokens ?? 2500, stream: true };
+
+  let resp;
+  try {
+    resp = await fetch(prov.chatUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeout ?? 120_000),
+    });
+  } catch (e) {
+    throw new Error(`网络请求失败: ${e?.message || e}`);
+  }
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => '');
+    throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+  }
+
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  const reasoningChunks = [];
+  const contentChunks = [];
+  let usage = null;
+  let buf = '';
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    // SSE: lines starting with "data:"
+    const lines = buf.split('\n');
+    buf = lines.pop() || ''; // keep incomplete line
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      const payload = trimmed.slice(5).trim();
+      if (payload === '[DONE]') continue;
+      let obj;
+      try { obj = JSON.parse(payload); } catch { continue; }
+      const delta = obj.choices?.[0]?.delta || {};
+      if (delta.reasoning_content) {
+        reasoningChunks.push(delta.reasoning_content);
+        onEvent?.({ type: 'reasoning', data: { text: delta.reasoning_content } });
+      }
+      if (delta.content) {
+        contentChunks.push(delta.content);
+        onEvent?.({ type: 'content', data: { text: delta.content } });
+      }
+      if (obj.usage) usage = obj.usage;
+    }
+  }
+
+  const content = contentChunks.join('').trim();
+  onEvent?.({ type: 'done', data: { usage } });
+  console.info(`[llm-stream] ${model} reasoning=${reasoningChunks.length} chunks, content=${contentChunks.length} chunks`);
+  return { content, reasoningChunks, usage };
+}
