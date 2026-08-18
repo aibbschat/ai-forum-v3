@@ -41,6 +41,8 @@ router.post('/stream', async (req, res) => {
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no', // 禁 Nginx 缓冲
   });
+  // 立即 flush headers，确保后续 res.write 实时推送（不被 Node/Express 缓冲）
+  res.flushHeaders();
 
   const send = (event, data) => {
     res.write(`event:${event}\ndata:${JSON.stringify(data)}\n\n`);
