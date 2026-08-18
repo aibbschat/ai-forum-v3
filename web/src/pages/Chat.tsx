@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import Nav from '../components/Nav';
 
 /* ── 类型 ── */
@@ -289,10 +291,30 @@ export default function Chat() {
                         )}
                         {/* 思考过程（可折叠） */}
                         {m.reasoning && <ReasoningBlock text={m.reasoning} isOpen={m.isReasoning || false} />}
-                        {/* 正文 */}
+                        {/* 正文（Markdown 完整渲染） */}
                         {(m.content || (!m.pending && !m.reasoning)) && (
-                          <div className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap break-words">
-                            {renderText(m.content)}
+                          <div className="chat-markdown text-sm text-gray-800 leading-relaxed break-words">
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              components={{
+                                // 外链统一 nofollow + 新标签
+                                a({ href, children, ...rest }) {
+                                  const ext = typeof href === 'string' && /^https?:\/\//i.test(href);
+                                  return (
+                                    <a
+                                      href={href}
+                                      {...(ext ? { target: '_blank', rel: 'nofollow noopener noreferrer' } : {})}
+                                      className="text-brand-600 hover:underline"
+                                      {...rest}
+                                    >
+                                      {children}
+                                    </a>
+                                  );
+                                },
+                              }}
+                            >
+                              {m.content}
+                            </ReactMarkdown>
                             {m.isContent && <span className="inline-block w-1.5 h-4 bg-indigo-400 animate-pulse ml-0.5 align-middle" />}
                           </div>
                         )}
