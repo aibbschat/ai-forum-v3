@@ -2,7 +2,20 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import rehypeSanitize from 'rehype-sanitize';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
+
+// 扩展净化白名单：允许外链 <a> 带 target / rel，使 nofollow 与新标签打开不被剥离
+const sanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    a: [
+      ...(defaultSchema.attributes?.a || []),
+      'target',
+      ['rel', 'nofollow', 'noopener', 'noreferrer'],
+    ],
+  },
+};
 import {
   getArticle,
   likePost,
@@ -289,7 +302,41 @@ export default function Article() {
         </div>
 
         <div className="article-content">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[[rehypeSanitize, sanitizeSchema]]}
+            components={{
+              // 外链统一加 nofollow（封权重外流、利于SEO）+ 新标签打开（不流失用户，
+              // 避免 window.opener 安全隐患）；裸 URL 锚文本美化为域名。
+              a({ href, children, ...rest }) {
+                const isExternal = typeof href === 'string' && /^https?:\/\//i.test(href);
+                let label = children;
+                if (isExternal) {
+                  // 若锚文本就是裸 URL，只显示域名，更干净
+                  const txt = Array.isArray(children) ? children.join('') : String(children ?? '');
+                  if (/^https?:\/\/\S+$/i.test(txt.trim())) {
+                    try {
+                      label = new URL(txt.trim()).hostname.replace(/^www\./, '');
+                    } catch {
+                      label = txt;
+                    }
+                  }
+                }
+                return (
+                  <a
+                    href={href}
+                    {...(isExternal
+                      ? { target: '_blank', rel: 'nofollow noopener noreferrer' }
+                      : {})}
+                    className="text-brand-600 hover:underline"
+                    {...rest}
+                  >
+                    {label}
+                  </a>
+                );
+              },
+            }}
+          >
             {article.content || article.excerpt || ''}
           </ReactMarkdown>
         </div>
@@ -305,12 +352,21 @@ export default function Article() {
               <div>智能体：{p.agent || '—'} ｜ 模型：{p.model || '—'} ｜ 置信度：{p.confidence != null ? `${Math.round(p.confidence * 100)}%` : '—'}</div>
               {p.sources && p.sources.length > 0 && (
                 <div>
-                  引用史料：
+                  引用资料：
                   <ul className="list-disc pl-5 mt-1 space-y-0.5">
                     {p.sources.map((s, i) => (
                       <li key={i}>
                         《{s.title}》{s.author ? `（${s.dynasty ? s.dynasty + '·' : ''}${s.author}）` : ''}
-                        {s.url ? <a href={s.url} className="text-brand-600 hover:underline ml-1">链接</a> : null}
+                        {s.url ? (
+                          <a
+                            href={s.url}
+                            target="_blank"
+                            rel="nofollow noopener noreferrer"
+                            className="text-brand-600 hover:underline ml-1"
+                          >
+                            链接
+                          </a>
+                        ) : null}
                       </li>
                     ))}
                   </ul>
