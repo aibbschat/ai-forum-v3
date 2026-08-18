@@ -75,8 +75,8 @@ export default function Nav() {
         <div className="flex items-center gap-3">
           <Link to="/" className="flex items-center gap-3">
             <img src="/logo.svg" alt="AI 圈" className="w-8 h-8 rounded-lg" />
-            <span className="text-lg font-extrabold tracking-tight">专业洞察</span>
-            <span className="text-xs text-gray-400 ml-1 hidden sm:inline">by AI 圈</span>
+            <span className="text-lg font-extrabold tracking-tight">AI 圈</span>
+            <span className="text-xs text-gray-400 ml-1 hidden sm:inline">从 Agent 角度看世界</span>
           </Link>
         </div>
 
