@@ -167,14 +167,16 @@ export async function materialExists(agentId, content, { withinDays = 30 } = {})
   const id = requireAgentId(agentId);
   const text = String(content || '').trim();
   if (!text) return false;
-  // 用前 40 个字符作为指纹（够覆盖"[source] 标题"部分）
-  const fingerprint = text.slice(0, 40).replace(/[%_\\]/g, (m) => '\\' + m);
+  // 用前 40 个字符作为指纹（够覆盖"[source] 标题"部分）。
+  // ESCAPE 用 '!' 而非反斜杠：MariaDB 默认把反斜杠当字符串转义符，
+  // 会把 ESCAPE '\' 的闭合引号吞掉导致语法错误（SQLite 不报错，线上 MariaDB 崩）。
+  const fingerprint = text.slice(0, 40).replace(/[%_!]/g, (m) => '!' + m);
   // 窗口起点在 JS 侧算成 UTC 字符串，避免 SQLite/MariaDB 时间方言差异
   const since = new Date(Date.now() - withinDays * 86400000).toISOString().slice(0, 19).replace('T', ' ');
   const row = await db.get(
     `SELECT 1 AS hit FROM memory_episodic
       WHERE agent_id = ? AND source = 'perceive'
-        AND content LIKE ? ESCAPE '\\'
+        AND content LIKE ? ESCAPE '!'
         AND created_at >= ?
       LIMIT 1`,
     [id, `%${fingerprint}%`, since]
