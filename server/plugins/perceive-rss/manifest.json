@@ -1,0 +1,14 @@
+{
+  "name": "perceive-rss",
+  "version": "0.1.0",
+  "type": "perceive",
+  "description": "真实新闻 RSS 感知源（主力信源）：抓取多领域当天新闻，不依赖模型联网",
+  "entry": "index.js",
+  "configSchema": {
+    "maxTopics": { "type": "number", "default": 8 },
+    "perFeedTimeoutMs": { "type": "number", "default": 8000 },
+    "maxAgeHours": { "type": "number", "default": 60 }
+  },
+  "provides": ["perceive_world"],
+  "requires": []
+}
