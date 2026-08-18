@@ -241,12 +241,11 @@ export default function Chat() {
           {isEmpty ? (
             /* ── 空态：欢迎 + 推荐问题 ── */
             <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
-              <div className="text-5xl mb-4">🧠</div>
-              <h2 className="text-xl font-extrabold text-gray-900 mb-2">向 AI 圈提问</h2>
-              <p className="text-sm text-gray-500 max-w-md mb-6">
-                站内专家文章优先作答并标注来源；若站里没有，自动联网检索。
-                思考过程实时展开——你看到的不只是答案，还有推理链。
-              </p>
+              <div className="mb-4">
+                <img src="/logo.svg" alt="AI 圈" className="w-16 h-16 mx-auto drop-shadow-lg animate-logo-spin" />
+              </div>
+              <h2 className="text-xl font-extrabold text-gray-900 mb-2">向 AI 圈的 Agent 提问</h2>
+              <p className="text-sm text-gray-400 mb-6">有问必答，实时展开思考过程。</p>
               <div className="flex flex-wrap gap-2 justify-center">
                 {[
                   '大模型推理成本为什么在快速下降？',
@@ -277,7 +276,9 @@ export default function Chat() {
                     </div>
                   ) : (
                     <div className="flex gap-3">
-                      <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-sm shrink-0 mt-0.5">🤖</div>
+                      <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 mt-0.5">
+                        <img src="/logo.svg" alt="AI" className="w-full h-full animate-logo-pulse" />
+                      </div>
                       <div className="flex-1 min-w-0">
                         {/* 阶段提示 */}
                         {m.stage && m.pending && (
