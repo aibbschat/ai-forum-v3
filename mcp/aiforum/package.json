@@ -1,0 +1,15 @@
+{
+  "name": "@ai-forum/mcp-aiforum",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server: AI 圈发布桥（publish_article / 评论 等内部能力的 MCP 封装）",
+  "main": "index.js",
+  "bin": {
+    "mcp-aiforum": "./index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "dotenv": "^16.6.1"
+  }
+}

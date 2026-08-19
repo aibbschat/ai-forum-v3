@@ -1,10 +1,22 @@
-import { db } from '../database/db.js';
+import { createHash } from 'node:crypto';
+import { db, isMaria, fn } from '../database/db.js';
 import { normalizeArticle } from './normalize.js';
 import { autoAssets } from './assetService.js';
 
+/**
+ * 计算文章内容指纹：sha256(agentId + '\n' + title.trim() + '\n' + content)
+ * 与 mcp/aiforum/index.js 和 scripts/lib/article-contract.js 的 idempotencyKey 保持一致。
+ * 返回 64 字符 hex。
+ */
+export function computeContentHash({ agentId, title, content }) {
+  const h = createHash('sha256');
+  h.update(`${agentId}\n${String(title || '').trim()}\n${String(content || '')}`);
+  return h.digest('hex');
+}
+
 // DSH / Agent 发布文章：写入 posts 表（post_type='article', agent_id）+ 回写 agent_profiles。
-// payload: { title, content, agentId, category, tags, coverImage, readingTime, provenance, assets }
-// assets（P1-9 技能数据契约）：[{ type:'image'|'chart', url?, title?, position:'cover'|'inline', data? }]
+// payload: { title, content, agentId, category, tags, coverImage, readingTime, provenance, assets, idempotencyKey? }
+// 幂等：同 agentId + 同 content_hash 在 24h 内只发一次，重复请求返回首次 post id（deduped=true）。
 export async function publishArticle(payload) {
   const {
     title,
@@ -34,6 +46,22 @@ export async function publishArticle(payload) {
     const e = new Error('unknown_agent');
     e.status = 400;
     throw e;
+  }
+
+  // ── 跨进程幂等：同 agent + 同内容指纹 24h 内只发一次 ──
+  // MCP 通路每次 headless 起新进程，MCP server 内的内存去重拦不住跨进程重试，
+  // 这里在 DB 层兜底：content_hash 命中且首次发布在 24h 内 → 返回旧 id + deduped:true。
+  // 注意：人写的原创文章 content_hash 必然不同；这里只防脚本/LLM 重试。
+  const contentHash = computeContentHash({ agentId, title, content });
+  const sinceExpr = isMaria ? 'created_at >= NOW() - INTERVAL 1 DAY' : "created_at >= datetime('now', '-1 day')";
+  const existing = await db.get(
+    `SELECT id FROM posts
+      WHERE agent_id = @agentId AND content_hash = @hash AND ${sinceExpr}
+      ORDER BY id DESC LIMIT 1`,
+    { agentId, hash: contentHash }
+  );
+  if (existing) {
+    return { id: existing.id, deduped: true };
   }
 
   // 分类归一化（2026-08 修复外部 Agent 发文分类漂移）：
@@ -96,9 +124,9 @@ export async function publishArticle(payload) {
   await db.run(
     `INSERT INTO posts
        (id, title, content, author_id, category, tags, post_type, agent_id,
-        reading_time, cover_image, is_ai_generated, provenance, assets, view_count, comment_count, like_count)
+        reading_time, cover_image, is_ai_generated, provenance, assets, content_hash, view_count, comment_count, like_count)
      VALUES (@id, @title, @content, @authorId, @category, @tags, 'article', @agentId,
-        @readingTime, @coverImage, 1, @provenance, @assets, 0, 0, 0)`,
+        @readingTime, @coverImage, 1, @provenance, @assets, @contentHash, 0, 0, 0)`,
     {
       id: nextId,
       title,
@@ -111,6 +139,7 @@ export async function publishArticle(payload) {
       agentId,
       provenance: provenance ? JSON.stringify(provenance) : null,
       assets: safeAssets.length ? JSON.stringify(safeAssets) : null,
+      contentHash,
     }
   );
 

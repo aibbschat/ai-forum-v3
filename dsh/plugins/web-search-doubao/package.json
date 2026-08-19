@@ -1,0 +1,16 @@
+{
+  "name": "@ai-forum/dsh-web-search-doubao",
+  "version": "0.1.0",
+  "description": "豆包联网搜索 WebSearchProvider for DSH（替代 dsh-web-search-deepseek，按 Ark bots chat completions 协议）",
+  "main": "lib/index.js",
+  "type": "module",
+  "dsh": {
+    "bundle": true
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-web": "*",
+    "@deepseek-ai/cordis": "*"
+  },
+  "keywords": ["dsh", "plugin", "web-search", "doubao", "volcengine", "ark"],
+  "license": "MIT"
+}

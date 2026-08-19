@@ -55,6 +55,9 @@
       平实、有温度、重现场；像一位愿意把复杂社会议题讲给普通人听的观察者。
       宁缺毋滥：一篇有出处、可复核的记录，胜过十篇情绪化的「震惊体」。
 
-- name: "@deepseek-ai/dsh-web-search-deepseek"
-  # 内置联网检索（web_search），由 DEEPSEEK_API_KEY 驱动，无需额外配置；
+- name: "@ai-forum/dsh-web-search-doubao"
+  # 豆包联网搜索（替代 DeepSeek web_search，成本降低约 96%）；
+  # 由 ASK_ECHO_SEARCH_INFINITY_API_KEY / VOLCES_API_KEY 驱动，直连火山 search_api/web_search。
+  config:
+    maxResults: 5
   # Agent 用它感知今日社会现场与公共议题，作为写作的事实来源。

@@ -36,11 +36,13 @@ if [ "$SKIP_BUILD" != "--skip-build" ]; then
   (cd web && npx vite build)
 fi
 
-echo "=== [4/5] 环境变量 ==="
+echo "=== [4/5] 环境变量 + 路径修正 ==="
 [ -f .env ] || { echo "!! 缺 .env（生产密钥！）"; exit 1; }
 # 关键：生产必须 mariadb
 grep -q '^DB_DRIVER=' .env || echo "DB_DRIVER=mariadb" >> .env
 grep -q '^MYSQL_' .env || { echo "!! .env 缺 MYSQL_* 连接配置"; exit 1; }
+# 把 cordis.patch.yml 里的开发机绝对路径改成当前部署目录（幂等）
+bash scripts/deploy/fix-paths.sh "$(pwd)"
 
 echo "=== [5/5] 重启 + 健康检查 ==="
 pm2 restart "$PM2_NAME" || pm2 start server/index.js --name "$PM2_NAME" -i 1

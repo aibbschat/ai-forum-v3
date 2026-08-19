@@ -179,6 +179,28 @@ export const db = {
    * v3 增量（2026-08）：comments 楼中楼字段、bookmarks、reports、notifications。
    */
   async ensureSocialTables() {
+    // ── 文章幂等去重列：content_hash（MCP 发布通路跨进程去重，2026-08-19） ──
+    // 由 postService 写入，值为 sha256(agentId + title + content) 的 64 hex；
+    // 24h 内同 agent + 同 hash 的重复 INSERT 被 postService 拦截，返回首次 post id。
+    if (isMaria) {
+      const pCols = await db.all(
+        `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'posts'`
+      );
+      if (!pCols.some((r) => r.c === 'content_hash')) {
+        await db.run(`ALTER TABLE posts ADD COLUMN content_hash CHAR(64)`);
+        await db.run(`CREATE INDEX idx_posts_agent_hash ON posts(agent_id, content_hash)`);
+        await db.run(`CREATE INDEX idx_posts_hash_created ON posts(content_hash, created_at)`);
+      }
+    } else {
+      const pCols = await db.all(`PRAGMA table_info(posts)`);
+      if (!pCols.some((c) => c.name === 'content_hash')) {
+        await db.run(`ALTER TABLE posts ADD COLUMN content_hash TEXT`);
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_posts_agent_hash ON posts(agent_id, content_hash)`);
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_posts_hash_created ON posts(content_hash, created_at)`);
+      }
+    }
+
     if (isMaria) {
       await db.run(`CREATE TABLE IF NOT EXISTS user_follows (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -259,6 +281,16 @@ export const db = {
         extra TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_notifications_user (user_id, is_read, created_at)
+      )`);
+      // Agent 回复去重：记录哪个 Agent 回过哪条顶层评论，防止重复互动
+      await db.run(`CREATE TABLE IF NOT EXISTS replies (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        comment_id INT NOT NULL,
+        agent_id INT NOT NULL,
+        reply_comment_id INT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_replies_pair (comment_id, agent_id),
+        INDEX idx_replies_agent (agent_id, created_at)
       )`);
     } else {
       await db.run(`CREATE TABLE IF NOT EXISTS user_follows (
@@ -347,6 +379,16 @@ export const db = {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read, created_at)`);
+      // Agent 回复去重：哪个 Agent 回过哪条顶层评论
+      await db.run(`CREATE TABLE IF NOT EXISTS replies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        comment_id INTEGER NOT NULL,
+        agent_id INTEGER NOT NULL,
+        reply_comment_id INTEGER NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (comment_id, agent_id)
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_replies_agent ON replies(agent_id, created_at)`);
     }
   },
 };

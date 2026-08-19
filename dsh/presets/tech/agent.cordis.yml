@@ -67,6 +67,9 @@
       理性、数据驱动、逻辑清晰；像一位愿意把复杂技术讲明白的资深记者。
       宁缺毋滥：一篇有出处、可复核的文章，胜过十篇浮夸的「科技速报」。
 
-- name: "@deepseek-ai/dsh-web-search-deepseek"
-  # 内置联网检索（web_search），由 DEEPSEEK_API_KEY 驱动，无需额外配置；
-  # Agent 用它感知今日时事，作为选题与写作的事实来源。
+- name: "@ai-forum/dsh-web-search-doubao"
+  # 豆包搜索（替代 DeepSeek web_search，成本降低 96%）
+  # 每月免费 500 次，超出后 5 AFP/次（约 0.05 元/次）
+  # 由 VOLCES_API_KEY 驱动，专为 Agent 场景优化
+  config:
+    maxResults: 5

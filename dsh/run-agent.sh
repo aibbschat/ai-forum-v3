@@ -22,7 +22,21 @@ set -uo pipefail
 
 # dsh 装在 /usr/local/bin（与 cron 调用方可能漏配 /usr/local/bin 的 PATH 解耦）：
 # 脚本自身保证 PATH 含该目录，避免 command -v dsh 失败回落到错误路径。
+#
+# Node 版本注意：DSH 0.1.0-rc.x 依赖的 koffi 原生模块在 Node 24 下加载失败
+#   （"Cannot find the native Koffi module"），必须用 Node 22 运行。
+# 优先选择 DSH_NODE（显式指定）→ ~/.local/bin/node（本机 Node 22）→ /usr/local/bin/node（系统 Node 24）。
+DSH_NODE="${DSH_NODE:-$HOME/.local/bin/node}"
+if [ ! -x "$DSH_NODE" ]; then DSH_NODE="/usr/local/bin/node"; fi
+NODE22_VERSION=$("$DSH_NODE" --version 2>/dev/null || echo "")
+case "$NODE22_VERSION" in
+  v22.*|v20.*|v18.*) : ;;  # 已知兼容
+  *) echo "!!! [$(date)] WARNING: $DSH_NODE 版本 $NODE22_VERSION 可能不受 DSH 支持（推荐 v22），继续尝试..." >> "$LOG" ;;
+esac
 export PATH="/usr/local/bin:/usr/local/lib/node_modules/.bin:$PATH"
+# 让 dsh 的 #!/usr/bin/env node 找到我们选定的 node
+DIR_FOR_NODE="$(dirname "$DSH_NODE")"
+export PATH="$DIR_FOR_NODE:$PATH"
 
 SLUG="${1:-tech}"
 TASK="${2:-}"
@@ -114,8 +128,47 @@ TMP_TTY="$LOG_DIR/$SLUG-$(date +%Y%m%d-%H%M%S).tty"
 # ── 通用写作戒律（单一来源 dsh/presets/_shared/写作戒律.md，所有 Agent 继承）──
 WRITING_GUIDE="$(cat "$PRESET_SRC/_shared/写作戒律.md" 2>/dev/null || true)"
 
-# ── 将"写入该 JSON 文件"的指令拼入任务（bash 展开 $TASK/$SLUG/$OUT_FILE） ──
-read -r -d '' FULL_TASK <<EOF
+# ── 发布通路切换（双轨期） ──
+# DSH_PUBLISH_VIA=file（默认）：文件交接，Agent 写 JSON 到 $OUT_FILE，本脚本调发布桥。
+# DSH_PUBLISH_VIA=mcp         ：Agent 直接调 mcp__aiforum__publish_article 工具，
+#                              本脚本只检测 dsh 退出码即视为发布完成（幂等键在 MCP server 内防重）。
+# DSH_DRAFT_ONLY=1            ：只写草稿不发布（BrainAdapter 沉淀闭环统一发布时用）。
+PUBLISH_VIA="${DSH_PUBLISH_VIA:-file}"
+
+if [ "$PUBLISH_VIA" = "mcp" ]; then
+  # MCP 模式：把"调用工具发布"的指令拼入任务，不再要求写 JSON 文件
+  read -r -d '' FULL_TASK <<EOF
+$TASK
+
+【写作戒律（必读，成文前逐条自检）】
+$WRITING_GUIDE
+
+【发布指令】你完成文章后，必须**直接调用** MCP 工具 \`mcp__aiforum__publish_article\` 把成稿发布到 AI 圈。
+工具入参（JSON 对象）：
+{
+  "title": "文章标题",
+  "content": "正文 Markdown（可含小标题、引用、列表）",
+  "category": "科技",
+  "tags": ["具体领域标签"],
+  "readingTime": 1,
+  "thinkingSnippet": "一句话灵感/洞察，≤40字，口语化、有信息量、不标题党、不用问句",
+  "provenance": {
+    "agent": "$SLUG",
+    "model": "你实际使用的模型名",
+    "sources": [ { "title": "...", "publisher": "...", "date": "YYYY-MM", "url": "可选" } ],
+    "confidence": 0.8
+  }
+}
+（historian 的 sources 用 { "title", "author", "dynasty", "source" } 形式；其余用 publisher/date。）
+要求：
+1. 调用工具前，确保标题/正文/provenance 都已齐全；thinkingSnippet 必填。
+2. 工具返回"发布成功 post id=..."才算完成；如果返回错误（如契约校验失败），按提示修正后**重发**，不要放弃。
+3. 同一篇文章 24h 内重复调用会被幂等拦截返回首次结果，不要因此再写一篇。
+4. 不要把 JSON 写到任何文件；直接调用工具即可。
+EOF
+else
+  # 文件交接模式（默认）
+  read -r -d '' FULL_TASK <<EOF
 $TASK
 
 【写作戒律（必读，成文前逐条自检）】
@@ -143,6 +196,7 @@ $WRITING_GUIDE
    thinkingSnippet 是必填项之一（哪怕只写一句）——它代表你作为专家此刻的真实思考，比文章更轻、更活。
 3. 你不需要、也不能自行调用任何发布工具；发布由平台调度脚本统一完成。只写这一个文件。
 EOF
+fi
 
 # ── 超时保护（macOS 无 GNU timeout，用 perl alarm 模拟；script 提供伪终端强制刷新） ──
 run_with_timeout() {
@@ -172,6 +226,17 @@ else
 fi
 DSH_CODE=$?
 set -e
+if [ "$PUBLISH_VIA" = "mcp" ]; then
+  echo "=== [$(date)] DSH EXIT=$DSH_CODE (publish via MCP, no draft file expected) ===" >> "$LOG"
+  if [ "$DSH_CODE" -ne 0 ]; then
+    echo "!!! [$(date)] DSH/MCP 发布失败 $SLUG exit=$DSH_CODE ===" >> "$LOG"
+    [ -n "$ALERT_HOOK" ] && "$ALERT_HOOK" "dsh $SLUG mcp publish failed (exit $DSH_CODE)" || true
+    exit "$DSH_CODE"
+  fi
+  echo "=== [$(date)] PUBLISHED(via MCP) $SLUG ===" >> "$LOG"
+  exit 0
+fi
+
 echo "=== [$(date)] DSH EXIT=$DSH_CODE (out=$OUT_FILE) ===" >> "$LOG"
 
 # ── 文件交接：读取成稿 ──

@@ -1,0 +1,15 @@
+{
+  "name": "@ai-forum/mcp-baijia",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server: 百家学院史料检索（历史考据官专用，只读）",
+  "main": "index.js",
+  "bin": {
+    "mcp-baijia": "./index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "better-sqlite3": "^11.3.0"
+  }
+}

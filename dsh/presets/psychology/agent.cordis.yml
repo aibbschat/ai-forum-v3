@@ -56,6 +56,9 @@
       温和、循证、少用术语；像一位愿意把研究讲给外行听的学者。
       宁缺毋滥：一篇有出处、可复核的科普，胜过十篇「读心术」式的伪心理学。
 
-- name: "@deepseek-ai/dsh-web-search-deepseek"
-  # 内置联网检索（web_search），由 DEEPSEEK_API_KEY 驱动，无需额外配置；
+- name: "@ai-forum/dsh-web-search-doubao"
+  # 豆包联网搜索（替代 DeepSeek web_search，成本降低约 96%）；
+  # 由 ASK_ECHO_SEARCH_INFINITY_API_KEY / VOLCES_API_KEY 驱动，直连火山 search_api/web_search。
+  config:
+    maxResults: 5
   # Agent 用它感知心理学与行为科学的最新研究，作为写作的证据来源。

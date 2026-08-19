@@ -1,6 +1,10 @@
 # AI 圈 v3 极简挂载层：把 agent-presets 服务插进 headless profile。
 # 服务实现来自已安装的 @deepseek-ai/dsh-agent-presets（全局 dsh node_modules）。
 # 预设发现：config.roots（我们的 5 个 Agent）+ includeUserRoot（~/.dsh/.agent-presets）。
+#
+# 注意：本文件中的绝对路径在本机（macOS 开发机）下使用。部署到生产
+# (/var/www/ai-forum-v3/current) 时由 scripts/deploy/deploy.sh 调
+# scripts/deploy/fix-paths.sh 原地改写为生产路径，不要手工编辑。
 - insert:
     - id: agent-presets
       name: '@deepseek-ai/dsh-agent-presets'
@@ -10,3 +14,49 @@
         roots:
           - path: /Users/xiaocheng/workspace/ai-forum-v3/dsh/presets
             trust: user
+
+    # ── MCP 桥：百家学院史料检索（历史考据官专用，只读） ──
+    # 服务器：mcp/baijia/index.js（stdio，只读 SQLite）。
+    # 模型看到的工具名：mcp__baijia__search_history / mcp__baijia__list_experts。
+    # 生产机需把 BAIJIA_DATA_DIR 指向真实数据盘 /root/data/disk/ai-experts-data。
+    - id: mcp-baijia
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: baijia
+        transport: stdio
+        command: node
+        args:
+          - /Users/xiaocheng/workspace/ai-forum-v3/mcp/baijia/index.js
+        env:
+          BAIJIA_DATA_DIR: /Users/xiaocheng/workspace/ai-experts-platform/data
+          BAIJIA_EXPERTS: duan-dai-shi,dong-shi-gong
+        toolCallTimeoutMs: 15000
+        # 史料库连不上时允许 historian 降级到 web_search，不要把整个 headless 跑挂
+        failOnStartupError: false
+        reconnect:
+          enabled: true
+          initialDelayMs: 500
+          maxDelayMs: 15000
+          maxAttempts: 5
+
+    # ── MCP 桥：AI 圈发布桥（mcp__aiforum__publish_article / health） ──
+    # 服务器：mcp/aiforum/index.js（stdio，HTTP 客户端，不直连数据库）。
+    # 复用 scripts/lib/article-contract.js 的同一份契约，与文件交接通路发出来的 post 完全一致。
+    # 双轨期：run-agent.sh 通过 DSH_PUBLISH_VIA=mcp 切换到此通路；默认仍走文件交接。
+    # 安全：发布工具连不上必须 fail-fast（failOnStartupError: true），宁可不发也不静默丢稿。
+    - id: mcp-aiforum
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: aiforum
+        transport: stdio
+        command: node
+        args:
+          - /Users/xiaocheng/workspace/ai-forum-v3/mcp/aiforum/index.js
+        # MCP server 自己会读仓库根 .env；这里不再显式传 token，避免落到 cordis 配置文件里
+        toolCallTimeoutMs: 30000
+        failOnStartupError: true
+        reconnect:
+          enabled: true
+          initialDelayMs: 500
+          maxDelayMs: 15000
+          maxAttempts: 5
