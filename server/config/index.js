@@ -1,5 +1,8 @@
 import dotenv from 'dotenv';
+// 先加载基础 .env；再叠加可选的 .env.brain（由 scripts/switch-brain.sh 维护），
+// 后者只放 LLM_MODEL_* 路由覆盖，优先级更高，切换大脑供应商时不改动含密钥的主 .env。
 dotenv.config();
+dotenv.config({ path: new URL('../../.env.brain', import.meta.url), override: true });
 
 export const config = {
   port: Number(process.env.PORT || 3001),

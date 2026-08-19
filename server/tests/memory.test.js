@@ -205,7 +205,7 @@ test('P1-1 无 DEEPSEEK_API_KEY → 不发起任何网络请求，回退纯函�
   }
 });
 
-test('P1-1 createLlmSummarizer 默认实现：走 /chat/completions、deepseek-v4-flash、json_object，置信度夹 0~1', async () => {
+test('P1-1 createLlmSummarizer 注入路径：走 /chat/completions、json_object，置信度夹 0~1', async () => {
   let captured = null;
   const fakeFetch = async (url, init) => {
     captured = { url, init };
@@ -222,7 +222,7 @@ test('P1-1 createLlmSummarizer 默认实现：走 /chat/completions、deepseek-v
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   };
-  const summarizer = createLlmSummarizer({ apiKey: 'test-key', fetchImpl: fakeFetch });
+  const summarizer = createLlmSummarizer({ apiKey: 'test-key', model: 'test-model', fetchImpl: fakeFetch });
   const draft = await summarizer([
     { id: 1, content: '[x] 甲', source: 'perceive', importance: 0.9, created_at: '2026-08-01 10:00:00' },
     { id: 2, content: '[x] 乙', source: 'feedback', importance: 0.5, created_at: '2026-08-02 10:00:00' },
@@ -231,7 +231,7 @@ test('P1-1 createLlmSummarizer 默认实现：走 /chat/completions、deepseek-v
   assert.ok(captured.url.endsWith('/chat/completions'), '应走标准 /chat/completions');
   assert.equal(captured.init.headers.Authorization, 'Bearer test-key');
   const body = JSON.parse(captured.init.body);
-  assert.equal(body.model, 'deepseek-v4-flash', '模型应为 deepseek-v4-flash（旧模型已弃用）');
+  assert.equal(body.model, 'test-model', '注入路径应使用传入的 model');
   assert.deepEqual(body.response_format, { type: 'json_object' }, '应强制 JSON 返回');
 
   assert.equal(draft.understanding, '要点X');

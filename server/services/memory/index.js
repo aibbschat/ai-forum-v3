@@ -32,12 +32,13 @@ export const EPISODIC_TTL_DAYS = 90;
 const EVICT_BATCH = 1_000;
 
 // ── LLM 巩固（§7.6.3）配置 ─────────────────────────────────────────
-// 关键 API 知识（2026-08-15 实测）：
-// - 巩固总结走标准 /chat/completions（不需要 web_search 工具，该工具只在 Anthropic 兼容路由）。
-// - deepseek-chat / deepseek-reasoner 已于 2026-07-24 弃用；端点/模型现读 env（DEEPSEEK_ENDPOINT / DEEPSEEK_MODEL），默认仍指向 DeepSeek，生产切到 Volcengine Agent Plan。
-const DEEPSEEK_ENDPOINT = process.env.DEEPSEEK_ENDPOINT ?? 'https://api.deepseek.com/chat/completions';
-const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
-const LLM_TIMEOUT_MS = 30_000;
+// 巩固总结一律走 server/llm 统一路由层（chat()），不再直接 fetch /chat/completions，
+// 也不再读 DEEPSEEK_* 变量——供应商/模型/密钥全部由 llm/config.js 统一决定，
+// 换模型（火山/小米/DeepSeek）只需改一处配置或 LLM_MODEL_MEMORY 环境变量。
+// 仅为单测保留 createLlmSummarizer 的可注入签名（apiKey/fetchImpl），生产路径不用。
+import { chat as llmChat } from '../../llm/client.js';
+
+const LLM_TIMEOUT_MS = 120_000; // 与 llm/client.js 的 purpose=memory 超时一致
 
 /** 检索加权表达式：importance × recency，recency = 1/(1+距今天数)。 */
 const SCORE_SQL = `importance * ${fn.recencyScore('created_at')}`;
@@ -655,32 +656,26 @@ function parseLlmJson(raw) {
  * 与 summarizeEpisodics 返回结构对齐（额外带 confidence 自评与 doubts 存疑点），
  * 使 consolidate() 对 LLM / 纯函数两条路径的消费方式一致。
  *
- * 实现要点：
- * - 走标准 /chat/completions（不需要 web_search 工具），端点/模型读 env（DEEPSEEK_ENDPOINT / DEEPSEEK_MODEL）。
- * - response_format: { type: 'json_object' } 强制 JSON 返回；Node 22 内置 fetch。
- * - 无 DEEPSEEK_API_KEY 或无 fetch → 抛错（consolidate 捕获后回退纯函数，不发起网络）。
- * - 一次调用总结一组 rows；空组直接返回纯函数空草稿。
+ * 生产路径（无注入参数）一律走 server/llm 统一层 chat({purpose:'memory'})，
+ * 供应商/模型/密钥/降级全部由 llm/config.js 决定，本模块不再直连端点或读 DEEPSEEK_*。
  *
- * 依赖全部可注入（apiKey / fetchImpl 等），测试注入 mock fetch 不真调 API。
+ * 仅为单测保留可注入参数（apiKey + fetchImpl）：传入 fetchImpl 时走注入的直连路径，
+ * 以便断言请求体/鉴权头而不依赖真实供应商。
  *
  * @param {{apiKey?:string, model?:string, endpoint?:string, timeoutMs?:number,
  *          fetchImpl?:typeof fetch}} [opts]
  * @returns {(rows:Array<object>) => Promise<object>}
  */
 export function createLlmSummarizer({
-  apiKey = process.env.DEEPSEEK_API_KEY,
-  model = DEEPSEEK_MODEL,
-  endpoint = DEEPSEEK_ENDPOINT,
+  apiKey,
+  model,
+  endpoint,
   timeoutMs = LLM_TIMEOUT_MS,
-  fetchImpl = globalThis.fetch,
+  fetchImpl,
 } = {}) {
   return async function llmSummarizer(rows = []) {
     const list = Array.isArray(rows) ? rows.filter(Boolean) : [];
     if (!list.length) return summarizeEpisodics([]);
-    if (!apiKey) throw new Error('DEEPSEEK_API_KEY 未设置，跳过 LLM 巩固（回退纯函数聚合）');
-    if (typeof fetchImpl !== 'function') {
-      throw new Error('当前运行时无 fetch，跳过 LLM 巩固（回退纯函数聚合）');
-    }
 
     // domain 从组内第一条 content 推断，仅用于 prompt 上下文提示，不做分组依据。
     const domain = inferDomain(list[0].content);
@@ -701,42 +696,51 @@ export function createLlmSummarizer({
       },
     ];
 
-    let resp;
-    try {
-      resp = await fetchImpl(endpoint, {
+    // ── 测试注入路径：直连 fetch，断言请求体/鉴权头，不依赖统一层 ──
+    if (typeof fetchImpl === 'function') {
+      if (!apiKey) throw new Error('测试注入需要 apiKey');
+      const target = endpoint || 'https://invalid.test/chat/completions';
+      const resp = await fetchImpl(target, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({ model, messages, response_format: { type: 'json_object' } }),
+        body: JSON.stringify({
+          model: model || 'test-model',
+          messages,
+          response_format: { type: 'json_object' },
+        }),
         signal: AbortSignal.timeout(timeoutMs),
       });
-    } catch (e) {
-      throw new Error(`LLM 请求失败: ${e.message}`);
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(`LLM HTTP ${resp.status}: ${text.slice(0, 200)}`);
+      }
+      const payload = await resp.json().catch(() => {
+        throw new Error('LLM 响应不是合法 JSON');
+      });
+      return buildDraft(list, payload?.choices?.[0]?.message?.content);
     }
 
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
-      throw new Error(`LLM HTTP ${resp.status}: ${text.slice(0, 200)}`);
-    }
+    // ── 生产路径：统一层（自动供应商选择 + 降级 + 超时）──
+    const res = await llmChat({ purpose: 'memory', messages, json: true, timeout: timeoutMs });
+    if (!res || !res.content) throw new Error('LLM 统一层无可用响应（回退纯函数聚合）');
+    return buildDraft(list, res.content);
+  };
+}
 
-    const payload = await resp.json().catch(() => {
-      throw new Error('LLM 响应不是合法 JSON');
-    });
-    const content = payload?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || !content.trim()) throw new Error('LLM 返回内容为空');
-
-    const parsed = parseLlmJson(content);
-    const understanding = typeof parsed.understanding === 'string' ? parsed.understanding.trim() : '';
-    if (!understanding) throw new Error('LLM 返回缺少 understanding 字段');
-
-    return {
-      understanding,
-      evidenceIds: toIdArray(parsed.evidenceIds),
-      sources: [...new Set(list.map((r) => r.source).filter(Boolean))],
-      count: list.length,
-      avgImportance: list.reduce((sum, r) => sum + clamp01(r.importance, 0.5), 0) / list.length,
-      confidence: clamp01(parsed.confidence, undefined), // 缺失时留给 consolidate 用 confidence 参数兜底
-      doubts: Array.isArray(parsed.doubts) ? parsed.doubts.map(String).filter(Boolean) : [],
-    };
+/** 把 LLM 返回的 JSON 文本解析成 draft（统一层与注入路径共用）。 */
+function buildDraft(list, content) {
+  if (typeof content !== 'string' || !content.trim()) throw new Error('LLM 返回内容为空');
+  const parsed = parseLlmJson(content);
+  const understanding = typeof parsed.understanding === 'string' ? parsed.understanding.trim() : '';
+  if (!understanding) throw new Error('LLM 返回缺少 understanding 字段');
+  return {
+    understanding,
+    evidenceIds: toIdArray(parsed.evidenceIds),
+    sources: [...new Set(list.map((r) => r.source).filter(Boolean))],
+    count: list.length,
+    avgImportance: list.reduce((sum, r) => sum + clamp01(r.importance, 0.5), 0) / list.length,
+    confidence: clamp01(parsed.confidence, undefined), // 缺失时留给 consolidate 用 confidence 参数兜底
+    doubts: Array.isArray(parsed.doubts) ? parsed.doubts.map(String).filter(Boolean) : [],
   };
 }
 

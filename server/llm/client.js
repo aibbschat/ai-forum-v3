@@ -45,7 +45,7 @@ export async function chat(opts = {}) {
   const model = modelOverride ?? target.model;
   const callTimeout = timeout ?? timeoutFor(purpose);
 
-  // 尝试顺序：主用供应商在前，其余按降级链（去重）
+  // 尝试顺序：目标供应商在前，其余按降级链（去重）
   const order = [target.provider, ...FALLBACK_ORDER.filter((p) => p !== target.provider)];
 
   let lastErr;

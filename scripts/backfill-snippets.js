@@ -1,6 +1,8 @@
 // scripts/backfill-snippets.js
-// 冷启动回填：对站内已有的 AI 文章，用 DeepSeek 提炼一句"专家此刻的洞察"写入 thinking_snippets，
+// 冷启动回填：对站内已有的 AI 文章，用 LLM 提炼一句"专家此刻的洞察"写入 thinking_snippets，
 // 让「思想广场」一上线就有内容、且每条都能「展开追问」跳到对话。
+//
+// 走 server/llm 统一路由层：供应商/模型由 .env 决定（默认火山包月），不直连端点。
 //
 // 幂等：已为该文章生成过 snippet（source_article_id 已存在）则跳过。
 // 用法：node scripts/backfill-snippets.js [--limit 30]
@@ -12,13 +14,11 @@ import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db } from '../server/database/db.js';
 import { insertSnippet } from '../server/services/snippetService.js';
+import { chat as llmChat } from '../server/llm/client.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 dotenv.config({ path: join(ROOT, '.env') });
-
-const DEEPSEEK_ENDPOINT = process.env.DEEPSEEK_ENDPOINT ?? 'https://api.deepseek.com/chat/completions';
-const MODEL = process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
 
 const args = process.argv.slice(2);
 const limit = (() => {
@@ -27,8 +27,6 @@ const limit = (() => {
 })();
 
 async function genSnippet(agentName, title, excerpt) {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) return null;
   const prompt =
     `你是「${agentName}」，一位驻站 AI 专家。\n` +
     `你刚写了一篇文章《${title}》，核心内容：${excerpt}\n\n` +
@@ -36,29 +34,18 @@ async function genSnippet(agentName, title, excerpt) {
     `口语化、有具体信息量、不标题党、不用问句、不要出现书名号。\n` +
     `只输出这句话本身，不要解释、不要引号。`;
 
-  // deepseek-v4-flash 是推理模型，预算不足会让 content 为空 → 递增重试
+  // 推理模型预算不足会让 content 为空 → 递增 maxTokens 重试
   for (const maxTokens of [1500, 3000]) {
-    let resp;
-    try {
-      resp = await fetch(DEEPSEEK_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: MODEL,
-          messages: [
-            { role: 'system', content: '你是严谨的中文专家，只输出用户要求的一句话，不要多余内容。' },
-            { role: 'user', content: prompt },
-          ],
-          max_tokens: maxTokens,
-          temperature: 0.7,
-        }),
-      });
-    } catch {
-      continue;
-    }
-    if (!resp.ok) continue;
-    const data = await resp.json().catch(() => null);
-    const raw = data?.choices?.[0]?.message?.content?.trim();
+    const res = await llmChat({
+      purpose: 'chat',
+      messages: [
+        { role: 'system', content: '你是严谨的中文专家，只输出用户要求的一句话，不要多余内容。' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.7,
+      maxTokens,
+    }).catch(() => null);
+    const raw = res?.content?.trim();
     if (raw) return raw.replace(/^["'「『]|["'」』]$/g, '').slice(0, 140);
   }
   return null;

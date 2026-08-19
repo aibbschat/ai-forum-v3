@@ -8,13 +8,13 @@
 
 # ── 大脑模型路由（成本控制核心）──────────────────────────────────
 # DSH 默认大脑是 deepseek-official / deepseek-v4-flash（按量付费，一天约 30 元）。
-# 这里通过 dsh-llm-pi-ai 多供应商适配器注册火山方舟 Agent Plan 路由（包月 50 元封顶），
-# 并把默认大脑切到火山。DeepSeek 官方适配器仍保留，但其 key 改用独立变量名
-# DEEPSEEK_OFFICIAL_KEY（见下 llm-deepseek 覆盖），与后端 .env 里那把同名但实为
-# 火山 key 的 DEEPSEEK_API_KEY 彻底隔离，消灭"同名不同物"的 401 陷阱。
+# 这里通过 dsh-llm-pi-ai 多供应商适配器注册所有候选套餐路由，默认大脑切到火山包月。
+# 切换（火山/小米/DeepSeek）改 agent-default-model 即可，或用 scripts/switch-brain.sh。
 #
-# 切换包月/按量：改 agent-default-model 的 provider 即可（volcengine ↔ deepseek-official），
-# 或用 scripts/switch-brain.sh 一键切换，无需改代码。
+# 供应商命名与后端 server/llm/config.js 保持一致；key 全部语义化命名，互不污染：
+#   VOLCES_API_KEY            火山 Agent Plan（包月）
+#   XIAOMI_TOKEN_PLAN_CN_API_KEY  小米 MiMo Token Plan（包月，OpenAI 兼容）
+#   DEEPSEEK_OFFICIAL_KEY     DeepSeek 官方按量（备用）
 - id: llm-pi-ai
   config:
     providers:
@@ -28,6 +28,17 @@
           - id: ark-code-latest
             name: Ark Code Latest (Agent Plan)
             contextWindow: 256000
+            maxTokens: 32768
+      xiaomi:
+        displayName: 小米 MiMo Token Plan
+        apiKeyEnv: XIAOMI_TOKEN_PLAN_CN_API_KEY
+        api: openai-completions
+        # OpenAI 兼容 BASE_URL，model mimo-v2.5-pro；tp- 开头的 Token Plan key
+        baseURL: https://token-plan-cn.xiaomimimo.com/v1
+        models:
+          - id: mimo-v2.5-pro
+            name: MiMo V2.5 Pro
+            contextWindow: 1000000
             maxTokens: 32768
 
 - id: agent-default-model
