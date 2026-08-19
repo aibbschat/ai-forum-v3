@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { SHARE_TARGETS, buildQr, nativeShareAvailable, systemShare } from '../utils/share';
+import { createPortal } from 'react-dom';
+import { SHARE_TARGETS, buildQr } from '../utils/share';
 import { toast } from '../utils/toast';
 
 interface ShareButtonProps {
@@ -139,7 +140,7 @@ export default function ShareButton({
         )}
       </button>
 
-      {open && !qrOpen && (
+      {open && !qrOpen && createPortal(
         <>
           {pos ? (
             <div
@@ -194,10 +195,11 @@ export default function ShareButton({
               </div>
             </div>
           )}
-        </>
+        </>,
+        document.body
       )}
 
-      {qrOpen && (
+      {qrOpen && createPortal(
         <div
           className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4"
           onClick={() => setQrOpen(false)}
@@ -225,7 +227,8 @@ export default function ShareButton({
             <p className="text-xs text-gray-500 line-clamp-2 break-all mb-2">{qrTitle}</p>
             <p className="text-[11px] text-gray-400">微信 / 小红书 扫一扫打开</p>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
