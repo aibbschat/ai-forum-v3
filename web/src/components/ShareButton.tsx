@@ -76,7 +76,29 @@ export default function ShareButton({
     }
     if (btnRef.current && window.innerWidth >= 768) {
       const r = btnRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 6, left: Math.max(8, r.right - 180) });
+      const menuW = 220;
+      const menuH = SHARE_TARGETS.length * 38 + 12; // 每项 ~38px + 上下 padding
+      const margin = 8;
+
+      // 水平：默认右对齐到按钮；若右边放不下就往左推，但不超出视口左边
+      let left = r.right - menuW;
+      if (left < margin) left = margin;
+      if (left + menuW > window.innerWidth - margin) {
+        left = Math.max(margin, window.innerWidth - menuW - margin);
+      }
+
+      // 垂直：优先在按钮下方；下方不够则翻到按钮上方
+      let top = r.bottom + 6;
+      if (top + menuH > window.innerHeight - margin) {
+        const above = r.top - 6 - menuH;
+        if (above >= margin) {
+          top = above;
+        } else {
+          // 上下都不够：贴着底部，允许滚动（极端小屏）
+          top = Math.max(margin, window.innerHeight - menuH - margin);
+        }
+      }
+      setPos({ top, left });
     } else {
       setPos(null); // 移动端走底部居中面板
     }
