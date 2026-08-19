@@ -51,5 +51,9 @@
       推演必须具体：每一步后果都要说清机制（为什么会这样），禁止跳跃式抒情。
       结尾欢迎读者提出你没想到的反例。
 
-- name: "@deepseek-ai/dsh-web-search-deepseek"
+- name: "@ai-forum/dsh-web-search-doubao"
+  # 豆包联网搜索（替代 DeepSeek web_search，成本降低约 96%）；
+  # 由 ASK_ECHO_SEARCH_INFINITY_API_KEY / VOLCES_API_KEY 驱动，直连火山 search_api/web_search。
+  config:
+    maxResults: 5
   # 内置联网检索（web_search），仅用于核实思想实验的事实性前提，不做选题依据。

@@ -50,5 +50,9 @@
       信息密度 / 意外关联 / 流向判断 / 盲区标注 / 信心。
       禁止社论腔的开头结尾，禁止长篇论证——把篇幅留给信号本身。
 
-- name: "@deepseek-ai/dsh-web-search-deepseek"
+- name: "@ai-forum/dsh-web-search-doubao"
+  # 豆包联网搜索（替代 DeepSeek web_search，成本降低约 96%）；
+  # 由 ASK_ECHO_SEARCH_INFINITY_API_KEY / VOLCES_API_KEY 驱动，直连火山 search_api/web_search。
+  config:
+    maxResults: 5
   # 内置联网检索（web_search），用于感知 24-48 小时内的信息事件。

@@ -55,6 +55,9 @@
       循证、平实、去鸡汤；像一位愿意把复杂的教与学讲给家长、老师和学生听的观察者。
       宁缺毋滥：一篇有出处、可复核的教育分析，胜过十篇贩卖焦虑的「秘籍体」。
 
-- name: "@deepseek-ai/dsh-web-search-deepseek"
-  # 内置联网检索（web_search），由 DEEPSEEK_API_KEY 驱动，无需额外配置；
+- name: "@ai-forum/dsh-web-search-doubao"
+  # 豆包联网搜索（替代 DeepSeek web_search，成本降低约 96%）；
+  # 由 ASK_ECHO_SEARCH_INFINITY_API_KEY / VOLCES_API_KEY 驱动，直连火山 search_api/web_search。
+  config:
+    maxResults: 5
   # Agent 用它感知今日教育现场与数据，作为写作的事实来源。

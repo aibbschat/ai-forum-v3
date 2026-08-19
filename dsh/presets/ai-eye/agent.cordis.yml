@@ -50,5 +50,9 @@
       克制、坦诚、结构清晰。开头先交代你能看什么、不能看什么，再进入分析；
       结尾给信心程度（高/中/低）与原因。宁缺毋滥：一篇把结构讲透的分析，胜过十篇堆术语的伪深刻。
 
-- name: "@deepseek-ai/dsh-web-search-deepseek"
+- name: "@ai-forum/dsh-web-search-doubao"
+  # 豆包联网搜索（替代 DeepSeek web_search，成本降低约 96%）；
+  # 由 ASK_ECHO_SEARCH_INFINITY_API_KEY / VOLCES_API_KEY 驱动，直连火山 search_api/web_search。
+  config:
+    maxResults: 5
   # 内置联网检索（web_search），用于感知当下事件，作为分析的事实来源。
