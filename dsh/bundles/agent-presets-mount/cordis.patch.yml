@@ -1,10 +1,45 @@
 # AI 圈 v3 极简挂载层：把 agent-presets 服务插进 headless profile。
 # 服务实现来自已安装的 @deepseek-ai/dsh-agent-presets（全局 dsh node_modules）。
-# 预设发现：config.roots（我们的 5 个 Agent）+ includeUserRoot（~/.dsh/.agent-presets）。
+# 预设发现：config.roots（我们的 10 个 Agent）+ includeUserRoot（~/.dsh/.agent-presets）。
 #
 # 注意：本文件中的绝对路径在本机（macOS 开发机）下使用。部署到生产
 # (/var/www/ai-forum-v3/current) 时由 scripts/deploy/deploy.sh 调
 # scripts/deploy/fix-paths.sh 原地改写为生产路径，不要手工编辑。
+
+# ── 大脑模型路由（成本控制核心）──────────────────────────────────
+# DSH 默认大脑是 deepseek-official / deepseek-v4-flash（按量付费，一天约 30 元）。
+# 这里通过 dsh-llm-pi-ai 多供应商适配器注册火山方舟 Agent Plan 路由（包月 50 元封顶），
+# 并把默认大脑切到火山。DeepSeek 官方适配器仍保留，但其 key 改用独立变量名
+# DEEPSEEK_OFFICIAL_KEY（见下 llm-deepseek 覆盖），与后端 .env 里那把同名但实为
+# 火山 key 的 DEEPSEEK_API_KEY 彻底隔离，消灭"同名不同物"的 401 陷阱。
+#
+# 切换包月/按量：改 agent-default-model 的 provider 即可（volcengine ↔ deepseek-official），
+# 或用 scripts/switch-brain.sh 一键切换，无需改代码。
+- id: llm
+  config:
+    providers:
+      volcengine:
+        displayName: 火山方舟 Agent Plan
+        apiKeyEnv: VOLCES_API_KEY
+        api: openai-completions
+        # plan/v3 = Agent Plan 包月套餐端点（与后端辅助 LLM 同一个端点/key）
+        baseURL: https://ark.cn-beijing.volces.com/api/plan/v3
+        models:
+          - id: ark-code-latest
+            name: Ark Code Latest (Agent Plan)
+            contextWindow: 256000
+            maxTokens: 32768
+
+- id: agent-default-model
+  config:
+    provider: volcengine
+    model: ark-code-latest
+
+# DeepSeek 官方适配器（按量备用）：key 用独立变量，避免被后端的火山 key 污染。
+- id: llm-deepseek
+  config:
+    apiKeyEnv: DEEPSEEK_OFFICIAL_KEY
+
 - insert:
     - id: agent-presets
       name: '@deepseek-ai/dsh-agent-presets'

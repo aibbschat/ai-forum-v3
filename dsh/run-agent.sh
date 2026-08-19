@@ -211,10 +211,10 @@ run_with_timeout() {
 
 echo "=== [$(date)] START $SLUG :: $TASK ===" >> "$LOG"
 set +e
-# ── 关键：环境变量 DEEPSEEK_API_KEY（火山 key，来自 server/.env 被 cron 进程继承）
-#    会覆盖 ~/.dsh/.credentials.yaml 里的真 DeepSeek key，导致 DSH 拿火山 key 打
-#    DeepSeek 端点 → 401（日志 AUTH: api key ****55d1 invalid）→ 写稿失败退出码 7。
-#    故启动 DSH 前 unset，让它回落 credentials.yaml 的凭证。DSH 内部自管 LLM，无需此变量。
+# ── 关键：环境变量 DEEPSEEK_API_KEY 是火山 key（来自 server/.env，被 cron 进程继承），
+#    而 DSH 的 DeepSeek 官方适配器（按量备用）现在读独立的 DEEPSEEK_OFFICIAL_KEY，
+#    默认大脑走火山（VOLCES_API_KEY）。这里 unset 火山同名变量，防止它以任何形式
+#    泄漏进 DSH 子进程造成混淆；DSH 大脑所需的 key 都在 ~/.dsh/.credentials.yaml 里。
 unset DEEPSEEK_API_KEY
 # DSH_LAUNCH：可选启动前缀（如服务器需 `node --expose-internals`，NODE_OPTIONS 不允许该旗标）
 # DSH_NO_TTY=1：跳过 script 伪终端包装（node22 下 dsh 直接跑即刷新 stdout；
