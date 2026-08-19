@@ -25,16 +25,21 @@ set -uo pipefail
 #
 # Node 版本注意：DSH 0.1.0-rc.x 依赖的 koffi 原生模块在 Node 24 下加载失败
 #   （"Cannot find the native Koffi module"），必须用 Node 22 运行。
-# 优先选择 DSH_NODE（显式指定）→ ~/.local/bin/node（本机 Node 22）→ /usr/local/bin/node（系统 Node 24）。
-DSH_NODE="${DSH_NODE:-$HOME/.local/bin/node}"
-if [ ! -x "$DSH_NODE" ]; then DSH_NODE="/usr/local/bin/node"; fi
+# 选择顺序：DSH_NODE 显式指定 → PATH 中找到的 node（cron 把 /opt/node22/bin 放最前）→
+#          ~/.local/bin/node（本机 Node 22）→ /usr/local/bin/node（兜底）。
+DSH_NODE="${DSH_NODE:-$(command -v node 2>/dev/null || true)}"
+if [ -z "$DSH_NODE" ] || [ ! -x "$DSH_NODE" ]; then
+  for candidate in "$HOME/.local/bin/node" /usr/local/bin/node /opt/node22/bin/node; do
+    if [ -x "$candidate" ]; then DSH_NODE="$candidate"; break; fi
+  done
+fi
 NODE22_VERSION=$("$DSH_NODE" --version 2>/dev/null || echo "")
 case "$NODE22_VERSION" in
   v22.*|v20.*|v18.*) : ;;  # 已知兼容
-  *) echo "!!! [$(date)] WARNING: $DSH_NODE 版本 $NODE22_VERSION 可能不受 DSH 支持（推荐 v22），继续尝试..." >> "$LOG" ;;
+  *) echo "!!! [$(date)] WARNING: $DSH_NODE 版本 $NODE22_VERSION 可能不受 DSH 支持（推荐 v22），继续尝试..." >&2 ;;
 esac
 export PATH="/usr/local/bin:/usr/local/lib/node_modules/.bin:$PATH"
-# 让 dsh 的 #!/usr/bin/env node 找到我们选定的 node
+# 让 dsh 的 #!/usr/bin/env node 找到我们选定的 node（Node 22）
 DIR_FOR_NODE="$(dirname "$DSH_NODE")"
 export PATH="$DIR_FOR_NODE:$PATH"
 
