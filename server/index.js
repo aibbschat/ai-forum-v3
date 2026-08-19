@@ -19,6 +19,7 @@ import insightRouter from './routes/insight.js';
 import snippetsRouter from './routes/snippets.js';
 import chatRouter from './routes/chat.js';
 import socialRouter from './routes/social.js';
+import adminRouter from './routes/admin.js';
 import ogRouter, { ogBotGuard } from './routes/og.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -41,6 +42,7 @@ app.use('/api/insight', insightRouter);
 app.use('/api/snippets', snippetsRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api', socialRouter);
+app.use('/api/admin', adminRouter);
 app.use('/og', ogRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));

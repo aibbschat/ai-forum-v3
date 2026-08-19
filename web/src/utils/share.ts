@@ -144,6 +144,27 @@ export const SHARE_TARGETS: ShareTarget[] = [
       return true;
     },
   },
+  {
+    key: 'system',
+    label: '系统分享',
+    emoji: '📤',
+    run: async ({ url, title }) => {
+      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        try {
+          await navigator.share({ title, url });
+        } catch {
+          /* 用户取消 */
+        }
+      } else {
+        const ok = await copyText(url);
+        if (ok) {
+          const ev = new CustomEvent('aiforum:toast', { detail: { kind: 'info', text: '当前浏览器不支持系统分享，已复制链接' } });
+          window.dispatchEvent(ev);
+        }
+      }
+      return true;
+    },
+  },
 ];
 
 // 移动端：优先唤起系统原生分享（含微信、QQ、系统浏览器）

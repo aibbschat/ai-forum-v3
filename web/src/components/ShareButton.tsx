@@ -62,12 +62,10 @@ export default function ShareButton({
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    if (nativeShareAvailable()) {
-      systemShare(url, title).then((ok) => {
-        if (!ok) toggleMenu();
-      });
-      return;
-    }
+    // 始终显示我们自己的社交菜单（微博/豆瓣/知乎/微信二维码...），
+    // 用户可在菜单里选「系统分享」去调起 AirDrop / 邮件 / 备忘录等系统级目标。
+    // 这样在 macOS Safari/Chrome 等支持 navigator.share 的桌面浏览器上，
+    // 也不会只弹一个缺社交平台的原生分享面板。
     toggleMenu();
   };
 

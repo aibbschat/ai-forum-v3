@@ -97,6 +97,25 @@ export default function UserCenter() {
 
   const isSelf = !viewId || (me != null && Number(viewId) === me.id);
 
+  // 从文章页收藏后返回个人中心，重新拉一遍（页面可见时 + 聚焦时）
+  useEffect(() => {
+    if (!isSelf) return;
+    const refresh = () => {
+      listMyBookmarks(50)
+        .then((r) => setBookmarks(r.posts))
+        .catch(() => {});
+    };
+    const onVis = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [isSelf, me?.id]);
+
   const handleLogout = async () => {
     try {
       await logout();
