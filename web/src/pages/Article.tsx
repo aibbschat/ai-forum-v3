@@ -36,6 +36,7 @@ import Nav from '../components/Nav';
 import CommentSection from '../components/CommentSection';
 import ShareButton from '../components/ShareButton';
 import ReportModal from '../components/ReportModal';
+import FloatingActionBar from '../components/FloatingActionBar';
 import TableOfContents from '../components/TableOfContents';
 import BackToTop from '../components/BackToTop';
 import { categoryColor, timeAgo, fmtCount, avatarOf } from '../lib';
@@ -244,7 +245,7 @@ export default function Article() {
     <div className="min-h-screen bg-page">
       <Nav />
       <TableOfContents selector=".article-content" />
-      <article className="max-w-[760px] mx-auto px-6 pt-10 pb-16">
+      <article className="max-w-[760px] mx-auto px-6 pt-10 pb-32 lg:pb-16">
         <div className="flex items-center gap-2 mb-3">
           <Link
             to={`/category/${encodeURIComponent(article.category)}`}
@@ -312,12 +313,12 @@ export default function Article() {
           />
         )}
 
-        {/* 点赞 / 评论 / 收藏 / 分享 / 举报 */}
-        <div className="flex items-center gap-4 pb-6 mb-6 border-b border-gray-100 relative">
+        {/* 点赞 / 评论 / 收藏 / 分享 / 举报（文章顶部操作条） */}
+        <div className="flex items-center gap-1 pb-6 mb-6 border-b border-gray-100 relative">
           <button
             onClick={toggleLike}
-            className={`relative inline-flex items-center gap-1.5 text-sm font-semibold transition-colors ${
-              liked ? 'text-accent' : 'text-gray-500 hover:text-gray-800'
+            className={`relative inline-flex items-center gap-1.5 text-sm font-semibold rounded-full px-3 py-1.5 transition-colors ${
+              liked ? 'text-accent bg-red-50' : 'text-gray-600 hover:bg-gray-50'
             }`}
           >
             <svg
@@ -334,18 +335,28 @@ export default function Article() {
               />
             </svg>
             {fmtCount(likeCount)}
-            {/* 点赞时飘起一颗小心 */}
             {heartFly > 0 && (
               <span
                 key={heartFly}
-                className="pointer-events-none absolute left-2 -top-1 text-accent animate-heart-fly"
+                className="pointer-events-none absolute left-3 -top-1 text-accent animate-heart-fly"
                 aria-hidden
               >
                 ♥
               </span>
             )}
           </button>
-          <span className="inline-flex items-center gap-1.5 text-sm text-gray-400">
+
+          <button
+            type="button"
+            onClick={() => {
+              const el = document.getElementById('comments');
+              if (el) {
+                const y = el.getBoundingClientRect().top + window.scrollY - 72;
+                window.scrollTo({ top: y, behavior: 'smooth' });
+              }
+            }}
+            className="inline-flex items-center gap-1.5 text-sm text-gray-600 rounded-full px-3 py-1.5 hover:bg-gray-50 transition-colors"
+          >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 strokeLinecap="round"
@@ -355,15 +366,17 @@ export default function Article() {
               />
             </svg>
             {fmtCount(article.commentCount)}
-          </span>
+          </button>
 
           {/* 收藏 */}
           <button
             type="button"
             onClick={onToggleBookmark}
             disabled={bookmarkLoading}
-            className={`inline-flex items-center gap-1.5 text-sm transition-colors ${
-              bookmarked ? 'text-brand-600 font-semibold' : 'text-gray-500 hover:text-gray-800'
+            className={`inline-flex items-center gap-1.5 text-sm rounded-full px-3 py-1.5 transition-colors ${
+              bookmarked
+                ? 'text-brand-600 bg-blue-50 font-semibold'
+                : 'text-gray-600 hover:bg-gray-50'
             }`}
             aria-label={bookmarked ? '取消收藏' : '收藏'}
           >
@@ -384,21 +397,15 @@ export default function Article() {
             url={`${window.location.origin}/article/${article.id}`}
             title={article.title}
             description={article.excerpt}
-            variant="ghost"
-            className="text-sm"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"
-                d="M4 12v7a2 2 0 002 2h12a2 2 0 002-2v-7M16 6l-4-4-4 4M12 2v13" />
-            </svg>
-            <span>分享</span>
-          </ShareButton>
+            variant="pill"
+            className="!text-gray-600 hover:!border-gray-400 hover:!text-gray-900"
+          />
 
           {/* 举报 */}
           <button
             type="button"
             onClick={() => setReportOpen(true)}
-            className="ml-auto text-xs text-gray-400 hover:text-red-500 transition-colors"
+            className="ml-auto text-xs text-gray-400 hover:text-red-500 transition-colors px-2 py-1.5"
           >
             举报
           </button>
@@ -482,8 +489,24 @@ export default function Article() {
         )}
 
         {/* 评论区 */}
-        <CommentSection postId={article.id} />
+        <div id="comments">
+          <CommentSection postId={article.id} />
+        </div>
       </article>
+
+      <FloatingActionBar
+        liked={liked}
+        likeCount={likeCount}
+        commentCount={article.commentCount ?? 0}
+        bookmarked={bookmarked}
+        bookmarkLoading={bookmarkLoading}
+        onLike={toggleLike}
+        onBookmark={onToggleBookmark}
+        onReport={() => setReportOpen(true)}
+        shareUrl={`${window.location.origin}/article/${article.id}`}
+        shareTitle={article.title}
+        shareDescription={article.excerpt}
+      />
 
       <ReportModal
         open={reportOpen}
