@@ -49,18 +49,30 @@ export async function chat(opts = {}) {
   const order = [target.provider, ...FALLBACK_ORDER.filter((p) => p !== target.provider)];
 
   let lastErr;
+  let skippedTargetForKey = false;
   for (const pname of order) {
     const prov = PROVIDERS[pname];
     if (!prov) continue;
     const key = prov.apiKey();
     if (!key) {
-      // 该供应商未配置密钥，跳过（自动降级到下一个）
+      // 目标供应商缺 key 是配置问题（成本路由会被静默打乱），必须显式告警；
+      // 降级链上其余缺 key 的供应商则安静跳过。
+      if (pname === target.provider) {
+        skippedTargetForKey = true;
+        console.error(
+          `[llm] 目标供应商 "${pname}" 未配置 API key（检查 LLM_${pname.toUpperCase()}_API_KEY）；` +
+            `将尝试降级链，注意这可能产生非预期供应商费用`
+        );
+      }
       continue;
     }
     try {
       const res = await callOpenAI(prov, key, { model, messages, json, temperature, maxTokens, timeout: callTimeout });
       if (res.usage) {
         console.info(`[llm] ${pname}/${model} tokens=${JSON.stringify(res.usage)}`);
+      }
+      if (skippedTargetForKey) {
+        console.warn(`[llm] 目标供应商 ${target.provider} 缺 key，本次实际由 ${pname} 承接`);
       }
       return { content: res.content, provider: pname, model };
     } catch (e) {
@@ -126,13 +138,25 @@ export async function chatStream(opts = {}, onEvent) {
   const order = [target.provider, ...FALLBACK_ORDER.filter((p) => p !== target.provider)];
 
   let lastErr;
+  let skippedTargetForKey = false;
   for (const pname of order) {
     const prov = PROVIDERS[pname];
     if (!prov) continue;
     const key = prov.apiKey();
-    if (!key) continue;
+    if (!key) {
+      if (pname === target.provider) {
+        skippedTargetForKey = true;
+        console.error(
+          `[llm-stream] 目标供应商 "${pname}" 未配置 API key（检查 LLM_${pname.toUpperCase()}_API_KEY）；将尝试降级链`
+        );
+      }
+      continue;
+    }
     try {
       const result = await streamOpenAI(prov, key, { model, messages, temperature, maxTokens, timeout: callTimeout }, onEvent);
+      if (skippedTargetForKey) {
+        console.warn(`[llm-stream] 目标供应商 ${target.provider} 缺 key，本次实际由 ${pname} 承接`);
+      }
       return { ...result, provider: pname, model };
     } catch (e) {
       lastErr = e;
