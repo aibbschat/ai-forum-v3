@@ -18,7 +18,8 @@
  * 鉴权：
  *   - apiKey 配置项可写死（不推荐）
  *   - 否则按 apiKeyEnv（默认 ASK_ECHO_SEARCH_INFINITY_API_KEY，与火山官方 MCP 一致）
- *     到 DSH credentials / 环境变量取；兼容旧名 VOLCES_API_KEY 作为 fallback
+ *     到 DSH credentials / 环境变量取；官方 Skill 约定的 WEB_SEARCH_API_KEY、
+ *     以及旧名 VOLCES_API_KEY 都作为 fallback（同一把 key 在多个产品名间通用）
  *
  * 配置字段（cordis.yml）：
  *   apiKey / apiKeyEnv / baseURL / maxResults / timeoutMs / authLevel / timeRange / queryRewrite
@@ -32,8 +33,9 @@ import { WebError } from '@deepseek-ai/dsh-web';
 const PROVIDER_ID = 'doubao';
 const DEFAULT_BASE_URL = 'https://open.feedcoopapi.com';
 const DEFAULT_API_KEY_ENV = 'ASK_ECHO_SEARCH_INFINITY_API_KEY';
-// 兼容：某些部署只有 VOLCES_API_KEY，火山的搜索 API 也接受同一把 key（同一账号体系）
-const FALLBACK_API_KEY_ENVS = ['VOLCES_API_KEY'];
+// 兼容：官方 Skill 约定的 WEB_SEARCH_API_KEY，以及历史部署用过的 VOLCES_API_KEY；
+// 同一把 Ark/Agent Plan key 在这几个产品名之间通用。
+const FALLBACK_API_KEY_ENVS = ['WEB_SEARCH_API_KEY', 'VOLCES_API_KEY'];
 const DEFAULT_MAX_RESULTS = 8;
 const DEFAULT_TIMEOUT_MS = 20000;
 
@@ -88,6 +90,8 @@ export class DoubaoSearchProvider {
       Query: query,
       SearchType: 'web',
       Count: count,
+      // 与火山官方 web_search.py 对齐：web 搜索默认请求摘要，丰富 Summary 字段
+      NeedSummary: true,
     };
     // 可选过滤器
     const filter = {};
