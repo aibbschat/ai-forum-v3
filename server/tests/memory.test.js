@@ -179,8 +179,17 @@ test('P1-1 LLM 失败 → 自动回退 summarizeEpisodics 纯函数，不抛错'
   assert.equal(semantic[0].evidenceIds.length, 2, '回退路径出处同样不丢');
 });
 
-test('P1-1 无 DEEPSEEK_API_KEY → 不发起任何网络请求，回退纯函数', async () => {
-  const savedKey = process.env.DEEPSEEK_API_KEY;
+test('P1-1 无任何供应商 key → 不发起任何网络请求，回退纯函数', async () => {
+  // 统一层有多个供应商 key 源（历史 DEEPSEEK_API_KEY=火山、LLM_XIAOMI_API_KEY 等），
+  // "无 key" 场景必须全部清掉，否则降级链会打到有 key 的供应商。
+  const KEY_VARS = [
+    'DEEPSEEK_API_KEY',
+    'LLM_VOLCENGINE_API_KEY',
+    'LLM_DEEPSEEK_API_KEY',
+    'LLM_XIAOMI_API_KEY',
+    'XIAOMI_TOKEN_PLAN_CN_API_KEY',
+  ];
+  const saved = {};
   const originalFetch = globalThis.fetch;
   let fetchCalls = 0;
   globalThis.fetch = async () => {
@@ -189,7 +198,10 @@ test('P1-1 无 DEEPSEEK_API_KEY → 不发起任何网络请求，回退纯函�
   };
 
   try {
-    delete process.env.DEEPSEEK_API_KEY;
+    for (const k of KEY_VARS) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
     await writeEpisodic({ agentId: AGENT_NO_KEY, content: `[${DOMAIN}] 无 key 场景下的史料。`, importance: 0.5 });
     // 不注入 llmSummarizer → 走默认实现（createLlmSummarizer），无 key 应在碰网络前就放弃。
     const res = await consolidate(AGENT_NO_KEY, { days: 7 });
@@ -200,8 +212,10 @@ test('P1-1 无 DEEPSEEK_API_KEY → 不发起任何网络请求，回退纯函�
     assert.equal(semantic[0].confidence, 0.6);
   } finally {
     globalThis.fetch = originalFetch;
-    if (savedKey === undefined) delete process.env.DEEPSEEK_API_KEY;
-    else process.env.DEEPSEEK_API_KEY = savedKey;
+    for (const k of KEY_VARS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
   }
 });
 
