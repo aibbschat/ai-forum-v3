@@ -18,11 +18,14 @@ import messagesRouter from './routes/messages.js';
 import insightRouter from './routes/insight.js';
 import snippetsRouter from './routes/snippets.js';
 import chatRouter from './routes/chat.js';
+import socialRouter from './routes/social.js';
+import ogRouter, { ogBotGuard } from './routes/og.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(cors({ origin: config.webOrigin }));
-app.use(express.json({ limit: '2mb' }));
+// JSON body 上限放宽到 6MB，以支持写作页 data URI 图片粘贴上传
+app.use(express.json({ limit: '6mb' }));
 
 // 路由
 app.use('/api/internal/dsh', internalRouter);
@@ -37,6 +40,8 @@ app.use('/api/messages', messagesRouter);
 app.use('/api/insight', insightRouter);
 app.use('/api/snippets', snippetsRouter);
 app.use('/api/chat', chatRouter);
+app.use('/api', socialRouter);
+app.use('/og', ogRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
@@ -44,8 +49,10 @@ app.get('/api/health', (req, res) => res.json({ ok: true }));
 const DIST = resolve(__dirname, '..', 'web', 'dist');
 if (existsSync(join(DIST, 'index.html'))) {
   app.use(express.static(DIST));
-  // SPA fallback（排除 /api）
-  app.get(/^\/(?!api\/).*/, (req, res) => res.sendFile(join(DIST, 'index.html')));
+  // /article/:id 的爬虫请求返回 OG 卡片（不影响浏览器）
+  app.get(/^\/article\/\d+/, ogBotGuard);
+  // SPA fallback（排除 /api 和 /og）
+  app.get(/^\/(?!api\/|og\/).*/, (req, res) => res.sendFile(join(DIST, 'index.html')));
 }
 
 // 404

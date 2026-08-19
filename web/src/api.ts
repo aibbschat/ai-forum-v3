@@ -135,10 +135,16 @@ export interface Comment {
   authorId: number;
   author: string;
   authorAvatar: string;
+  authorUserType?: string;
   content: string;
   isAiGenerated?: boolean;
   likeCount?: number;
   liked?: boolean;
+  parentId?: number | null;
+  replyToId?: number | null;
+  replyToName?: string | null;
+  mentionedIds?: number[];
+  replies?: Comment[];
   createdAt: string;
 }
 
@@ -247,8 +253,12 @@ export function listComments(postId: number) {
   return get<{ comments: Comment[] }>(`/api/posts/${postId}/comments`);
 }
 
-export function addComment(postId: number, content: string) {
-  return post<{ comment: Comment }>(`/api/posts/${postId}/comments`, { content }, true);
+export function addComment(postId: number, content: string, parentId?: number | null, replyToId?: number | null) {
+  return post<{ comment: Comment }>(
+    `/api/posts/${postId}/comments`,
+    { content, parentId: parentId ?? null, replyToId: replyToId ?? null },
+    true
+  );
 }
 
 export function likeComment(commentId: number) {
@@ -384,4 +394,113 @@ export interface ChatAnswer {
 export function askChat(question: string) {
   return post<ChatAnswer>('/api/chat', { question }, false);
 }
+
+// ── 收藏 ─────────────────────────────────────────────────────────
+export function toggleBookmark(postId: number) {
+  return post<{ ok: boolean; bookmarked: boolean }>(`/api/posts/${postId}/bookmark`, {}, true);
+}
+
+export function getBookmarkState(postId: number) {
+  return get<{ bookmarked: boolean }>(`/api/posts/${postId}/bookmark-state`);
+}
+
+export function listMyBookmarks(limit = 30, offset = 0) {
+  return get<{ posts: Article[] }>(`/api/me/bookmarks?limit=${limit}&offset=${offset}`);
+}
+
+// ── 举报 ─────────────────────────────────────────────────────────
+export function listReportReasons() {
+  return get<{ reasons: string[] }>('/api/reports/reasons');
+}
+// 缓存原因列表，避免每次打开弹窗都拉取
+let _reasonsCache: string[] | null = null;
+export async function getReportReasons(): Promise<string[]> {
+  if (_reasonsCache) return _reasonsCache;
+  const r = await listReportReasons();
+  _reasonsCache = r.reasons;
+  return r.reasons;
+}
+
+export function reportContent(payload: {
+  targetType: 'post' | 'comment';
+  targetId: number;
+  reason: string;
+  detail?: string;
+}) {
+  return post<{ ok: boolean; id: number }>('/api/reports', payload, true);
+}
+
+// 兼容 ReportModal 的命名别名
+export const REPORT_REASONS_FALLBACK = [
+  '垃圾广告', '色情低俗', '违法违规', '人身攻击', '不实信息', '抄袭搬运', '其他',
+];
+
+// ── 通知 ─────────────────────────────────────────────────────────
+export interface AppNotification {
+  id: number;
+  type: 'like' | 'comment' | 'reply' | 'follow' | 'mention';
+  isRead: boolean;
+  postId?: number;
+  commentId?: number;
+  postTitle?: string;
+  actor: { id: number; name: string; avatar: string; userType?: string };
+  extra?: { snippet?: string; [k: string]: unknown };
+  createdAt: string;
+}
+
+export function listNotifications(opts: { limit?: number; offset?: number; unreadOnly?: boolean } = {}) {
+  const params = new URLSearchParams();
+  if (opts.limit) params.set('limit', String(opts.limit));
+  if (opts.offset) params.set('offset', String(opts.offset));
+  if (opts.unreadOnly) params.set('unread', '1');
+  return get<{ notifications: AppNotification[]; unread: number }>(
+    `/api/notifications?${params.toString()}`
+  );
+}
+
+export function unreadNotificationCount() {
+  return get<{ count: number }>('/api/notifications/unread-count');
+}
+
+export function markAllNotificationsRead() {
+  return post<{ ok: boolean }>('/api/notifications/read-all', {}, true);
+}
+
+export function markNotificationRead(id: number) {
+  return post<{ ok: boolean }>(`/api/notifications/${id}/read`, {}, true);
+}
+
+// ── @用户搜索 ─────────────────────────────────────────────────────
+export interface MentionUser {
+  id: number;
+  username: string;
+  nickname: string;
+  avatar?: string;
+  userType?: string;
+  isVerified?: boolean;
+}
+
+export function searchUsers(q: string) {
+  return get<{ users: MentionUser[] }>(
+    `/api/users/search?q=${encodeURIComponent(q)}`
+  );
+}
+
+// ── 分类目录 ─────────────────────────────────────────────────────
+export interface Category {
+  name: string;
+  postCount: number;
+  latestAt: string;
+}
+export function listCategories() {
+  return get<{ categories: Category[] }>('/api/categories');
+}
+
+// ── 图片上传（写作页粘贴/拖拽） ─────────────────────────────────
+export function uploadImage(dataUrl: string) {
+  return post<{ url: string }>('/api/upload/image', { dataUrl }, true);
+}
+
+// 暴露常量给不使用 hook 的组件（ReportModal 同步引用）
+export const REPORT_REASONS = REPORT_REASONS_FALLBACK;
 

@@ -1,5 +1,6 @@
 import { db } from '../database/db.js';
 import { normalizeUser } from './normalize.js';
+import { createNotification } from './notificationService.js';
 
 // 关注（幂等）：已关注则不重复插入。返回最新状态。
 export async function follow(userId, agentId) {
@@ -28,7 +29,19 @@ export async function followUser(followerId, followeeId) {
     e.status = 400;
     throw e;
   }
+  const already = await db.get(
+    `SELECT 1 FROM user_follows WHERE follower_id = ? AND followee_id = ?`,
+    [followerId, followeeId]
+  );
   await db.insertIgnore('user_follows', { follower_id: followerId, followee_id: followeeId });
+  if (!already) {
+    // 新关注 → 通知被关注者（fire-and-forget）
+    createNotification({
+      userId: followeeId,
+      actorId: followerId,
+      type: 'follow',
+    });
+  }
   return userFollowState(followerId, followeeId);
 }
 

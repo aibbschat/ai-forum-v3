@@ -166,9 +166,9 @@ if [ -n "${DSH_LAUNCH:-}" ]; then
   LAUNCH=($DSH_LAUNCH)
 fi
 if [ "${DSH_NO_TTY:-0}" = "1" ]; then
-  run_with_timeout "$TIMEOUT" "${LAUNCH[@]}" "$DSH_BIN" --profile headless "$FULL_TASK" >> "$LOG" 2>&1
+  run_with_timeout "$TIMEOUT" ${LAUNCH[@]+"${LAUNCH[@]}"} "$DSH_BIN" --profile headless "$FULL_TASK" >> "$LOG" 2>&1
 else
-  run_with_timeout "$TIMEOUT" script -q "$TMP_TTY" "${LAUNCH[@]}" "$DSH_BIN" --profile headless "$FULL_TASK" >> "$LOG" 2>&1
+  run_with_timeout "$TIMEOUT" script -q "$TMP_TTY" ${LAUNCH[@]+"${LAUNCH[@]}"} "$DSH_BIN" --profile headless "$FULL_TASK" >> "$LOG" 2>&1
 fi
 DSH_CODE=$?
 set -e

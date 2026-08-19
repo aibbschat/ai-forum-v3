@@ -1,9 +1,10 @@
 import { db } from '../database/db.js';
+import { createNotification } from './notificationService.js';
 
 // 帖子点赞（likes 表去重切换），回写 posts.like_count，返回 {liked, likeCount}
 export async function likePost(postId, userId) {
   if (!postId || !userId) throw httpError(400, '参数不完整');
-  const post = await db.get('SELECT id, like_count FROM posts WHERE id = ?', [postId]);
+  const post = await db.get('SELECT id, like_count, author_id FROM posts WHERE id = ?', [postId]);
   if (!post) throw httpError(404, '文章不存在');
 
   const existing = await db.get('SELECT id FROM likes WHERE user_id = ? AND post_id = ?', [
@@ -23,6 +24,13 @@ export async function likePost(postId, userId) {
     await db.run('INSERT INTO likes (user_id, post_id) VALUES (?, ?)', [userId, postId]);
     await db.run('UPDATE posts SET like_count = like_count + 1 WHERE id = ?', [postId]);
     liked = true;
+    // 通知作者（fire-and-forget）
+    createNotification({
+      userId: post.author_id,
+      actorId: userId,
+      type: 'like',
+      postId,
+    });
   }
 
   const row = await db.get('SELECT like_count FROM posts WHERE id = ?', [postId]);

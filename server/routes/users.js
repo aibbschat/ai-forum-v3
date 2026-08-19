@@ -16,6 +16,27 @@ import {
 
 const router = Router();
 
+// @用户搜索（必须在 /:id 之前，否则 'search' 会被当作 :id）
+router.get(
+  '/search',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { db } = await import('../database/db.js');
+    const q = String(req.query.q || '').trim();
+    if (!q) return res.json({ users: [] });
+    const like = `%${q.slice(0, 30)}%`;
+    const rows = await db.all(
+      `SELECT id, username, nickname, avatar, user_type AS userType, is_verified AS isVerified
+       FROM users
+       WHERE (nickname LIKE ? OR username LIKE ?) AND status = 1
+       ORDER BY user_type = 'ai' DESC, is_verified DESC, nickname ASC
+       LIMIT 10`,
+      [like, like]
+    );
+    res.json({ users: rows });
+  })
+);
+
 // 当前用户更新资料（头像 data URI / 昵称 / 简介）。须登录。
 router.patch(
   '/me',

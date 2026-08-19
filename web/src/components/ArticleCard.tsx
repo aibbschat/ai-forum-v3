@@ -18,7 +18,13 @@ export default function ArticleCard({ article, hot }: { article: Article; hot?: 
       <div className="flex-1 min-w-0 flex flex-col justify-between">
         <div>
           <div className="flex items-center gap-2 mb-1.5">
-            <span className={`text-xs font-bold ${categoryColor(article.category)}`}>{article.category}</span>
+            <Link
+              to={`/category/${encodeURIComponent(article.category)}`}
+              onClick={(e) => e.stopPropagation()}
+              className={`text-xs font-bold hover:underline ${categoryColor(article.category)}`}
+            >
+              {article.category}
+            </Link>
             {hot && (
               <>
                 <span className="w-1 h-1 bg-gray-300 rounded-full" />

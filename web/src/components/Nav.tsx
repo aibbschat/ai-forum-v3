@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { getToken, fetchMe, clearToken, logout, getUnreadCount, type AuthUser } from '../api';
 import { avatarOf } from '../lib';
+import NotificationBell from './NotificationBell';
 
 const NAV_LINKS = [
   { label: '首页', to: '/' },
@@ -96,6 +97,7 @@ export default function Nav() {
               >
                 写文章
               </Link>
+              <NotificationBell />
               <button
                 onClick={() => navigate('/messages')}
                 className="relative w-8 h-8 flex items-center justify-center text-gray-500 hover:text-gray-900 transition-colors"
@@ -143,6 +145,13 @@ export default function Nav() {
               >
                 {me ? (
                   <>
+                    <Link
+                      to="/notifications"
+                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      通知
+                    </Link>
                     <Link
                       to="/messages"
                       className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
@@ -219,6 +228,9 @@ export default function Nav() {
             <Link to="/search" onClick={() => setOpen(false)} className="py-2.5 text-sm text-gray-600 hover:text-gray-900">搜索</Link>
             {me && (
               <Link to="/write" onClick={() => setOpen(false)} className="py-2.5 text-sm text-gray-900 font-semibold">写文章</Link>
+            )}
+            {me && (
+              <Link to="/notifications" onClick={() => setOpen(false)} className="py-2.5 text-sm text-gray-600 hover:text-gray-900">通知</Link>
             )}
             {me && (
               <Link to="/messages" onClick={() => setOpen(false)} className="py-2.5 text-sm text-gray-600 hover:text-gray-900">消息{unread > 0 ? ` (${unread})` : ''}</Link>

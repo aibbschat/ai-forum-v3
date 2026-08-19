@@ -176,6 +176,7 @@ export const db = {
   /**
    * 社交功能自迁移（互关 user_follows + 私信 messages + avatar→TEXT）。
    * 部署时由 bootstrap 调用，幂等：新表 CREATE TABLE IF NOT EXISTS，旧库仅补表/改列。
+   * v3 增量（2026-08）：comments 楼中楼字段、bookmarks、reports、notifications。
    */
   async ensureSocialTables() {
     if (isMaria) {
@@ -217,6 +218,48 @@ export const db = {
         INDEX idx_snippets_agent (agent_id),
         INDEX idx_snippets_created (created_at)
       )`);
+      // ── v3 增量：评论楼中楼 + @提及 ──
+      const cCols = await db.all(`SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comments'`);
+      const cNames = new Set(cCols.map((r) => r.c));
+      if (!cNames.has('parent_id')) await db.run(`ALTER TABLE comments ADD COLUMN parent_id INT`);
+      if (!cNames.has('reply_to_id')) await db.run(`ALTER TABLE comments ADD COLUMN reply_to_id INT`);
+      if (!cNames.has('mentioned_ids')) await db.run(`ALTER TABLE comments ADD COLUMN mentioned_ids TEXT`);
+      // 收藏
+      await db.run(`CREATE TABLE IF NOT EXISTS bookmarks (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        post_id INT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_bookmarks_user_post (user_id, post_id),
+        INDEX idx_bookmarks_user (user_id, created_at),
+        INDEX idx_bookmarks_post (post_id)
+      )`);
+      // 举报
+      await db.run(`CREATE TABLE IF NOT EXISTS reports (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        reporter_id INT NOT NULL,
+        target_type VARCHAR(20) NOT NULL,
+        target_id INT NOT NULL,
+        reason VARCHAR(100) NOT NULL,
+        detail TEXT,
+        status VARCHAR(20) DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_reports_target (target_type, target_id),
+        INDEX idx_reports_status (status)
+      )`);
+      // 通知
+      await db.run(`CREATE TABLE IF NOT EXISTS notifications (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        actor_id INT NOT NULL,
+        type VARCHAR(20) NOT NULL,
+        post_id INT,
+        comment_id INT,
+        is_read TINYINT DEFAULT 0,
+        extra TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_notifications_user (user_id, is_read, created_at)
+      )`);
     } else {
       await db.run(`CREATE TABLE IF NOT EXISTS user_follows (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -254,6 +297,56 @@ export const db = {
       )`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_snippets_agent ON thinking_snippets(agent_id)`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_snippets_created ON thinking_snippets(created_at)`);
+
+      // ── v3 增量：评论楼中楼 + @提及 ──
+      const cCols = await db.all(`PRAGMA table_info(comments)`);
+      if (!cCols.some((c) => c.name === 'parent_id')) {
+        await db.run(`ALTER TABLE comments ADD COLUMN parent_id INTEGER`);
+      }
+      if (!cCols.some((c) => c.name === 'reply_to_id')) {
+        await db.run(`ALTER TABLE comments ADD COLUMN reply_to_id INTEGER`);
+      }
+      if (!cCols.some((c) => c.name === 'mentioned_ids')) {
+        await db.run(`ALTER TABLE comments ADD COLUMN mentioned_ids TEXT`);
+      }
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments(parent_id)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_comments_reply_to ON comments(reply_to_id)`);
+      // 收藏
+      await db.run(`CREATE TABLE IF NOT EXISTS bookmarks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        post_id INTEGER NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (user_id, post_id)
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON bookmarks(user_id, created_at)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_bookmarks_post ON bookmarks(post_id)`);
+      // 举报
+      await db.run(`CREATE TABLE IF NOT EXISTS reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reporter_id INTEGER NOT NULL,
+        target_type VARCHAR(20) NOT NULL,
+        target_id INTEGER NOT NULL,
+        reason VARCHAR(100) NOT NULL,
+        detail TEXT,
+        status VARCHAR(20) DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_reports_target ON reports(target_type, target_id)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status)`);
+      // 通知
+      await db.run(`CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        actor_id INTEGER NOT NULL,
+        type VARCHAR(20) NOT NULL,
+        post_id INTEGER,
+        comment_id INTEGER,
+        is_read TINYINT DEFAULT 0,
+        extra TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read, created_at)`);
     }
   },
 };

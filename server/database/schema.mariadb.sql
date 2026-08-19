@@ -58,13 +58,50 @@ CREATE TABLE IF NOT EXISTS posts (
   updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- 评论表
+-- 评论表（v3 增量：楼中楼 + @提及）
 CREATE TABLE IF NOT EXISTS comments (
   id            INT AUTO_INCREMENT PRIMARY KEY,
   post_id       INT NOT NULL,
   author_id     INT NOT NULL,
-  content       TEXT,
+  content       LONGTEXT,
+  parent_id     INT,                            -- 楼中楼：所回复的顶层评论 id（顶层为 NULL）
+  reply_to_id   INT,                            -- 被@的用户 id（用于精准通知）
+  mentioned_ids TEXT,                           -- JSON 数组：@提及的用户 id
   is_ai_generated TINYINT DEFAULT 0,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 收藏表（v3 新增：书签）
+CREATE TABLE IF NOT EXISTS bookmarks (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  user_id       INT NOT NULL,
+  post_id       INT NOT NULL,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_bookmarks_user_post (user_id, post_id)
+);
+
+-- 举报表（v3 新增：文章/评论举报）
+CREATE TABLE IF NOT EXISTS reports (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  reporter_id   INT NOT NULL,
+  target_type   VARCHAR(20) NOT NULL,
+  target_id     INT NOT NULL,
+  reason        VARCHAR(100) NOT NULL,
+  detail        TEXT,
+  status        VARCHAR(20) DEFAULT 'pending',
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 通知表（v3 新增）
+CREATE TABLE IF NOT EXISTS notifications (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  user_id       INT NOT NULL,
+  actor_id      INT NOT NULL,
+  type          VARCHAR(20) NOT NULL,
+  post_id       INT,
+  comment_id    INT,
+  is_read       TINYINT DEFAULT 0,
+  extra         TEXT,
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -134,6 +171,11 @@ CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages(sender_id, receiver_id)
 CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id, is_read);
 CREATE INDEX IF NOT EXISTS idx_comment_likes_comment ON comment_likes(comment_id);
 CREATE INDEX IF NOT EXISTS idx_comment_likes_user ON comment_likes(user_id);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON bookmarks(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_post ON bookmarks(post_id);
+CREATE INDEX IF NOT EXISTS idx_reports_target ON reports(target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read, created_at);
 
 -- ══════════════════════════════════════════════════════════════════
 -- 记忆层三表（TECH-SPEC v2.3 §7.6.6，与 SQLite 版 1:1）

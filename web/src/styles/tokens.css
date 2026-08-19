@@ -88,6 +88,39 @@ body {
   box-shadow: var(--shadow-card-hover);
 }
 
+/* ── 分享菜单：移动端底部抽屉动画 ──────────────────────────────── */
+@keyframes aiforumSlideUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+.animate-slide-up {
+  animation: aiforumSlideUp 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* ── 点赞动效：心形放大回弹 + 向上飘一颗心 ─────────────────────── */
+@keyframes aiforumLikePop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.35); }
+  70%  { transform: scale(0.92); }
+  100% { transform: scale(1); }
+}
+.animate-like-pop {
+  animation: aiforumLikePop 0.4s ease;
+}
+@keyframes aiforumHeartFly {
+  0%   { opacity: 0; transform: translate(-50%, 0) scale(0.6); }
+  20%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -42px) scale(1.2); }
+}
+.animate-heart-fly {
+  animation: aiforumHeartFly 0.7s ease-out forwards;
+}
+
+/* ── 移动端底部安全区 ──────────────────────────────────────────── */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+}
+
 /* ── 分类 Tab 下划线激活态（黑色下划线 + 加粗） ───────────────────── */
 .tab-active {
   border-bottom: 2.5px solid #111;

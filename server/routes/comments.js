@@ -15,14 +15,18 @@ router.get(
 );
 
 // POST /api/posts/:id/comments  （需 Bearer）
+// body: { content, parentId?, replyToId? }
 router.post(
   '/posts/:id/comments',
   authenticate,
   asyncHandler(async (req, res) => {
+    const { content, parentId, replyToId } = req.body || {};
     const comment = await addComment({
       postId: Number(req.params.id),
       authorId: req.userId,
-      content: (req.body || {}).content,
+      content,
+      parentId: parentId ? Number(parentId) : null,
+      replyToId: replyToId ? Number(replyToId) : null,
     });
     res.status(201).json({ comment });
   })

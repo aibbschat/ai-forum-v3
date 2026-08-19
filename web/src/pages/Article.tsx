@@ -26,16 +26,23 @@ import {
   followUser,
   unfollowUser,
   getUserFollowState,
+  toggleBookmark,
+  getBookmarkState,
   Article as ArticleT,
   ArticleAsset,
   FollowState,
 } from '../api';
 import Nav from '../components/Nav';
 import CommentSection from '../components/CommentSection';
+import ShareButton from '../components/ShareButton';
+import ReportModal from '../components/ReportModal';
+import TableOfContents from '../components/TableOfContents';
+import BackToTop from '../components/BackToTop';
 import { categoryColor, timeAgo, fmtCount, avatarOf } from '../lib';
 import VerifiedBadge from '../components/VerifiedBadge';
 import AiBadge from '../components/AiBadge';
 import { BlockSkeleton, ErrorState } from '../components/AsyncState';
+import { toast } from '../utils/toast';
 
 // ── P1-11 数据可视化：轻量内联图表（SVG 柱状图，无第三方依赖） ──
 function InlineChart({ asset }: { asset: ArticleAsset }) {
@@ -107,6 +114,11 @@ export default function Article() {
   const [authError, setAuthError] = useState('');
   const [fs, setFs] = useState<FollowState | null>(null);
   const [meId, setMeId] = useState<number | null>(null);
+  const [bookmarked, setBookmarked] = useState(false);
+  const [bookmarkLoading, setBookmarkLoading] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [likeAnim, setLikeAnim] = useState(false);
+  const [heartFly, setHeartFly] = useState(0); // 自增 key 触发飘心动效
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -126,6 +138,12 @@ export default function Article() {
             getUserFollowState(a.author.id).then(setFs).catch(() => setFs(null));
           } else {
             setFs(null);
+          }
+          // 已登录 → 拉收藏状态
+          if (getToken()) {
+            getBookmarkState(Number(id))
+              .then((r) => setBookmarked(r.bookmarked))
+              .catch(() => setBookmarked(false));
           }
         })
         .catch(() => setError('文章加载失败'))
@@ -165,6 +183,11 @@ export default function Article() {
       const r = await likePost(Number(id));
       setLiked(r.liked);
       setLikeCount(r.likeCount);
+      if (r.liked) {
+        setLikeAnim(true);
+        setHeartFly((k) => k + 1);
+        setTimeout(() => setLikeAnim(false), 450);
+      }
     } catch (e: unknown) {
       if (e instanceof Error && 'status' in e && (e as { status?: number }).status === 401) {
         clearToken();
@@ -174,6 +197,25 @@ export default function Article() {
       }
     }
   }, [id]);
+
+  const onToggleBookmark = useCallback(async () => {
+    if (!id) return;
+    if (!getToken()) {
+      toast.error('请先登录');
+      return;
+    }
+    if (bookmarkLoading) return;
+    setBookmarkLoading(true);
+    try {
+      const r = await toggleBookmark(Number(id));
+      setBookmarked(r.bookmarked);
+      toast.success(r.bookmarked ? '已加入收藏' : '已取消收藏');
+    } catch {
+      toast.error('操作失败');
+    } finally {
+      setBookmarkLoading(false);
+    }
+  }, [id, bookmarkLoading]);
 
   if (loading)
     return (
@@ -201,9 +243,15 @@ export default function Article() {
   return (
     <div className="min-h-screen bg-page">
       <Nav />
+      <TableOfContents selector=".article-content" />
       <article className="max-w-[760px] mx-auto px-6 pt-10 pb-16">
         <div className="flex items-center gap-2 mb-3">
-          <span className={`text-xs font-bold ${categoryColor(article.category)}`}>{article.category}</span>
+          <Link
+            to={`/category/${encodeURIComponent(article.category)}`}
+            className={`text-xs font-bold hover:underline ${categoryColor(article.category)}`}
+          >
+            {article.category}
+          </Link>
           {article.tags?.map((t) => (
             <span key={t} className="text-[11px] text-gray-400">#{t}</span>
           ))}
@@ -264,16 +312,16 @@ export default function Article() {
           />
         )}
 
-        {/* 点赞 / 评论 */}
-        <div className="flex items-center gap-4 pb-6 mb-6 border-b border-gray-100">
+        {/* 点赞 / 评论 / 收藏 / 分享 / 举报 */}
+        <div className="flex items-center gap-4 pb-6 mb-6 border-b border-gray-100 relative">
           <button
             onClick={toggleLike}
-            className={`inline-flex items-center gap-1.5 text-sm font-semibold transition-colors ${
+            className={`relative inline-flex items-center gap-1.5 text-sm font-semibold transition-colors ${
               liked ? 'text-accent' : 'text-gray-500 hover:text-gray-800'
             }`}
           >
             <svg
-              className={`w-4 h-4 ${liked ? 'fill-current' : ''}`}
+              className={`w-4 h-4 ${liked ? 'fill-current' : ''} ${likeAnim ? 'animate-like-pop' : ''}`}
               fill={liked ? 'currentColor' : 'none'}
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -286,6 +334,16 @@ export default function Article() {
               />
             </svg>
             {fmtCount(likeCount)}
+            {/* 点赞时飘起一颗小心 */}
+            {heartFly > 0 && (
+              <span
+                key={heartFly}
+                className="pointer-events-none absolute left-2 -top-1 text-accent animate-heart-fly"
+                aria-hidden
+              >
+                ♥
+              </span>
+            )}
           </button>
           <span className="inline-flex items-center gap-1.5 text-sm text-gray-400">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -298,6 +356,53 @@ export default function Article() {
             </svg>
             {fmtCount(article.commentCount)}
           </span>
+
+          {/* 收藏 */}
+          <button
+            type="button"
+            onClick={onToggleBookmark}
+            disabled={bookmarkLoading}
+            className={`inline-flex items-center gap-1.5 text-sm transition-colors ${
+              bookmarked ? 'text-brand-600 font-semibold' : 'text-gray-500 hover:text-gray-800'
+            }`}
+            aria-label={bookmarked ? '取消收藏' : '收藏'}
+          >
+            <svg
+              className="w-4 h-4"
+              fill={bookmarked ? 'currentColor' : 'none'}
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"
+                d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-4-7 4V5z" />
+            </svg>
+            {bookmarked ? '已收藏' : '收藏'}
+          </button>
+
+          {/* 分享 */}
+          <ShareButton
+            url={`${window.location.origin}/article/${article.id}`}
+            title={article.title}
+            description={article.excerpt}
+            variant="ghost"
+            className="text-sm"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"
+                d="M4 12v7a2 2 0 002 2h12a2 2 0 002-2v-7M16 6l-4-4-4 4M12 2v13" />
+            </svg>
+            <span>分享</span>
+          </ShareButton>
+
+          {/* 举报 */}
+          <button
+            type="button"
+            onClick={() => setReportOpen(true)}
+            className="ml-auto text-xs text-gray-400 hover:text-red-500 transition-colors"
+          >
+            举报
+          </button>
+
           {authError && <span className="text-xs text-accent">{authError}</span>}
         </div>
 
@@ -379,6 +484,15 @@ export default function Article() {
         {/* 评论区 */}
         <CommentSection postId={article.id} />
       </article>
+
+      <ReportModal
+        open={reportOpen}
+        targetType="post"
+        targetId={article.id}
+        onClose={() => setReportOpen(false)}
+      />
+      <BackToTop />
+
       <footer className="bg-white border-t border-gray-100 py-8">
         <div className="max-w-[760px] mx-auto px-6 text-xs text-gray-400">
           <Link to="/" className="hover:text-gray-600">← 返回首页</Link>

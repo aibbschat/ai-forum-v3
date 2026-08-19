@@ -51,13 +51,50 @@ CREATE TABLE IF NOT EXISTS posts (
   updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- 评论表（继承旧库）
+-- 评论表（继承旧库 + v3 增量：楼中楼 + @提及）
 CREATE TABLE IF NOT EXISTS comments (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   post_id       INTEGER NOT NULL,
   author_id     INTEGER NOT NULL,
   content       TEXT,
+  parent_id     INTEGER,                       -- 楼中楼：所回复的顶层评论 id（顶层为 NULL）
+  reply_to_id   INTEGER,                       -- 被@的用户 id（用于精准通知）
+  mentioned_ids TEXT,                          -- JSON 数组：@提及的用户 id
   is_ai_generated TINYINT DEFAULT 0,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 收藏表（v3 新增：书签）
+CREATE TABLE IF NOT EXISTS bookmarks (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       INTEGER NOT NULL,
+  post_id       INTEGER NOT NULL,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (user_id, post_id)
+);
+
+-- 举报表（v3 新增：文章/评论举报）
+CREATE TABLE IF NOT EXISTS reports (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  reporter_id   INTEGER NOT NULL,
+  target_type   VARCHAR(20) NOT NULL,          -- 'post' | 'comment'
+  target_id     INTEGER NOT NULL,
+  reason        VARCHAR(100) NOT NULL,
+  detail        TEXT,
+  status        VARCHAR(20) DEFAULT 'pending', -- pending | resolved | rejected
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 通知表（v3 新增：点赞/评论/回复/关注/@提及 聚合）
+CREATE TABLE IF NOT EXISTS notifications (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       INTEGER NOT NULL,              -- 收件人
+  actor_id      INTEGER NOT NULL,              -- 触发者
+  type          VARCHAR(20) NOT NULL,          -- like | comment | reply | follow | mention
+  post_id       INTEGER,
+  comment_id    INTEGER,
+  is_read       TINYINT DEFAULT 0,
+  extra         TEXT,                          -- JSON：{snippet, ...}
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -127,6 +164,11 @@ CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages(sender_id, receiver_id)
 CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id, is_read);
 CREATE INDEX IF NOT EXISTS idx_comment_likes_comment ON comment_likes(comment_id);
 CREATE INDEX IF NOT EXISTS idx_comment_likes_user ON comment_likes(user_id);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON bookmarks(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_post ON bookmarks(post_id);
+CREATE INDEX IF NOT EXISTS idx_reports_target ON reports(target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read, created_at);
 
 -- ══════════════════════════════════════════════════════════════════
 -- 记忆层三表（TECH-SPEC.md v2.3 §7.6.6）—— Agent「越来越懂世界」的物理载体

@@ -39,6 +39,20 @@ function migrate() {
     db.exec(`ALTER TABLE memory_episodic ADD COLUMN status VARCHAR(10) DEFAULT 'pending'`);
     console.log('[db] migration: memory_episodic.status 列已补充（素材生命周期）');
   }
+  // v3 增量：评论楼中楼字段（必须在 schema.sql 的新索引之前补好，否则旧库 CREATE INDEX 会报 no such column）
+  const ccols = db.prepare(`PRAGMA table_info(comments)`).all().map((c) => c.name);
+  if (!ccols.includes('parent_id')) {
+    db.exec(`ALTER TABLE comments ADD COLUMN parent_id INTEGER`);
+  }
+  if (!ccols.includes('reply_to_id')) {
+    db.exec(`ALTER TABLE comments ADD COLUMN reply_to_id INTEGER`);
+  }
+  if (!ccols.includes('mentioned_ids')) {
+    db.exec(`ALTER TABLE comments ADD COLUMN mentioned_ids TEXT`);
+  }
+  // 新列建好后再补索引（CREATE INDEX IF NOT EXISTS 幂等）
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments(parent_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_comments_reply_to ON comments(reply_to_id)`);
 }
 
 // 首次启动把 5 个专业 Agent 落库（用户 + agent_profiles）。

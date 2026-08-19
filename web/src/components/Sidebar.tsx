@@ -65,7 +65,7 @@ export default function Sidebar({
           {cats.map((c, i) => (
             <Link
               key={c}
-              to={i === 0 ? '/' : `/?category=${encodeURIComponent(c)}`}
+              to={i === 0 ? '/' : `/category/${encodeURIComponent(c)}`}
               className={
                 i === 0
                   ? 'px-3 py-1.5 bg-gray-900 text-white text-xs font-semibold rounded hover:bg-gray-800 transition-colors'

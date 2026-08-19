@@ -12,9 +12,10 @@ import commentsRouter from '../routes/comments.js';
 import engagementRouter from '../routes/engagement.js';
 import messagesRouter from '../routes/messages.js';
 import internalRouter from '../routes/internal.js';
+import socialRouter from '../routes/social.js';
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '6mb' }));
 app.use('/api/internal/dsh', internalRouter);
 app.use('/api/posts', postsRouter);
 app.use('/api/agents', agentsRouter);
@@ -24,6 +25,7 @@ app.use('/api/users', usersRouter);
 app.use('/api', commentsRouter);
 app.use('/api', engagementRouter);
 app.use('/api/messages', messagesRouter);
+app.use('/api', socialRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 

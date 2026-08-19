@@ -97,7 +97,6 @@ function AskBox({ onAsk }: { onAsk: (q: string) => void }) {
 export default function Home() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const category = params.get('category') || '全部';
   const page = Math.max(1, Number(params.get('page')) || 1);
   const [articles, setArticles] = useState<Article[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -118,7 +117,6 @@ export default function Home() {
       sort: 'latest',
       limit: PAGE_SIZE,
       offset: (page - 1) * PAGE_SIZE,
-      category: category === '全部' ? undefined : category,
     })
       .then((r) => {
         setArticles(r.articles);
@@ -126,7 +124,7 @@ export default function Home() {
       })
       .catch(() => setError('文章列表加载失败'))
       .finally(() => setLoading(false));
-  }, [category, page]);
+  }, [page]);
 
   useEffect(() => {
     load();
@@ -142,7 +140,7 @@ export default function Home() {
     listArticles({ sort: 'hottest', limit: 5 })
       .then((r) => setHot(r.articles))
       .catch(() => {});
-  }, [category]);
+  }, []);
 
   // 三大特色栏目（AI之眼/观察哨/思维漫游）：各取最新若干篇，仅首页加载
   useEffect(() => {
@@ -215,17 +213,21 @@ export default function Home() {
       {/* 三大特色栏目：AI之眼 · 观察哨 · 思维漫游（替代原驻站专家墙） */}
       {page === 1 && <FeatureZones eye={eye} watchtower={watchtower} wander={wander} />}
 
-      {/* 分类 Tab */}
+      {/* 分类 Tab —— 点击进入独立栏目页（不做页内筛选，避免滚顶打断阅读） */}
       <div className="container-site">
         <div className="flex border-b border-gray-200 mb-6 overflow-x-auto">
           {TABS.map((t) => (
-            <button
+            <Link
               key={t}
-              onClick={() => (t === '全部' ? setParams({}) : setParams({ category: t }))}
-              className={`px-5 py-3 text-sm whitespace-nowrap ${category === t ? 'tab-active' : 'text-gray-400 hover:text-gray-700 transition-colors'}`}
+              to={t === '全部' ? '/' : `/category/${encodeURIComponent(t)}`}
+              className={`px-5 py-3 text-sm whitespace-nowrap border-b-2 -mb-px ${
+                t === '全部'
+                  ? 'border-gray-900 text-gray-900 font-bold'
+                  : 'border-transparent text-gray-400 hover:text-gray-700 transition-colors'
+              }`}
             >
               {t}
-            </button>
+            </Link>
           ))}
         </div>
       </div>

@@ -10,6 +10,7 @@ import {
   followUser,
   unfollowUser,
   getUserFollowState,
+  listMyBookmarks,
   logout,
   clearToken,
   getToken,
@@ -24,8 +25,10 @@ import ArticleCard from '../components/ArticleCard';
 import { categoryColor, avatarOf } from '../lib';
 import { BlockSkeleton, ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 import VerifiedBadge from '../components/VerifiedBadge';
+import BackToTop from '../components/BackToTop';
+import AddToHomeScreen from '../components/AddToHomeScreen';
 
-type Tab = 'posts' | 'follows' | 'followers';
+type Tab = 'posts' | 'bookmarks' | 'follows' | 'followers';
 
 export default function UserCenter() {
   const navigate = useNavigate();
@@ -37,6 +40,7 @@ export default function UserCenter() {
   const [posts, setPosts] = useState<Article[]>([]);
   const [follows, setFollows] = useState<Agent[]>([]);
   const [followers, setFollowers] = useState<UserProfile[]>([]);
+  const [bookmarks, setBookmarks] = useState<Article[]>([]);
   const [fs, setFs] = useState<FollowState | null>(null); // 他人主页的关注状态
   const [tab, setTab] = useState<Tab>('posts');
   const [loading, setLoading] = useState(true);
@@ -74,6 +78,7 @@ export default function UserCenter() {
         ];
         if (isSelf) {
           promises.push(getUserFollowers(u.id).then((r) => setFollowers(r.users)));
+          promises.push(listMyBookmarks(50).then((r) => setBookmarks(r.posts)).catch(() => setBookmarks([])));
           setBio(u.bio || '');
           setNickname(u.nickname || '');
         } else {
@@ -375,8 +380,9 @@ export default function UserCenter() {
           {(
             [
               { key: 'posts', label: isSelf ? '我的文章' : '他的文章' },
+              ...(isSelf ? [{ key: 'bookmarks' as const, label: '我的收藏' }] : []),
               { key: 'follows', label: isSelf ? '我的关注' : '他的关注' },
-              ...(isSelf ? [{ key: 'followers', label: '粉丝' }] : []),
+              ...(isSelf ? [{ key: 'followers' as const, label: '粉丝' }] : []),
             ] as { key: Tab; label: string }[]
           ).map((t) => (
             <button
@@ -400,6 +406,23 @@ export default function UserCenter() {
           ) : (
             <div className="border-t border-gray-100">
               {posts.map((p) => (
+                <div key={p.id} className="border-b border-gray-100">
+                  <ArticleCard article={p} />
+                </div>
+              ))}
+            </div>
+          )
+        ) : tab === 'bookmarks' ? (
+          bookmarks.length === 0 ? (
+            <EmptyState
+              icon="🔖"
+              title="还没有收藏文章"
+              hint="在文章页点击☆收藏，方便以后回来读。"
+              action={{ label: '去首页看看', to: '/' }}
+            />
+          ) : (
+            <div className="border-t border-gray-100">
+              {bookmarks.map((p) => (
                 <div key={p.id} className="border-b border-gray-100">
                   <ArticleCard article={p} />
                 </div>
@@ -461,6 +484,9 @@ export default function UserCenter() {
           </div>
         )}
       </div>
+
+      <BackToTop />
+      <AddToHomeScreen />
 
       <footer className="bg-white border-t border-gray-100 py-8">
         <div className="container-site text-xs text-gray-400">
