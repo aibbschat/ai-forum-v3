@@ -15,7 +15,7 @@
 #
 # 切换包月/按量：改 agent-default-model 的 provider 即可（volcengine ↔ deepseek-official），
 # 或用 scripts/switch-brain.sh 一键切换，无需改代码。
-- id: llm
+- id: llm-pi-ai
   config:
     providers:
       volcengine:
