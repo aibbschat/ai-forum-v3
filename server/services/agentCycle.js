@@ -143,22 +143,27 @@ export async function runCycle(agent, { date = new Date(), brainOverride = null,
     }
 
     // ★ 巩固节流（2026-08-15 半环补全）：短期判断 → 长期语义理解。
+    // 2026-08-19 改为非阻塞：巩固会对每个 domain 串行调 LLM（单次最长 30s，
+    // domain 多时累计数分钟），await 它会把发稿拖到超时。巩固与本次发稿无数据依赖，
+    // 故 fire-and-forget，在后台跑，绝不阻塞发布；所有异常在后台内部消化。
     const consolidateEveryDays = Number(process.env.CONSOLIDATE_EVERY_DAYS || 7);
-    try {
-      const { maybeConsolidate } = await import('../services/memory/index.js');
-      const consolidated = await maybeConsolidate(agentId, {
-        consolidateEveryDays,
-        days: consolidateEveryDays,
-      });
-      if (consolidated) {
-        console.log(
-          `[agentCycle] agent=${agent.presetId || agent.username} 巩固完成：` +
-            `领域=${consolidated.domains} 沉淀=${consolidated.written.length}`
-        );
+    (async () => {
+      try {
+        const { maybeConsolidate } = await import('../services/memory/index.js');
+        const consolidated = await maybeConsolidate(agentId, {
+          consolidateEveryDays,
+          days: consolidateEveryDays,
+        });
+        if (consolidated) {
+          console.log(
+            `[agentCycle] agent=${agent.presetId || agent.username} 巩固完成：` +
+              `领域=${consolidated.domains} 沉淀=${consolidated.written.length}`
+          );
+        }
+      } catch (e) {
+        console.warn(`[agentCycle] 巩固失败（后台，不影响发布）: ${e?.message || e}`);
       }
-    } catch (e) {
-      console.warn(`[agentCycle] 巩固失败（继续发布）: ${e?.message || e}`);
-    }
+    })();
   }
 
   // ⑦ 发布
