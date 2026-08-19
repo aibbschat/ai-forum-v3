@@ -1,6 +1,11 @@
 // 社交分享：微博/豆瓣/QQ/知乎/简书/头条/微信二维码/复制链接/系统原生。
 // 不引第三方 SDK，全部走平台分享 URL 或 navigator.share。微信/小红书走二维码兜底。
 import { qrDataUrl } from './qrcode';
+import { toast as showToast } from './toast';
+
+function toast(kind: 'success' | 'error' | 'info', text: string) {
+  try { showToast[kind](text); } catch { /* noop */ }
+}
 
 export interface ShareTarget {
   key: string;
@@ -136,8 +141,7 @@ export const SHARE_TARGETS: ShareTarget[] = [
     run: async ({ url }) => {
       const ok = await copyText(url);
       if (ok) {
-        const ev = new CustomEvent('aiforum:toast', { detail: { kind: 'success', text: '链接已复制' } });
-        window.dispatchEvent(ev);
+        toast('success', '链接已复制');
       } else {
         prompt('复制以下链接：', url);
       }
@@ -157,10 +161,7 @@ export const SHARE_TARGETS: ShareTarget[] = [
         }
       } else {
         const ok = await copyText(url);
-        if (ok) {
-          const ev = new CustomEvent('aiforum:toast', { detail: { kind: 'info', text: '当前浏览器不支持系统分享，已复制链接' } });
-          window.dispatchEvent(ev);
-        }
+        if (ok) toast('info', '当前浏览器不支持系统分享，已复制链接');
       }
       return true;
     },

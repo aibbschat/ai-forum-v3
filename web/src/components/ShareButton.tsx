@@ -76,25 +76,25 @@ export default function ShareButton({
     }
     if (btnRef.current && window.innerWidth >= 768) {
       const r = btnRef.current.getBoundingClientRect();
-      const menuW = 220;
-      const menuH = SHARE_TARGETS.length * 38 + 12; // 每项 ~38px + 上下 padding
+      // 宫格尺寸：5 列 × 2 行，每个 cell ~60px 宽，含 padding
+      const menuW = 320;
+      const menuH = 156;
       const margin = 8;
 
-      // 水平：默认右对齐到按钮；若右边放不下就往左推，但不超出视口左边
-      let left = r.right - menuW;
-      if (left < margin) left = margin;
+      // 水平：默认把菜单左边对齐按钮左边；超出右边则左推；左边不够则贴左
+      let left = r.left;
       if (left + menuW > window.innerWidth - margin) {
-        left = Math.max(margin, window.innerWidth - menuW - margin);
+        left = r.right - menuW;
       }
+      left = Math.max(margin, Math.min(left, window.innerWidth - menuW - margin));
 
-      // 垂直：优先在按钮下方；下方不够则翻到按钮上方
-      let top = r.bottom + 6;
+      // 垂直：优先按钮下方；下方不够则上方；都不够则贴底
+      let top = r.bottom + 8;
       if (top + menuH > window.innerHeight - margin) {
-        const above = r.top - 6 - menuH;
+        const above = r.top - 8 - menuH;
         if (above >= margin) {
           top = above;
         } else {
-          // 上下都不够：贴着底部，允许滚动（极端小屏）
           top = Math.max(margin, window.innerHeight - menuH - margin);
         }
       }
@@ -144,20 +144,22 @@ export default function ShareButton({
           {pos ? (
             <div
               ref={menuRef}
-              className="fixed z-[9999] bg-white rounded-xl shadow-2xl border border-gray-100 py-1.5 w-[190px]"
+              className="fixed z-[9999] bg-white rounded-2xl shadow-2xl border border-gray-100 p-3 w-[320px] animate-slide-up"
               style={{ top: pos.top, left: pos.left }}
             >
-              {SHARE_TARGETS.map((t) => (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => runTarget(t.key)}
-                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors"
-                >
-                  <span className="text-base leading-none">{t.emoji}</span>
-                  <span>{t.label}</span>
-                </button>
-              ))}
+              <div className="grid grid-cols-5 gap-1">
+                {SHARE_TARGETS.map((t) => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => runTarget(t.key)}
+                    className="flex flex-col items-center gap-1.5 py-2 rounded-lg hover:bg-gray-50 active:bg-gray-100 transition-colors"
+                  >
+                    <span className="text-2xl leading-none">{t.emoji}</span>
+                    <span className="text-[11px] text-gray-600 leading-tight">{t.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           ) : (
             // 移动端：底部抽屉
@@ -169,7 +171,7 @@ export default function ShareButton({
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-4" />
-                <div className="grid grid-cols-4 gap-3">
+                <div className="grid grid-cols-5 gap-2">
                   {SHARE_TARGETS.map((t) => (
                     <button
                       key={t.key}
