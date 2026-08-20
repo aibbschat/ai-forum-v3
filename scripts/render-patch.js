@@ -15,6 +15,14 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, isAbsolute } from 'node:path';
 
+// 加载仓库根 .env，使 BAIJIA_DATA_DIR 等机器相关变量可被读取（dotenv 已在依赖中）。
+try {
+  const dotenv = await import('dotenv');
+  dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
+} catch {
+  // dotenv 不可用时退回纯 process.env
+}
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const TEMPLATE = resolve(ROOT, 'dsh/bundles/agent-presets-mount/cordis.patch.template.yml');
 const OUT = resolve(ROOT, 'dsh/bundles/agent-presets-mount/cordis.patch.yml');
