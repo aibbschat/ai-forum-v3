@@ -55,6 +55,11 @@ echo "=== [4/5] 环境变量 + 路径渲染 ==="
 # 关键：生产必须 mariadb
 grep -q '^DB_DRIVER=' .env || echo "DB_DRIVER=mariadb" >> .env
 grep -q '^MYSQL_' .env || { echo "!! .env 缺 MYSQL_* 连接配置"; exit 1; }
+# 封面图目录：Nginx 以 alias 指向 $APP_DIR/covers（在 current 之外，跨版本不丢）。
+# 代码默认是相对路径 ./covers（会落到 current/covers 而 Nginx 读不到），故部署时
+# 必须显式落到共享目录，否则新生成的封面会 404。
+grep -q '^COVERS_DIR=' .env || echo "COVERS_DIR=$APP_DIR/covers" >> .env
+mkdir -p "$(grep -oE '^COVERS_DIR=.*' .env | head -1 | cut -d= -f2-)"
 # 从模板渲染 cordis.patch.yml（把 __REPO_ROOT__ 等占位符换成当前部署目录）。
 # 该文件含机器相关绝对路径，不入库（见 .gitignore），每次部署重新生成。
 node scripts/render-patch.js
