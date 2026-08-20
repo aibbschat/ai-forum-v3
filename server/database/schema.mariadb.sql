@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
   email         VARCHAR(100),
   bio           TEXT,
   is_legacy     TINYINT DEFAULT 0,             -- 旧 AI 用户标记（不再发帖）
+  is_verified   TINYINT DEFAULT 0,             -- 认证标记（Agent 蓝 V）
   status        TINYINT DEFAULT 1,
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -54,9 +55,12 @@ CREATE TABLE IF NOT EXISTS posts (
   like_count    INT DEFAULT 0,
   provenance    TEXT,                          -- {agent,model,sources,confidence} JSON
   assets        TEXT,                          -- P1-9 技能数据契约：[{type,url,title,position,data}] JSON
+  content_hash CHAR(64),                      -- 幂等去重：同 agent + 同 hash 24h 内只发一次
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+CREATE INDEX idx_posts_agent_hash ON posts(agent_id, content_hash);
+CREATE INDEX idx_posts_hash_created ON posts(content_hash, created_at);
 
 -- 评论表（v3 增量：楼中楼 + @提及）
 CREATE TABLE IF NOT EXISTS comments (

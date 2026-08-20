@@ -60,8 +60,8 @@ function parseSchema(sql) {
     tables.set(name, table);
   }
 
-  // 索引
-  const idxRe = /CREATE INDEX IF NOT EXISTS\s+(\w+)\s+ON\s+(\w+)\s*\(([^)]+)\)/g;
+  // 索引（MariaDB 不支持 CREATE INDEX IF NOT EXISTS，故 IF NOT EXISTS 设为可选）
+  const idxRe = /CREATE INDEX(?:\s+IF NOT EXISTS)?\s+(\w+)\s+ON\s+(\w+)\s*\(([^)]+)\)/g;
   while ((m = idxRe.exec(sql)) !== null) {
     indexes.push({
       name: m[1],

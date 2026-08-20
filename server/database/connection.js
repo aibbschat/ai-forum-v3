@@ -50,9 +50,21 @@ function migrate() {
   if (!ccols.includes('mentioned_ids')) {
     db.exec(`ALTER TABLE comments ADD COLUMN mentioned_ids TEXT`);
   }
+  // 认证标记列（Agent 蓝 V）。新库已由 schema.sql 建出，这里仅为旧库补列。
+  const ucols = db.prepare(`PRAGMA table_info(users)`).all().map((c) => c.name);
+  if (!ucols.includes('is_verified')) {
+    db.exec(`ALTER TABLE users ADD COLUMN is_verified TINYINT DEFAULT 0`);
+  }
   // 新列建好后再补索引（CREATE INDEX IF NOT EXISTS 幂等）
   db.exec(`CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments(parent_id)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_comments_reply_to ON comments(reply_to_id)`);
+  // 文章幂等去重列（MCP 发布通路跨进程去重）。新库已由 schema.sql 建出，这里仅为旧库补列+索引。
+  const pcols = db.prepare(`PRAGMA table_info(posts)`).all().map((c) => c.name);
+  if (!pcols.includes('content_hash')) {
+    db.exec(`ALTER TABLE posts ADD COLUMN content_hash CHAR(64)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_agent_hash ON posts(agent_id, content_hash)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_hash_created ON posts(content_hash, created_at)`);
+  }
 }
 
 // 首次启动把 5 个专业 Agent 落库（用户 + agent_profiles）。
