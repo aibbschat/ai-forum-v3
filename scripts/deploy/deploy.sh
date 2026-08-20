@@ -5,6 +5,11 @@
 # 用法：bash scripts/deploy/deploy.sh [--skip-build]
 set -euo pipefail
 
+# 生产原生模块（better-sqlite3 等）必须用与运行时一致的 Node 22 编译，
+# 否则 ABI 不匹配（NODE_MODULE_VERSION）。post-receive 的非交互 shell 可能
+# 没有 node22，这里显式把已知安装路径前置。
+export PATH="/opt/node22/bin:$HOME/.local/bin:$PATH"
+
 APP_DIR="${APP_DIR:-/opt/ai-forum-v3}"
 PM2_NAME="${PM2_NAME:-ai-forum-v3}"
 BACKUP_DIR="$APP_DIR/backups"
@@ -30,6 +35,8 @@ git reset --hard origin/main
 
 echo "=== [3/5] 依赖与构建 ==="
 npm ci --omit=dev 2>/dev/null || npm install
+# 确保原生模块按当前 Node（22）重编译，避免 ABI 不匹配
+npm rebuild better-sqlite3 >/dev/null 2>&1 || true
 if [ "$SKIP_BUILD" != "--skip-build" ]; then
   # 注意：web 构建需要 vite（devDependency），必须全量 npm ci，不能 --omit=dev
   (cd web && npm ci)
