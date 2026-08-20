@@ -33,7 +33,7 @@
 
 ## 4. 生产化
 - [ ] .env 强随机密钥（JWT_SECRET/INTERNAL_TOKEN）已换
-- [ ] Nginx 反代 3001 + ai.xs91.com HTTPS（docs/DEPLOY.md 灰度 8 步）
+- [ ] Nginx 反代 3001 + staging.example.com HTTPS（docs/DEPLOY.md 灰度 8 步）
 - [ ] pm2 保活 + 开机自启
 - [ ] 记忆库每日备份 cron（scripts/memory-backup.js）
 - [ ] DSH cron 调度（dsh/run-agent.sh + DSH_ALERT_HOOK）

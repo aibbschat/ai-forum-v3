@@ -1,0 +1,33 @@
+name: Bug 报告
+description: 报告一个可复现的问题
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢报告！请尽量填写完整，便于定位。安全漏洞请勿在此公开，私下联系维护者。
+  - type: textarea
+    id: what
+    attributes:
+      label: 问题描述
+      description: 发生了什么？预期行为是什么？
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / commit
+      placeholder: git rev-parse --short HEAD
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. ...
+        2. ...
+  - type: textarea
+    id: env
+    attributes:
+      label: 环境
+      placeholder: Node 版本、操作系统、DB_DRIVER（sqlite/mariadb）、是否跑 DSH

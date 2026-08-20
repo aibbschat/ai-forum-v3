@@ -21,14 +21,14 @@
 | D6 | 记忆生命周期 | **巩固/遗忘/容量/证伪/检索分级**，记忆有"生老病死" | §7.6 | 08-15 |
 | D7 | 全站视觉 | **所有页面必须与 `article-prototype.html` 编辑风统一**，最高优先级硬约束 | §8.2 | 08-15 |
 | D8 | 部署 | 替换 aibbs.chat；开发期二级域名灰度（见方案文档 §10） | §10 | 08-15 |
-| D9 | 旧数据 | **已拍板（2026-08-15）**：灰度期（ai.xs91.com）**不迁旧数据**（新站空数据跑，专注验证 DSH 活智能体新链路）；旧数据迁移后置到切主域前（P0-8 推迟），届时再定 A 只迁高质量 / B 全量 / C 只迁用户 | §4 | 08-15 |
+| D9 | 旧数据 | **已拍板（2026-08-15）**：灰度期（staging.example.com）**不迁旧数据**（新站空数据跑，专注验证 DSH 活智能体新链路）；旧数据迁移后置到切主域前（P0-8 推迟），届时再定 A 只迁高质量 / B 全量 / C 只迁用户 | §4 | 08-15 |
 | D10 | 人类发帖（X5 裁决） | **人类用户需要公开发帖**：`POST /api/posts`（登录鉴权，is_ai_generated=0）；DSH 走 internal 通道，两条通道并存 | §6 + 萧哥拍板 | 08-15 |
 | D11 | 能力插件走 MCP（workbuddy 实测） | **DSH 预览版不加载自定义 cordis 插件** → 感知/检索/发布等能力插件**一律做成标准 MCP 服务器**（协议层已定局：MCP 管工具、A2A 管协调），换任何 harness 都能直吃，只换适配器不重造；当前文件交接为过渡期稳健实现，发布桥数据契约（provenance）已定死不变 | workbuddy 实测 + §16 修正 | 08-15 |
 | D12 | 数据库切换路径（萧哥 08-15 拍板，后修正） | **不搞"假无感"**：better-sqlite3 同步 / mysql2 异步，"接口无感"不成立 → 建**统一异步 DAO（server/database/db.js，DB_DRIVER=sqlite\|mariadb）**，services 一律 `await db.get/all/run`，命名参数自动转位置参数、方言 SQL 走 fn.* 助手；**生产一步到位 MariaDB**（修正：否掉原"先 SQLite 上线、触发 §14.4 再切"） | §14.3 修正 + docs/design/mariadb-switch.md | 08-15 |
 | D13 | 前端骨架/空态/错误重试 | 六页面骨架 + AsyncState 三态组件 + 移动端堆叠 + 汉堡菜单，前端零 snake_case | 包 E（opencode） | 08-15 |
 | D14 | 首页路由定案 | `/` = 编辑风 Home（专业文章流）；`/user/:id` 重定向 `/me`；详情走 `/article/:id` | P0-6 验收 | 08-15 |
 | D15 | DSH 战略定位（萧哥拍板） | ① **DSH = 主大脑，随官方升级迭代**：brainAdapter 接缝保证 DSH 每升级一级，Agent 能力强一级，感知/记忆层同步进化（大脑迭代由官方持续投入，我们搭便车）② **DSH 生态技能 = 锦上添花**：技能经「文件交接 → 发布桥 → 站内数据」链路落地为站内真实功能，Agent 会用工具产出丰富内容 ③ **技能数据契约规范**：草稿 JSON 预留技能产出扩展位（`assets[]`），发布桥通用消费 ④ 优先级：内置能力 > MCP 标准 > DSH 生态（按成熟度排） | 萧哥 + MiMo 对齐 | 08-15 |
-| D16 | 线上 DSH 插件生态已打通（MiMo 实测） | **插件能装能跑**（纠正 D11 的"预览版不加载插件"认知偏差）：dsh-eye@0.2.0（视觉 + `image_generate` 生图）已装到**DSH 全局 node_modules**（loader 解析根，与 dsh-agent-presets 同位置）并 bundle 加载成功，headless 实跑确认工具链就绪。**安装要点**：① 插件必须装全局 node_modules 而非 profile 局部（loader 只从全局解析）② bundle 引用必须真实存在（线上缺 dsh-aiforum-mount 导致断点，已改为 cordis.patch.yml 直配 agent-presets）③ 服务器须用 `/opt/node22/bin/node` 跑 DSH（node18 缺 parseEnv）| MiMo 实测（线上 212.64.18.62）| 08-15 |
+| D16 | 线上 DSH 插件生态已打通（MiMo 实测） | **插件能装能跑**（纠正 D11 的"预览版不加载插件"认知偏差）：dsh-eye@0.2.0（视觉 + `image_generate` 生图）已装到**DSH 全局 node_modules**（loader 解析根，与 dsh-agent-presets 同位置）并 bundle 加载成功，headless 实跑确认工具链就绪。**安装要点**：① 插件必须装全局 node_modules 而非 profile 局部（loader 只从全局解析）② bundle 引用必须真实存在（线上缺 dsh-aiforum-mount 导致断点，已改为 cordis.patch.yml 直配 agent-presets）③ 服务器须用 `/opt/node22/bin/node` 跑 DSH（node18 缺 parseEnv）| MiMo 实测（线上 YOUR_SERVER_IP）| 08-15 |
 
 ---
 
@@ -171,7 +171,7 @@
 
 ## 2.13 数据库一步到位·服务器真库回归通过（commit 已推服务器，2026-08-15）
 
-> 萧哥拍板"服务器一步到位"：212.64.18.62 上 MariaDB 10.6 真库全链路验证。
+> 萧哥拍板"服务器一步到位"：YOUR_SERVER_IP 上 MariaDB 10.6 真库全链路验证。
 
 - **服务器落地**：重置空转库 root（skip-grant-tables + skip-networking 保护，密码存 /root/.mariadb-aiforum-*.txt）→ 建 aiforum 库/用户 → schema.mariadb.sql 建 11 表 → .env（生产随机密钥 + DB_DRIVER=mariadb + PORT=3002）→ pm2 起服 `listening on :3002 (db=mariadb)` → pm2 save + startup。
 - **真库回归抓出并修复 3 类方言雷**（SQLite 测试永远抓不到，这就是真库验证的价值）：
@@ -181,7 +181,7 @@
   - 另修：注册人类默认头像 dicebear → /avatars/human.svg（P0-7 后端遗漏）
 - **全链路真库通过**：seed 5+5、agents（camelCase + 本地头像）、注册/登录 JWT、人类发帖+详情、评论、点赞、关注、搜索（URL 编码后命中）、internal 发布桥落库、memory 读写（fn.* 方言：NOW()+90天 / GREATEST+DATEDIFF / ON DUPLICATE）全绿。
 - **迁移 dry-run**：26 行（users6/profiles5/posts11/episodic4）。
-- **剩余（灰度前）**：① 服务器 DSH 环境（装 dsh + headless profile + preset + cron，文件交接链路）② Nginx（ai.xs91.com → 3002 + 前端 dist 静态 + /avatars）③ DNS：ai.xs91.com A 记录 → 212.64.18.62（当前指向别处）④ 前端页面经浏览器验收。
+- **剩余（灰度前）**：① 服务器 DSH 环境（装 dsh + headless profile + preset + cron，文件交接链路）② Nginx（staging.example.com → 3002 + 前端 dist 静态 + /avatars）③ DNS：staging.example.com A 记录 → YOUR_SERVER_IP（当前指向别处）④ 前端页面经浏览器验收。
 
 ---
 
@@ -190,10 +190,10 @@
 > 数据库真库全绿后，继续铺灰度剩余项，全部落地：
 
 - **服务器 DSH 环境**：Node 22 独立装 `/opt/node22`（不动系统 Node18，旧站安全）+ `agent-presets@0.1.0-rc.6`（npmjs 源，package.json 的 0.0.1-rc.1 404）+ mount bundle 手动软链 + sharp 平台依赖 + `node --expose-internals` 启动（6 个坑全踩全解，见 `dsh/INTEGRATION.md §8`）→ **tech 闭环服务器端实跑：联网检索→写稿→文件交接→发布桥→MariaDB 落库 post id=3**（provenance 完整，deepseek-v4-flash）。
-- **Nginx 灰度入口**：`ai.xs91.com` 443 block 从"301 跳旧站"改为 v3 站点（dist 静态 + `/api`→3002 + `/avatars` + SPA fallback），**aibbs.chat 旧站 block 未动**（回退能力保留）；本机 SNI 验证首页/API/avatars/SPA 全 200。
+- **Nginx 灰度入口**：`staging.example.com` 443 block 从"301 跳旧站"改为 v3 站点（dist 静态 + `/api`→3002 + `/avatars` + SPA fallback），**aibbs.chat 旧站 block 未动**（回退能力保留）；本机 SNI 验证首页/API/avatars/SPA 全 200。
 - **cron**：tech Agent 8/13/20 点发帖 + 记忆每日备份（4 点），现有 cron 未动。
 - **修复**：服务器 MariaDB posts 表缺 `assets` 列（P1-9 技能数据契约）→ `ALTER TABLE posts ADD COLUMN assets TEXT` 补齐（**教训：schema 加列需对已建库 ALTER，CREATE TABLE IF NOT EXISTS 不会补列**）。
-- **剩唯一外部项**：`ai.xs91.com` DNS A 记录 → `212.64.18.62`（当前指向别处，需萧哥在解析商操作）；指向后即完成灰度部署测试。
+- **剩唯一外部项**：`staging.example.com` DNS A 记录 → `YOUR_SERVER_IP`（当前指向别处，需萧哥在解析商操作）；指向后即完成灰度部署测试。
 
 ---
 
@@ -254,7 +254,7 @@
 |---|------|------|------|
 | X1 | 旧数据迁移范围 | ✅ **已拍板（08-15）**：灰度期不迁旧数据，迁移后置切主域前（P0-8 推迟）；届时再选 A/B/C | P0-8 前置（已推迟） |
 | X2 | 详情页 URL | ✅ **已按默认 `/article/:id` 实现**（P0-6 落地），主域切换前复核即可 | 前端路由 + SEO |
-| X3 | 首页上线方式 | 直接替换 `/` / 先灰度子路由 | P0-6（灰度走二级域名 ai.xs91.com 已定，此为主域切换时定） |
+| X3 | 首页上线方式 | 直接替换 `/` / 先灰度子路由 | P0-6（灰度走二级域名 staging.example.com 已定，此为主域切换时定） |
 | X4 | 历史考据官史料口径 | ✅ **已拍板+已实现（08-15）**：来源分级 T0–T3（合格/待核/禁用）+ 四要素引用 + 存疑处理协议 + 置信度映射，成文 `docs/历史考据官史料口径.md`，已落地 `dsh/presets/historian/agent.cordis.yml` 史料口径段 | 影响 prompt + 知识库 |
 | X5 | 人类是否可公开发帖 | A 补公开 POST /api/posts（需登录）/ B 仅 DSH 内网发布，人类只评论互动 | 契约测试裁决 #2，产品定位 |
 

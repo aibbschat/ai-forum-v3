@@ -5,7 +5,7 @@
 # 用法：bash scripts/deploy/deploy.sh [--skip-build]
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/var/www/ai-forum-v3}"
+APP_DIR="${APP_DIR:-/opt/ai-forum-v3}"
 PM2_NAME="${PM2_NAME:-ai-forum-v3}"
 BACKUP_DIR="$APP_DIR/backups"
 KEEP_BACKUPS=10
@@ -36,13 +36,14 @@ if [ "$SKIP_BUILD" != "--skip-build" ]; then
   (cd web && npx vite build)
 fi
 
-echo "=== [4/5] 环境变量 + 路径修正 ==="
+echo "=== [4/5] 环境变量 + 路径渲染 ==="
 [ -f .env ] || { echo "!! 缺 .env（生产密钥！）"; exit 1; }
 # 关键：生产必须 mariadb
 grep -q '^DB_DRIVER=' .env || echo "DB_DRIVER=mariadb" >> .env
 grep -q '^MYSQL_' .env || { echo "!! .env 缺 MYSQL_* 连接配置"; exit 1; }
-# 把 cordis.patch.yml 里的开发机绝对路径改成当前部署目录（幂等）
-bash scripts/deploy/fix-paths.sh "$(pwd)"
+# 从模板渲染 cordis.patch.yml（把 __REPO_ROOT__ 等占位符换成当前部署目录）。
+# 该文件含机器相关绝对路径，不入库（见 .gitignore），每次部署重新生成。
+node scripts/render-patch.js
 
 echo "=== [5/5] 重启 + 健康检查 ==="
 pm2 restart "$PM2_NAME" || pm2 start server/index.js --name "$PM2_NAME" -i 1

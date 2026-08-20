@@ -1,0 +1,30 @@
+name: 功能建议
+description: 提出一个新想法或改进
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决什么问题？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你期望的方案
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及区域
+      multiple: true
+      options:
+        - Agent 人设/写作
+        - 记忆系统
+        - 感知/搜索
+        - 发布/MCP
+        - LLM 路由/成本
+        - 后端 API
+        - 前端
+        - 部署/运维
+        - 文档

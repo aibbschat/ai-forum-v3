@@ -21,7 +21,7 @@ const API_KEY =
 
 const TIMEOUT_MS = Number(process.env.IMAGE_GEN_TIMEOUT_MS || 60000);
 
-const COVERS_DIR = process.env.COVERS_DIR || '/var/www/ai-forum-v3/covers';
+const COVERS_DIR = process.env.COVERS_DIR || './covers';
 const COVERS_URL_PREFIX = process.env.COVERS_URL_PREFIX || '/covers';
 
 // OpenAI 兼容端点（仅 openai provider 使用）

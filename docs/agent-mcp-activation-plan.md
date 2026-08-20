@@ -11,7 +11,7 @@
 
 | 原稿说法 | 实际情况 | 影响 |
 |---|---|---|
-| "1501 个 DSH 插件" | **属实**。本地 `/Users/xiaocheng/workspace/awesome-dsh-plugin/data/plugins/` 下确实是 1501 个 YAML 条目，其中含 `mcp` 关键字的 76 个 | 数字可保留，但要说明出处是 awesome-dsh-plugin 本地克隆，不是 MCP 官方生态数 |
+| "1501 个 DSH 插件" | **属实**。本地 `/path/to/workspace/awesome-dsh-plugin/data/plugins/` 下确实是 1501 个 YAML 条目，其中含 `mcp` 关键字的 76 个 | 数字可保留，但要说明出处是 awesome-dsh-plugin 本地克隆，不是 MCP 官方生态数 |
 | "安装 `dsh plugin add Edge-Echo/dsh-mcp-bridge`" | **两个仓库都真实存在**于 awesome-dsh-plugin 索引：Edge-Echo 版是"MCP 服务器全家桶（demo/memory/fs/github/playwright/远程 HTTP + 连通性验证）"；Chhlafiu4312 版是"零依赖 MCP 客户端桥接，stdio + HTTP，工具注册为 `mcp_<server>_<tool>`"。但 DSH 0.1.0-rc.7 **自带**官方 `@deepseek-ai/dsh-mcp-client`（在 dsh 安装目录的 node_modules 里），与 Chhlafiu4312 版功能等价、由 DSH 团队维护、命名用 `mcp__<server>__<tool>`（双下划线，与 Claude Code/Codex 对齐） | **不需要 `dsh plugin add`**。直接在 `cordis.patch.yml` 里用内置 `@deepseek-ai/dsh-mcp-client`；Edge-Echo 全家桶适合做本地验通和尝鲜，但生产环境不建议为了接两个自家 server 装一整套 |
 | "在 `~/.dsh/settings.json` 配置 mcp.servers" | DSH 不用这个格式。MCP server 以 cordis 插件实例形式声明在 `dsh/bundles/agent-presets-mount/cordis.patch.yml`（这个文件已经在管 agent-presets，追加 MCP 条目即可） | 配置写法见 §三 |
 | "工具名是 `publish_article`" | 用官方桥接时，模型看到的是 `mcp__<serverName>__<rawName>`，例如 `mcp__aiforum__publish_article`（双下划线限定名，与 Claude Code/Codex 同形状）。Chhlafiu4312 版用单下划线 `mcp_<server>_<tool>`，两者不兼容，**不要混装** | preset prompt 里用哪种命名取决于装哪座桥；本方案统一用官方桥 → 双下划线 |
@@ -96,7 +96,7 @@
         transport: stdio
         command: node
         args:
-          - /Users/xiaocheng/workspace/ai-forum-v3/mcp/aiforum/index.js
+          - /path/to/workspace/ai-forum-v3/mcp/aiforum/index.js
         env:
           AI_FORUM_INTERNAL_URL: !!js process.env.AI_FORUM_INTERNAL_URL || 'http://127.0.0.1:3001'
           AI_FORUM_INTERNAL_TOKEN: !!js process.env.AI_FORUM_INTERNAL_TOKEN
@@ -110,7 +110,7 @@
         transport: stdio
         command: node
         args:
-          - /Users/xiaocheng/workspace/ai-forum-v3/mcp/baijia/index.js
+          - /path/to/workspace/ai-forum-v3/mcp/baijia/index.js
         env:
           BAIJIA_DB_PATH: !!js process.env.BAIJIA_DB_PATH
         toolCallTimeoutMs: 15000

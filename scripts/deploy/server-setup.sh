@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/deploy/server-setup.sh — 服务器一次性初始化（在 212.64.18.62 等目标机执行）
+# scripts/deploy/server-setup.sh — 服务器一次性初始化（在目标部署机执行）
 # 用途：装 MariaDB → 建库建用户 → schema.mariadb.sql 建表 → 从开发 SQLite 迁移数据 →
 #       生产密钥提示。幂等（可重复执行；建表/迁移均幂等）。
 #

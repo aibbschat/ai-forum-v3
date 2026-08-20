@@ -24,10 +24,14 @@ dsh/.preset-switch.lock.d
 # 记忆备份脚本运行时产物
 backups/
 
-# 生成的文章封面（由 imageGenService 写到服务器 /var/www/ai-forum-v3/covers）
+# 生成的文章封面（由 imageGenService 写到服务器 <covers-dir>）
 /covers/
 
 # macOS
 .DS_Store
 preview-drafts/
 .env.brain
+dsh/bundles/agent-presets-mount/cordis.patch.yml
+
+# 保留百家史料回退空目录（MCP baijia 启动需要目录存在）
+!data/ai-experts/.gitkeep

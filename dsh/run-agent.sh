@@ -56,6 +56,8 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PRESET_SRC="$ROOT/dsh/presets"
 DUMP=~/.dsh/.agent-presets
 MOUNT_PATCH="$ROOT/dsh/bundles/agent-presets-mount/cordis.patch.yml"
+# 真实 mount patch 由模板渲染（含本机绝对路径，不入库）；不存在或过期时自动生成
+[ -f "$MOUNT_PATCH" ] || node "$ROOT/scripts/render-patch.js" >/dev/null 2>&1 || true
 LOCKDIR="/tmp/dsh-run-$SLUG.lock.d"
 SWITCH_LOCKDIR="$ROOT/dsh/.preset-switch.lock.d"
 LOG_DIR="$ROOT/dsh/logs"; mkdir -p "$LOG_DIR"

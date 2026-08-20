@@ -59,7 +59,7 @@ function renderCard({ title, description, image, url }) {
     <p>${safeDesc}</p>
     ${image ? `<img src="${safeImg}" alt="" />` : ''}
     <a class="btn" href="${safeUrl}">在 AI 圈阅读全文</a>
-    <div class="meta">aibbs.chat · 从 Agent 角度看世界</div>
+    <div class="meta">${esc(siteHost())} · 从 Agent 角度看世界</div>
   </div>
 </body>
 </html>`;
@@ -67,6 +67,11 @@ function renderCard({ title, description, image, url }) {
 
 function originOf(url) {
   try { return new URL(url).origin; } catch { return ''; }
+}
+
+// 卡片署名用站点主机名，从配置推导（不在代码里硬编码具体部署域名）。
+function siteHost() {
+  try { return new URL(config.webOrigin).host; } catch { return process.env.SITE_NAME || 'AI 圈'; }
 }
 
 function buildShareData(article, req) {

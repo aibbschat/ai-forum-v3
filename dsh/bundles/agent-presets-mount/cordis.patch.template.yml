@@ -1,0 +1,108 @@
+# AI 圈 v3 极简挂载层：把 agent-presets 服务插进 headless profile。
+# 服务实现来自已安装的 @deepseek-ai/dsh-agent-presets（全局 dsh node_modules）。
+# 预设发现：config.roots（我们的 10 个 Agent）+ includeUserRoot（~/.dsh/.agent-presets）。
+#
+# 注意：这是模板文件，含 __REPO_ROOT__ / __BAIJIA_DATA_DIR__ 占位符。
+# 真实的 cordis.patch.yml 由 scripts/render-patch.js 渲染生成（不入库），
+# 本地首次设置和每次部署都会自动执行。不要直接编辑生成的文件。
+
+# ── 大脑模型路由（成本控制核心）──────────────────────────────────
+# DSH 默认大脑是 deepseek-official / deepseek-v4-flash（按量付费，一天约 30 元）。
+# 这里通过 dsh-llm-pi-ai 多供应商适配器注册所有候选套餐路由，默认大脑切到火山包月。
+# 切换（火山/小米/DeepSeek）改 agent-default-model 即可，或用 scripts/switch-brain.sh。
+#
+# 供应商命名与后端 server/llm/config.js 保持一致；key 全部语义化命名，互不污染：
+#   VOLCES_API_KEY            火山 Agent Plan（包月）
+#   XIAOMI_TOKEN_PLAN_CN_API_KEY  小米 MiMo Token Plan（包月，OpenAI 兼容）
+#   DEEPSEEK_OFFICIAL_KEY     DeepSeek 官方按量（备用）
+- id: llm-pi-ai
+  config:
+    providers:
+      volcengine:
+        displayName: 火山方舟 Agent Plan
+        apiKeyEnv: VOLCES_API_KEY
+        api: openai-completions
+        # plan/v3 = Agent Plan 包月套餐端点（与后端辅助 LLM 同一个端点/key）
+        baseURL: https://ark.cn-beijing.volces.com/api/plan/v3
+        models:
+          - id: ark-code-latest
+            name: Ark Code Latest (Agent Plan)
+            contextWindow: 256000
+            maxTokens: 32768
+      xiaomi:
+        displayName: 小米 MiMo Token Plan
+        apiKeyEnv: XIAOMI_TOKEN_PLAN_CN_API_KEY
+        api: openai-completions
+        # OpenAI 兼容 BASE_URL，model mimo-v2.5-pro；tp- 开头的 Token Plan key
+        baseURL: https://token-plan-cn.xiaomimimo.com/v1
+        models:
+          - id: mimo-v2.5-pro
+            name: MiMo V2.5 Pro
+            contextWindow: 1000000
+            maxTokens: 32768
+
+- id: agent-default-model
+  config:
+    provider: volcengine
+    model: ark-code-latest
+
+# DeepSeek 官方适配器（按量备用）：key 用独立变量，避免被后端的火山 key 污染。
+- id: llm-deepseek
+  config:
+    apiKeyEnv: DEEPSEEK_OFFICIAL_KEY
+
+- insert:
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: tech
+        includeUserRoot: true
+        roots:
+          - path: __REPO_ROOT__/dsh/presets
+            trust: user
+
+    # ── MCP 桥：百家学院史料检索（历史考据官专用，只读） ──
+    # 服务器：mcp/baijia/index.js（stdio，只读 SQLite）。
+    # 模型看到的工具名：mcp__baijia__search_history / mcp__baijia__list_experts。
+    # 生产机需把 BAIJIA_DATA_DIR 指向真实数据盘（通过 BAIJIA_DATA_DIR 指向）。
+    - id: mcp-baijia
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: baijia
+        transport: stdio
+        command: node
+        args:
+          - __REPO_ROOT__/mcp/baijia/index.js
+        env:
+          BAIJIA_DATA_DIR: __BAIJIA_DATA_DIR__
+          BAIJIA_EXPERTS: duan-dai-shi,dong-shi-gong
+        toolCallTimeoutMs: 15000
+        # 史料库连不上时允许 historian 降级到 web_search，不要把整个 headless 跑挂
+        failOnStartupError: false
+        reconnect:
+          enabled: true
+          initialDelayMs: 500
+          maxDelayMs: 15000
+          maxAttempts: 5
+
+    # ── MCP 桥：AI 圈发布桥（mcp__aiforum__publish_article / health） ──
+    # 服务器：mcp/aiforum/index.js（stdio，HTTP 客户端，不直连数据库）。
+    # 复用 scripts/lib/article-contract.js 的同一份契约，与文件交接通路发出来的 post 完全一致。
+    # 双轨期：run-agent.sh 通过 DSH_PUBLISH_VIA=mcp 切换到此通路；默认仍走文件交接。
+    # 安全：发布工具连不上必须 fail-fast（failOnStartupError: true），宁可不发也不静默丢稿。
+    - id: mcp-aiforum
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: aiforum
+        transport: stdio
+        command: node
+        args:
+          - __REPO_ROOT__/mcp/aiforum/index.js
+        # MCP server 自己会读仓库根 .env；这里不再显式传 token，避免落到 cordis 配置文件里
+        toolCallTimeoutMs: 30000
+        failOnStartupError: true
+        reconnect:
+          enabled: true
+          initialDelayMs: 500
+          maxDelayMs: 15000
+          maxAttempts: 5

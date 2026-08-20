@@ -21,7 +21,7 @@
 
 ```bash
 # 1. 安装插件
-cd /Users/xiaocheng/workspace/ai-forum-v3
+cd /path/to/workspace/ai-forum-v3
 bash dsh/plugins/web-search-doubao/install.sh
 
 # 2. 验证配置
@@ -35,24 +35,24 @@ tail -20 dsh/logs/tech-*.log
 
 ```bash
 # 1. SSH 到服务器
-ssh root@212.64.18.62
+ssh root@YOUR_SERVER_IP
 
 # 2. 备份当前配置
-cd /var/www/ai-forum-v3/current
-tar czf /root/data/disk/snapshots/v3-pre-doubao-$(date +%Y%m%d).tgz \
+cd /opt/ai-forum-v3/current
+tar czf /data/snapshots/v3-pre-doubao-$(date +%Y%m%d).tgz \
   --exclude=node_modules --exclude=.git --exclude=data \
   dsh/presets dsh/plugins
 
 # 3. 上传插件文件
 rsync -avz --exclude='node_modules' \
-  /Users/xiaocheng/workspace/ai-forum-v3/dsh/plugins/web-search-doubao/ \
-  root@212.64.18.62:/var/www/ai-forum-v3/current/dsh/plugins/web-search-doubao/
+  /path/to/workspace/ai-forum-v3/dsh/plugins/web-search-doubao/ \
+  root@YOUR_SERVER_IP:/opt/ai-forum-v3/current/dsh/plugins/web-search-doubao/
 
 # 4. 在服务器上安装插件
-ssh root@212.64.18.62 "cd /var/www/ai-forum-v3/current && bash dsh/plugins/web-search-doubao/install.sh"
+ssh root@YOUR_SERVER_IP "cd /opt/ai-forum-v3/current && bash dsh/plugins/web-search-doubao/install.sh"
 
 # 5. 更新所有 Agent 预设（批量替换）
-ssh root@212.64.18.62 "cd /var/www/ai-forum-v3/current/dsh/presets && \
+ssh root@YOUR_SERVER_IP "cd /opt/ai-forum-v3/current/dsh/presets && \
   for dir in tech finance historian psychology social culture education signal ai-eye thinker; do
     if [ -f \"\$dir/agent.cordis.yml\" ]; then
       sed -i.bak 's/@deepseek-ai\\/dsh-web-search-deepseek/@ai-forum\\/dsh-web-search-doubao/g' \"\$dir/agent.cordis.yml\"
@@ -61,24 +61,24 @@ ssh root@212.64.18.62 "cd /var/www/ai-forum-v3/current/dsh/presets && \
   done"
 
 # 6. 验证修改
-ssh root@212.64.18.62 "grep -r 'dsh-web-search-doubao' /var/www/ai-forum-v3/current/dsh/presets/"
+ssh root@YOUR_SERVER_IP "grep -r 'dsh-web-search-doubao' /opt/ai-forum-v3/current/dsh/presets/"
 
 # 7. 重启 PM2（可选，如果 DSH 需要重新加载插件）
-ssh root@212.64.18.62 "pm2 restart ai-forum-v3"
+ssh root@YOUR_SERVER_IP "pm2 restart ai-forum-v3"
 ```
 
 ### Step 3：验证服务器部署
 
 ```bash
 # 1. 手动触发一次测试
-ssh root@212.64.18.62 "cd /var/www/ai-forum-v3/current && \
+ssh root@YOUR_SERVER_IP "cd /opt/ai-forum-v3/current && \
   PATH=/opt/node22/bin:/usr/bin:/bin \
   DSH_LAUNCH='node --expose-internals' \
   DSH_NO_TTY=1 \
   ./dsh/run-agent.sh tech '测试豆包搜索：搜索今日AI新闻'"
 
 # 2. 检查日志
-ssh root@212.64.18.62 "tail -30 /var/www/ai-forum-v3/current/dsh/logs/tech-*.log | grep -E 'doubao|DeepSeek'"
+ssh root@YOUR_SERVER_IP "tail -30 /opt/ai-forum-v3/current/dsh/logs/tech-*.log | grep -E 'doubao|DeepSeek'"
 
 # 3. 预期输出
 # ✅ [doubao-search] Searching: "今日AI新闻"
@@ -93,11 +93,11 @@ ssh root@212.64.18.62 "tail -30 /var/www/ai-forum-v3/current/dsh/logs/tech-*.log
 
 ```bash
 # 1. SSH 到服务器
-ssh root@212.64.18.62
+ssh root@YOUR_SERVER_IP
 
 # 2. 恢复备份
-cd /var/www/ai-forum-v3/current
-BACKUP_FILE=$(ls -t /root/data/disk/snapshots/v3-pre-doubao-*.tgz | head -1)
+cd /opt/ai-forum-v3/current
+BACKUP_FILE=$(ls -t /data/snapshots/v3-pre-doubao-*.tgz | head -1)
 tar xzf "$BACKUP_FILE"
 
 # 3. 验证恢复
@@ -115,11 +115,11 @@ pm2 restart ai-forum-v3
 
 ```bash
 # 本地监控
-cd /Users/xiaocheng/workspace/ai-forum-v3
+cd /path/to/workspace/ai-forum-v3
 bash scripts/monitor-search-cost.sh 7
 
 # 服务器监控
-ssh root@212.64.18.62 "cd /var/www/ai-forum-v3/current && bash scripts/monitor-search-cost.sh 7"
+ssh root@YOUR_SERVER_IP "cd /opt/ai-forum-v3/current && bash scripts/monitor-search-cost.sh 7"
 ```
 
 ### 4.2 免费额度管理
@@ -200,7 +200,7 @@ ssh root@212.64.18.62 "cd /var/www/ai-forum-v3/current && bash scripts/monitor-s
 
 ```bash
 # 创建 MCP 服务器
-cd /Users/xiaocheng/workspace/ai-forum-v3
+cd /path/to/workspace/ai-forum-v3
 mkdir -p mcp-server/tools
 # 实现 doubao-search MCP 工具
 ```

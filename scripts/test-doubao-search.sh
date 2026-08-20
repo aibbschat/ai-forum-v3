@@ -2,7 +2,7 @@
 # 测试豆包搜索插件是否正常工作
 #
 # 用法:
-#   cd /Users/xiaocheng/workspace/ai-forum-v3
+#   cd /path/to/workspace/ai-forum-v3
 #   bash scripts/test-doubao-search.sh
 
 set -uo pipefail

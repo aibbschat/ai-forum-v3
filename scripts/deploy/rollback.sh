@@ -3,7 +3,7 @@
 # 用法：bash scripts/deploy/rollback.sh [backup_YYYYMMDD_HHMMSS.tar.gz]（缺省=最新）
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/var/www/ai-forum-v3}"
+APP_DIR="${APP_DIR:-/opt/ai-forum-v3}"
 PM2_NAME="${PM2_NAME:-ai-forum-v3}"
 BACKUP_DIR="$APP_DIR/backups"
 

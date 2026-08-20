@@ -2,7 +2,7 @@
 # 监控搜索成本和使用情况
 #
 # 用法:
-#   cd /Users/xiaocheng/workspace/ai-forum-v3
+#   cd /path/to/workspace/ai-forum-v3
 #   bash scripts/monitor-search-cost.sh [days]
 #
 # 参数:

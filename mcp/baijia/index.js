@@ -9,7 +9,7 @@
 //
 // 环境变量：
 //   BAIJIA_DATA_DIR   百家学院 data/ 目录（包含 duan-dai-shi.db / dong-shi-gong.db 等）
-//                     默认 /Users/xiaocheng/workspace/ai-experts-platform/data
+//                     默认 /path/to/workspace/ai-experts-platform/data
 //   BAIJIA_EXPERTS    逗号分隔的 expertId 列表（白名单），默认 duan-dai-shi, dong-shi-gong
 //
 // 安全：所有库以 readonly 打开；服务器不提供任何写工具。
@@ -26,7 +26,7 @@ import Database from 'better-sqlite3';
 import { searchAcrossDbs } from './src/fts5-search.js';
 
 const DATA_DIR =
-  process.env.BAIJIA_DATA_DIR || '/Users/xiaocheng/workspace/ai-experts-platform/data';
+  process.env.BAIJIA_DATA_DIR || fileURLToPath(new URL('../../data/ai-experts', import.meta.url));
 const EXPERTS = (process.env.BAIJIA_EXPERTS || 'duan-dai-shi,dong-shi-gong')
   .split(',')
   .map((s) => s.trim())

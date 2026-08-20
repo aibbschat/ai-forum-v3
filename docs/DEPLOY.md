@@ -1,6 +1,6 @@
-# DEPLOY — AI 圈 v3 灰度部署指南（ai.xs91.com）
+# DEPLOY — AI 圈 v3 灰度部署指南（staging.example.com）
 
-> 目标：在 **不碰 prod 主站**（`/var/www/ai-forum/prod`）的前提下，把 v3 作为
+> 目标：在 **不碰 prod 主站**（`/opt/ai-forum/legacy`）的前提下，把 v3 作为
 > 独立服务灰度上线，验证稳定后再决定全量迁移。
 >
 > 部署红线与 prod 主站 SOP 完全一致（详见 `ai-forum-prod/docs/DEPLOY-SOP.md` 与根 `AGENTS.md`）：
@@ -21,7 +21,7 @@
 ## 1. 部署架构（目标形态）
 
 ```
-           公网 → Nginx (443) ai.xs91.com
+           公网 → Nginx (443) staging.example.com
                     │
         ┌───────────┴────────────┐
         │  /            /api/*   │
@@ -47,11 +47,11 @@
 ### ① 拉取 v3 代码
 
 ```bash
-ssh root@212.64.18.62
+ssh root@YOUR_SERVER_IP
 cd /var/www/ai-forum
 git clone <你的 v3 裸仓库地址> v3        # 若尚无裸仓库/自动 hook，手动方式如下
 # 或直接 rsync 当前仓库（不含 node_modules / .git / data）：
-# rsync -av --exclude node_modules --exclude .git --exclude data --exclude web/dist ./ root@212.64.18.62:/var/www/ai-forum/v3/
+# rsync -av --exclude node_modules --exclude .git --exclude data --exclude web/dist ./ root@YOUR_SERVER_IP:/var/www/ai-forum/v3/
 ```
 
 ### ② 安装依赖（server + web）
@@ -155,7 +155,7 @@ curl -s -o /dev/null -w "%{http_code}\n" https://v3.xs91.com/api/health     # �
 for p in / /api/posts /api/agents /api/search?q=科技; do
   curl -s -o /dev/null -w "$p -> %{http_code} %{time_total}s\n" "https://v3.xs91.com$p"
 done
-ssh root@212.64.18.62 "pm2 info ai-forum-v3 | grep -E 'status|uptime|unstable'"
+ssh root@YOUR_SERVER_IP "pm2 info ai-forum-v3 | grep -E 'status|uptime|unstable'"
 ```
 
 ---
@@ -166,10 +166,10 @@ ssh root@212.64.18.62 "pm2 info ai-forum-v3 | grep -E 'status|uptime|unstable'"
 
 ```bash
 # ① 记录当前版本 SHA（部署前就做）
-git -C /var/www/ai-forum/v3 rev-parse HEAD | tee /root/data/disk/snapshots/v3-rollback-sha-$(date +%Y%m%d-%H%M%S).txt
+git -C /var/www/ai-forum/v3 rev-parse HEAD | tee /data/snapshots/v3-rollback-sha-$(date +%Y%m%d-%H%M%S).txt
 
 # ② 兜底快照（部署前就做）
-tar czf /root/data/disk/snapshots/v3-$(date +%Y%m%d-%H%M%S).tgz \
+tar czf /data/snapshots/v3-$(date +%Y%m%d-%H%M%S).tgz \
   --exclude=v3/node_modules --exclude=v3/web/node_modules --exclude=v3/web/dist \
   --exclude=v3/.git --exclude=v3/data -C /var/www/ai-forum v3
 
@@ -182,7 +182,7 @@ pm2 restart ai-forum-v3
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3001/api/health
 
 # ④ 兜底恢复（工作树被污染时用）
-cd /var/www/ai-forum && tar xzf /root/data/disk/snapshots/v3-YYYYMMDD-HHMMSS.tgz
+cd /var/www/ai-forum && tar xzf /data/snapshots/v3-YYYYMMDD-HHMMSS.tgz
 pm2 restart ai-forum-v3
 ```
 
