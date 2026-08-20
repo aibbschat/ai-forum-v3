@@ -35,8 +35,15 @@ git reset --hard origin/main
 
 echo "=== [3/5] 依赖与构建 ==="
 npm ci --omit=dev 2>/dev/null || npm install
-# 确保原生模块按当前 Node（22）重编译，避免 ABI 不匹配
+# 根目录原生模块按当前 Node（22）重编译，避免 ABI 不匹配。
 npm rebuild better-sqlite3 >/dev/null 2>&1 || true
+# 各 MCP server 有独立 package.json/node_modules（含 MCP SDK；baijia 还依赖 better-sqlite3），
+# 逐目录安装依赖。
+for mcp_dir in mcp/*/; do
+  if [ -f "${mcp_dir}package.json" ]; then
+    (cd "$mcp_dir" && npm ci --omit=dev >/dev/null 2>&1 || npm install --omit=dev >/dev/null 2>&1)
+  fi
+done
 if [ "$SKIP_BUILD" != "--skip-build" ]; then
   # 注意：web 构建需要 vite（devDependency），必须全量 npm ci，不能 --omit=dev
   (cd web && npm ci)
