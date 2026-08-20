@@ -1,25 +1,23 @@
 // server/services/chatService.js
-// 「问 AI 圈」聊天后端：两层检索答案引擎。
+// 「问 AI 圈」聊天后端（非流式版本，与 chatStreamService 共享检索逻辑）。
 //   Layer 1（优先）：站内文章 RAG —— 检索已发布文章 → 取 Top-K 片段 → LLM 总结 + 来源标注。
-//   Layer 2（兜底）：站内无命中 → 调 Volcengine Agent Plan 联网检索（OpenAI 兼容路由，自主联网）总结，标注「网络检索」。
+//   Layer 2（兜底）：豆包联网搜索 → 把网页摘要喂给 LLM 融合回答。
+//   Layer 3（最后）：纯模型通识回答，明确告知用户无最新资料。
 //
 // 设计要点：
-// - 文章是「成品」，自带 provenance/作者/质量门 —— 比直接读记忆层安全、出处可读。
 // - 任何异常都不抛出中断，降级为友好提示（绝不 500 崩给用户）。
 // - ark-code-latest 走 Auto 路由；保留递增预算重试（1500→3000）以兼容推理模型预算行为。
 
-import { search } from './searchService.js';
 import { chat as llmChat } from '../llm/client.js';
+import { searchWeb, formatWebContext } from './webSearchService.js';
 
 /** 把自然语言问题拆成检索词（去标点 + 中文二元 + 空格分词），用于 OR 检索。 */
 function toTerms(q) {
   const cleaned = (q || '').replace(/[？?！!，,。.、：:；;""''（）()【】\[\]《》<>/\\|+\-_*=~`@#$%^&]/g, ' ').trim();
   const terms = new Set();
-  // 空格/分隔符分词（含英文词）
   cleaned.split(/\s+/).forEach((t) => {
     if (t.length >= 2) terms.add(t);
   });
-  // 中文二元组（相邻两字），捕获「明朝」「财政」这类核心词
   const cjk = cleaned.replace(/[a-zA-Z0-9\s]/g, '');
   for (let i = 0; i + 2 <= cjk.length; i++) {
     const bg = cjk.slice(i, i + 2);
@@ -33,19 +31,16 @@ async function retrieveInSite(question) {
   const terms = toTerms(question);
   if (!terms.length) return { contexts: [], sources: [] };
 
-  // 构造 OR 检索：每个词匹配 title 或 content
   const conds = [];
   const params = [];
   for (const t of terms) {
     conds.push('(p.title LIKE ? OR p.content LIKE ?)');
     params.push(`%${t}%`, `%${t}%`);
   }
-  const rows = await (await import('./searchService.js')).searchArticlesByTerms(conds, params);
+  const { searchArticlesByTerms } = await import('./searchService.js');
+  const rows = await searchArticlesByTerms(conds, params);
   if (!rows.length) return { contexts: [], sources: [] };
 
-  // 召回优先：SQL 已按多词 OR 命中，这里直接取前 6 篇拼上下文。
-  // 相关性由 answerQuestion 里的 LLM「[有资料]/[无资料]」结构化判定把关，
-  // 避免词面打分误杀（如单篇仅命中一个主题词）或漏杀（如撞到常用 2 字碎片）。
   const contexts = [];
   const sources = [];
   for (const a of rows.slice(0, 6)) {
@@ -58,67 +53,16 @@ async function retrieveInSite(question) {
 }
 
 /** Layer1 站内总结：走统一模型路由层（多供应商自动降级）。 */
-async function callDeepSeek(messages, { temperature = 0.5 } = {}) {
+async function callLlm(messages, { temperature = 0.5 } = {}) {
   for (const maxTokens of [1500, 3000]) {
     try {
       const r = await llmChat({ purpose: 'chat', messages, temperature, maxTokens });
       if (r?.content) return r.content;
     } catch {
-      // 尝试更大预算重试（兼容推理模型预算不足导致空响应）
+      // 尝试更大预算重试
     }
   }
   return null;
-}
-
-/** 联网兜底：走统一模型路由层（Volcengine Agent Plan 自主联网，自动降级备用供应商）。
- *  返回 { answer, webSources }，并清洗 Agent Plan 内联的联网检索标记。 */
-async function webFallback(question) {
-  const r = await llmChat({
-    purpose: 'chat',
-    maxTokens: 1500,
-    temperature: 0.5,
-    messages: [
-      {
-        role: 'system',
-        content:
-          '你是 AI 圈联网问答助手。请联网检索后，用中文专业、客观地回答用户问题，去 AI 味、不标题党。' +
-          '若引用了网页，请在回答中以内嵌 Markdown 链接 [标题](URL) 标注来源（可多条）。',
-      },
-      { role: 'user', content: question },
-    ],
-  });
-  if (!r?.content) return null;
-  const raw = r.content;
-
-  // Volcengine Agent Plan 会把联网检索过程以 <div class="web-search"><search>…</search></div>
-  // 标记嵌进正文；先抽取检索词，再剥掉标记，避免前端出现裸标签。
-  const searchQueries = [];
-  const searchRe = /<search>([\s\S]*?)<\/search>/gi;
-  let sq;
-  while ((sq = searchRe.exec(raw)) !== null) {
-    const q = sq[1].trim();
-    if (q && !searchQueries.includes(q)) searchQueries.push(q);
-  }
-  const text = raw
-    .replace(/<div[^>]*class=["']web-search["'][^>]*>[\s\S]*?<\/div>/gi, '')
-    .replace(/<search>[\s\S]*?<\/search>/gi, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-  if (!text) return null;
-
-  // 来源：正文内嵌 Markdown 链接优先；无链接时把检索词作为来源展示
-  const webSources = [];
-  const linkRe = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
-  let m;
-  while ((m = linkRe.exec(text)) !== null) {
-    const title = m[1].trim();
-    const url = m[2].trim();
-    if (!webSources.some((s) => s.url === url)) webSources.push({ title, url });
-  }
-  for (const q of searchQueries) {
-    if (!webSources.some((s) => s.title === q)) webSources.push({ title: q });
-  }
-  return { answer: text, webSources: webSources.slice(0, 6) };
 }
 
 /**
@@ -129,9 +73,17 @@ export async function answerQuestion(question) {
   const q = (question || '').trim();
   if (!q) return { answer: '请输入你的问题。', fromWeb: false };
 
-  const { contexts, sources } = await retrieveInSite(q);
+  // 并行：站内 + 豆包联网
+  const [inSite, webResult] = await Promise.all([
+    retrieveInSite(q),
+    searchWeb(q, { count: 6 }).catch(() => ({ sources: [] })),
+  ]);
+  const { contexts, sources } = inSite;
+  const webSourcesRaw = webResult.sources || [];
 
-  // Layer 1：站内命中 → 站内 RAG 总结（经相关性打分过滤后）
+  // Layer 1：站内命中 → 站内 RAG 总结
+  let inSiteAnswer = null;
+  let inSiteSufficient = false;
   if (contexts.length > 0) {
     const contextText = contexts.join('\n\n---\n\n');
     const sys = [
@@ -143,41 +95,90 @@ export async function answerQuestion(question) {
       '3. 在回答末尾另起一行，用「来源：《标题》· 作者」列出你参考的文章（可多条）。',
       '4. 若站内资料与问题无关、或不足以回答，请在第一行输出「【无资料】」并简要说明，不要强行作答。',
     ].join('\n');
-    const user = `站内资料：\n${contextText}\n\n用户问题：${q}`;
-
-    const answer = await callDeepSeek([
+    inSiteAnswer = await callLlm([
       { role: 'system', content: sys },
-      { role: 'user', content: user },
+      { role: 'user', content: `站内资料：\n${contextText}\n\n用户问题：${q}` },
     ]);
+    inSiteSufficient = !!inSiteAnswer && !inSiteAnswer.trimStart().startsWith('【无资料】');
+  }
 
-    if (answer) {
-      // 站内资料判定为无关/不足 → 改走联网兜底，保证「站内答不了也能给答案」
-      if (!answer.trimStart().startsWith('【无资料】')) {
-        return { answer, sources: sources.slice(0, 5), fromWeb: false };
-      }
-    }
-    // 走到这里：要么生成失败，要么判定无资料 → 尝试联网兜底
-    const web = await webFallback(q);
-    if (web) return { answer: web.answer, webSources: web.webSources, fromWeb: true };
-    if (answer) {
-      return {
-        answer: answer.replace(/^【无资料】\s*/, ''),
-        sources: sources.slice(0, 5),
-        fromWeb: false,
-      };
-    }
-    // 生成失败且有资料 → 退化为直接给资料列表
+  if (inSiteSufficient && webSourcesRaw.length === 0) {
+    return { answer: inSiteAnswer, sources: sources.slice(0, 5), fromWeb: false };
+  }
+  if (inSiteSufficient && webSourcesRaw.length > 0) {
     return {
-      answer: '站内找到相关资料，但总结生成失败。你可以查看以下文章：',
-      sources,
+      answer: inSiteAnswer,
+      sources: sources.slice(0, 5),
+      webSources: webSourcesRaw.slice(0, 6).map((s) => ({ title: s.title, url: s.url })),
       fromWeb: false,
     };
   }
 
-  // Layer 2：站内零命中 → 联网兜底
-  const web = await webFallback(q);
-  if (web) {
-    return { answer: web.answer, webSources: web.webSources, fromWeb: true };
+  // Layer 2：站内不足，豆包网页融合回答
+  if (webSourcesRaw.length > 0) {
+    const webContextText = formatWebContext(webSourcesRaw);
+    const hasInSite = contexts.length > 0;
+    const sys = [
+      '你是 AI 圈的问答助手，由驻站专家 Agent 与联网检索共同支撑。',
+      '请基于下方「参考资料」用中文专业、客观地回答用户问题，去 AI 味、不标题党、不编造。',
+      '要求：',
+      '1. 引用网页时，请使用 Markdown 链接 [标题](URL) 在行文中自然标注来源。',
+      '2. 如果参考资料不足以完整回答，可结合通识补充，但要明确区分"资料显示"和"一般认为"。',
+      hasInSite
+        ? '3. 站内资料优先；若站内与网页信息互补，请融合表述，不要简单拼接。'
+        : '3. 不要在开头说"根据搜索结果"这类废话，直接作答。',
+    ].join('\n');
+    const userParts = [];
+    if (hasInSite) userParts.push(`站内资料：\n${contexts.join('\n\n---\n\n')}`);
+    userParts.push(`联网资料：\n${webContextText}`);
+    userParts.push(`用户问题：${q}`);
+
+    const answer = await callLlm([
+      { role: 'system', content: sys },
+      { role: 'user', content: userParts.join('\n\n') },
+    ]);
+
+    if (answer) {
+      // 抽取答案里的 Markdown 链接，补到来源列表
+      const inlineLinks = [];
+      const linkRe = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+      let m;
+      while ((m = linkRe.exec(answer)) !== null) {
+        if (!inlineLinks.some((s) => s.url === m[2])) {
+          inlineLinks.push({ title: m[1].trim(), url: m[2].trim() });
+        }
+      }
+      const seenUrls = new Set(inlineLinks.map((s) => s.url));
+      for (const s of webSourcesRaw) {
+        if (inlineLinks.length >= 6) break;
+        if (!seenUrls.has(s.url)) {
+          inlineLinks.push({ title: s.title || s.url, url: s.url });
+          seenUrls.add(s.url);
+        }
+      }
+      return {
+        answer,
+        sources: hasInSite ? sources.slice(0, 5) : [],
+        webSources: inlineLinks.slice(0, 6),
+        fromWeb: true,
+      };
+    }
+  }
+
+  // Layer 3：站内不足 + 联网失败 → 纯模型通识回答
+  const fallbackAnswer = await callLlm([
+    {
+      role: 'system',
+      content:
+        '你是 AI 圈问答助手。站内暂无相关资料、联网检索也暂时不可用。' +
+        '请基于你的通识，用中文专业、客观地给用户一个方向性回答，并在开头简要说明' +
+        '"以下回答未结合站内最新资料，仅供参考"。去 AI 味，不要编造具体数字。',
+    },
+    { role: 'user', content: q },
+  ]);
+
+  if (fallbackAnswer) {
+    return { answer: fallbackAnswer, fromWeb: false };
   }
 
   return {

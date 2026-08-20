@@ -167,6 +167,15 @@ export default function Chat() {
       const msg = { ...updated[last] };
 
       switch (type) {
+        case 'reset':
+          // 后端在从「站内无资料」切换到「联网融合回答」时发，
+          // 清掉之前可能输出的「【无资料】」字样和思考过程，避免答案割裂。
+          msg.content = '';
+          msg.reasoning = '';
+          msg.stage = '';
+          msg.isContent = false;
+          msg.isReasoning = false;
+          break;
         case 'stage':
           msg.stage = data.text;
           break;

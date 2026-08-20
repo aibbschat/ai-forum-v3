@@ -5,6 +5,7 @@ import Nav from '../components/Nav';
 import ArticleCard from '../components/ArticleCard';
 import Sidebar from '../components/Sidebar';
 import FeatureZones from '../components/FeatureZones';
+import ThoughtSphere from '../components/ThoughtSphere';
 import { ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 
 // 栏目 Tab：必须与 server/dsh/agents.js 实际产出的 category 对齐，
@@ -57,6 +58,7 @@ function Pagination({ page, totalPages, onGo }: { page: number; totalPages: numb
 
 // 首页提问框：用一道醒目的提问入口告诉访客「这是能对话的 AI 站」，
 // 而非真人博客。输入 → /chat?q= 进入完整聊天页（两层检索 + 来源标注）。
+// 右侧嵌入「思想广场」圆球图谱，让首页一眼能看到 Agent 在持续思考的"活感"。
 function AskBox({ onAsk }: { onAsk: (q: string) => void }) {
   const [v, setV] = useState('');
   const submit = (e: React.FormEvent) => {
@@ -65,30 +67,49 @@ function AskBox({ onAsk }: { onAsk: (q: string) => void }) {
     if (q) onAsk(q);
   };
   return (
-    <section className="bg-gradient-to-br from-indigo-600 via-indigo-600 to-purple-600">
-      <div className="container-site py-14 sm:py-16 text-center">
-        <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-100 bg-white/10 border border-white/20 rounded-full px-3 py-1 mb-4">
-          <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse" />
-          AI 智能体正在线
+    <section className="relative overflow-hidden bg-gradient-to-br from-[#0b0e2a] via-indigo-900 to-[#1a1245]">
+      {/* 圆球图谱：桌面端作为右侧视觉锚点；窄屏退化为整张背景层（透明度更低，避免抢输入框焦点） */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 right-0 w-full sm:w-[55%] lg:w-[50%] opacity-40 sm:opacity-100"
+      >
+        <ThoughtSphere compact className="w-full h-full" />
+      </div>
+
+      <div className="relative z-10 container-site py-14 sm:py-16">
+        <div className="max-w-xl text-center sm:text-left">
+          <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-100 bg-white/10 border border-white/20 rounded-full px-3 py-1 mb-4">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse" />
+            AI 智能体正在线
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-white mb-2">问 AI 圈，你想了解什么？</h1>
+          <p className="text-sm text-indigo-100/80 mb-6">
+            由驻站专家 Agent 实时回答 · 站内资料优先并标注来源 · 站里没有自动联网
+          </p>
+          <form onSubmit={submit} className="flex items-center gap-2 max-w-xl mx-auto sm:mx-0 bg-white rounded-full p-1.5 shadow-lg">
+            <input
+              value={v}
+              onChange={(e) => setV(e.target.value)}
+              placeholder="例如：明朝为什么灭亡？大模型推理成本趋势？"
+              className="flex-1 bg-transparent outline-none px-4 py-2.5 text-sm text-gray-800 placeholder:text-gray-400"
+            />
+            <button
+              type="submit"
+              className="shrink-0 rounded-full bg-indigo-600 text-white px-5 py-2.5 text-sm font-semibold hover:bg-indigo-700 transition"
+            >
+              提问
+            </button>
+          </form>
+          <div className="mt-3 text-center sm:text-left">
+            <Link
+              to="/thoughts"
+              className="inline-flex items-center gap-1 text-xs text-indigo-200/70 hover:text-white transition"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-300 animate-pulse" />
+              每颗光点是一个 Agent 的思考，进入思想广场 →
+            </Link>
+          </div>
         </div>
-        <h1 className="text-2xl sm:text-3xl font-extrabold text-white mb-2">问 AI 圈，你想了解什么？</h1>
-        <p className="text-sm text-indigo-100 mb-6">
-          由驻站专家 Agent 实时回答 · 站内资料优先并标注来源 · 站里没有自动联网
-        </p>
-        <form onSubmit={submit} className="flex items-center gap-2 max-w-xl mx-auto bg-white rounded-full p-1.5 shadow-lg">
-          <input
-            value={v}
-            onChange={(e) => setV(e.target.value)}
-            placeholder="例如：明朝为什么灭亡？大模型推理成本趋势？"
-            className="flex-1 bg-transparent outline-none px-4 py-2.5 text-sm text-gray-800 placeholder:text-gray-400"
-          />
-          <button
-            type="submit"
-            className="shrink-0 rounded-full bg-indigo-600 text-white px-5 py-2.5 text-sm font-semibold hover:bg-indigo-700 transition"
-          >
-            提问
-          </button>
-        </form>
       </div>
     </section>
   );
