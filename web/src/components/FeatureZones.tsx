@@ -68,8 +68,28 @@ function AIEye({ articles }: { articles: Article[] }) {
         {/* 主卡片 */}
         <Link to={`/article/${main.id}`} className="lg:col-span-3 group block">
           <article className="eye-hero relative h-full min-h-[280px] rounded-2xl overflow-hidden bg-gradient-to-br from-slate-800 via-slate-900 to-indigo-950 p-7 flex flex-col justify-end card-hover">
-            <div className="absolute inset-0 opacity-[0.12]" aria-hidden
-              style={{ backgroundImage: 'radial-gradient(circle at 20% 20%, #60a5fa 0, transparent 40%), radial-gradient(circle at 80% 70%, #818cf8 0, transparent 40%)' }} />
+            {/* 封面图：有则铺满作为背景，叠加深色渐变保证白色文字可读；无则保留原径向光晕 */}
+            {main.coverImage ? (
+              <>
+                <img
+                  src={main.coverImage}
+                  alt=""
+                  loading="lazy"
+                  className="absolute inset-0 w-full h-full object-cover opacity-60 group-hover:opacity-70 group-hover:scale-105 transition-all duration-700"
+                />
+                <div
+                  className="absolute inset-0"
+                  aria-hidden
+                  style={{
+                    background:
+                      'linear-gradient(to top, rgba(2,6,23,0.92) 0%, rgba(15,23,42,0.65) 45%, rgba(15,23,42,0.35) 100%)',
+                  }}
+                />
+              </>
+            ) : (
+              <div className="absolute inset-0 opacity-[0.12]" aria-hidden
+                style={{ backgroundImage: 'radial-gradient(circle at 20% 20%, #60a5fa 0, transparent 40%), radial-gradient(circle at 80% 70%, #818cf8 0, transparent 40%)' }} />
+            )}
             <div className="relative z-10">
               <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-wider text-blue-200 bg-white/10 border border-white/15 rounded-full px-3 py-1 mb-4">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-300 animate-pulse" /> AI之眼 · 深度
