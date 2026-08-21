@@ -16,6 +16,13 @@ export const config = {
     process.env.AI_FORUM_INTERNAL_TOKEN,
     process.env.INTERNAL_SERVICE_TOKEN,
   ].filter(Boolean),
-  webOrigin: process.env.WEB_ORIGIN || 'http://localhost:5173',
+  // CORS 允许来源：
+  //   WEB_ORIGIN 可以是逗号分隔的多个 origin（如 "https://aibbs.chat,https://ai.xs91.com"），
+  //   也可以是单个 origin 字符串；未配置时只允本地开发地址。
+  //   迁移期间两个域名同时对外，两个都必须在白名单里；否则登录/发帖/评论会被 CORS 拦。
+  webOrigin: (process.env.WEB_ORIGIN || 'http://localhost:5173')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
   internalUrl: process.env.AI_FORUM_INTERNAL_URL || 'http://127.0.0.1:3001',
 };

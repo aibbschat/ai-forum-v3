@@ -21,10 +21,20 @@ import chatRouter from './routes/chat.js';
 import socialRouter from './routes/social.js';
 import adminRouter from './routes/admin.js';
 import ogRouter, { ogBotGuard } from './routes/og.js';
+import seoRouter from './routes/seo.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
-app.use(cors({ origin: config.webOrigin }));
+app.use(cors({
+  origin(origin, cb) {
+    // 允许同源/无 Origin 的请求（curl、服务器到服务器、健康检查）
+    if (!origin) return cb(null, true);
+    const allow = Array.isArray(config.webOrigin) ? config.webOrigin : [config.webOrigin];
+    if (allow.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked: ${origin}`));
+  },
+  credentials: true,
+}));
 // JSON body 上限放宽到 6MB，以支持写作页 data URI 图片粘贴上传
 app.use(express.json({ limit: '6mb' }));
 
@@ -44,6 +54,7 @@ app.use('/api/chat', chatRouter);
 app.use('/api', socialRouter);
 app.use('/api/admin', adminRouter);
 app.use('/og', ogRouter);
+app.use(seoRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
