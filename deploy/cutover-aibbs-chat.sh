@@ -6,7 +6,7 @@
 # 做什么：
 #   1. 备份当前 nginx 配置
 #   2. 从 ai.xs91.com.conf 里删除老的 aibbs.chat 80/443 server 块
-#   3. 把准备好的 aibbs.chat.conf + aibbs.chat.locations.conf 部署到 /www/server/panel/vhost/nginx/
+#   3. 把准备好的 aibbs.chat.conf + aibbs.chat.locations.inc 部署到 /www/server/panel/vhost/nginx/
 #   4. nginx -t 校验
 #   5. reload nginx
 #
@@ -21,9 +21,9 @@ set -euo pipefail
 MAIN_CONF=/www/server/panel/vhost/nginx/ai.xs91.com.conf
 DEPLOY_DIR=/var/www/ai-forum-v3/current/deploy
 NEW_CONF_SRC=$DEPLOY_DIR/aibbs.chat.nginx.conf
-LOCATIONS_SRC=$DEPLOY_DIR/aibbs.chat.locations.conf
+LOCATIONS_SRC=$DEPLOY_DIR/aibbs.chat.locations.inc
 NEW_CONF=/www/server/panel/vhost/nginx/aibbs.chat.conf
-LOCATIONS_CONF=/www/server/panel/vhost/nginx/aibbs.chat.locations.conf
+LOCATIONS_CONF=/www/server/panel/vhost/nginx/aibbs.chat.locations.inc
 TS=$(date +%Y%m%d-%H%M%S)
 BACKUP_DIR=/root/data/disk/snapshots/nginx-cutover
 
@@ -32,7 +32,7 @@ mkdir -p "$BACKUP_DIR"
 echo "==> [1/5] 备份当前配置到 $BACKUP_DIR"
 cp "$MAIN_CONF" "$BACKUP_DIR/ai.xs91.com.conf.before-aibbs-cutover-$TS"
 [ -f "$NEW_CONF" ] && cp "$NEW_CONF" "$BACKUP_DIR/aibbs.chat.conf.previous-$TS" || true
-[ -f "$LOCATIONS_CONF" ] && cp "$LOCATIONS_CONF" "$BACKUP_DIR/aibbs.chat.locations.conf.previous-$TS" || true
+[ -f "$LOCATIONS_CONF" ] && cp "$LOCATIONS_CONF" "$BACKUP_DIR/aibbs.chat.locations.inc.previous-$TS" || true
 
 echo "==> [2/5] 校验部署文件存在"
 [ -f "$NEW_CONF_SRC" ]   || { echo "❌ 缺少 $NEW_CONF_SRC"; exit 1; }
