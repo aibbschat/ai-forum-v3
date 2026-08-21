@@ -51,8 +51,18 @@ export default function ThoughtSphere({ onPick, compact = false, className = '',
   const [canvasSize, setCanvasSize] = useState({ w: 600, h: 500 });
   const particlesRef = useRef<Particle[]>([]);
   const mouseRef = useRef({ x: -999, y: -999 });
+  const globalMouseRef = useRef({ x: 0.5, y: 0.5 });
   const animRef = useRef<number>(0);
   const activeBubbleRef = useRef<number>(-1);
+  // 精灵自身的反应状态（不放在 React state 里，避免每帧 re-render）
+  const spiritRef = useRef({
+    blinkAt: 2 + Math.random() * 3,
+    blinkClose: 0,
+    lastClick: -10,
+    pulseTarget: 0.5,
+    pulse: 0.5,
+    mood: 0,
+  });
 
   // 数据加载
   useEffect(() => {
@@ -143,7 +153,7 @@ export default function ThoughtSphere({ onPick, compact = false, className = '',
       const time = t * 0.001;
       const particles = particlesRef.current;
 
-      drawCoreSphere(ctx, cx, cy, time, w, h, compact);
+      drawCoreSphere(ctx, cx, cy, time, w, h, compact, globalMouseRef.current, spiritRef.current);
 
       let newHovered: Particle | null = null;
       const mx = mouseRef.current.x;
@@ -224,14 +234,30 @@ export default function ThoughtSphere({ onPick, compact = false, className = '',
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     mouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    // 归一化的全局鼠标位置（-1..1），给精灵的视线/身体倾斜用
+    globalMouseRef.current = {
+      x: ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      y: ((e.clientY - rect.top) / rect.height) * 2 - 1,
+    };
   };
 
   const handleMouseLeave = () => {
     mouseRef.current = { x: -999, y: -999 };
+    globalMouseRef.current = { x: 0, y: 0 };
   };
 
   const handleClick = () => {
-    if (hovered && onPick) onPick(hovered.snippet);
+    if (hovered && onPick) {
+      onPick(hovered.snippet);
+      return;
+    }
+    // 点击空白处也让精灵有反应（涟漪+眨眼）
+    const s = spiritRef.current;
+    s.lastClick = performance.now() / 1000;
+    s.blinkAt = 0; // 立刻眨眼
+    s.blinkClose = 1;
+    s.pulseTarget = 1;
+    s.mood = Math.min(1, s.mood + 0.4);
   };
 
   return (
@@ -239,7 +265,14 @@ export default function ThoughtSphere({ onPick, compact = false, className = '',
       <canvas
         ref={canvasRef}
         className="absolute inset-0 w-full h-full"
-        style={{ cursor: hovered && onPick ? 'pointer' : 'default' }}
+        style={{
+          cursor:
+            hovered && onPick
+              ? 'pointer'
+              : isNearSpirit(mouseRef.current, canvasSize, compact)
+                ? 'pointer'
+                : 'default',
+        }}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         onClick={handleClick}
@@ -278,6 +311,19 @@ export default function ThoughtSphere({ onPick, compact = false, className = '',
       )}
     </div>
   );
+}
+
+// ── 灵感冒出文字气泡 ──
+function isNearSpirit(
+  mouse: { x: number; y: number },
+  size: { w: number; h: number },
+  compact: boolean,
+) {
+  if (mouse.x < 0) return false;
+  const cx = size.w / 2;
+  const cy = size.h / 2;
+  const r = Math.min(size.w, size.h) * (compact ? 0.18 : 0.14);
+  return Math.hypot(mouse.x - cx, mouse.y - cy) < r;
 }
 
 // ── 灵感冒出文字气泡 ──
@@ -340,15 +386,69 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
-// ── 中央球体 ──
-function drawCoreSphere(ctx: CanvasRenderingContext2D, cx: number, cy: number, time: number, w: number, h: number, compact: boolean) {
-  const r = Math.min(w, h) * (compact ? 0.13 : 0.10);
-  const rotation = time * 0.3;
+// ── 中央"灵感精灵"（代替原死板圆球）────────────────────────────
+// 设计：
+//  - 半透明发光球体，保持与原粒子轨道的视觉一致
+//  - 双眼会跟随鼠标移动、每 2-5 秒自然眨眼
+//  - 整体有呼吸感（缩放 + 光晕脉动）
+//  - 鼠标进入精灵附近时"苏醒"：身体轻微倾斜、眼睛变大、光晕增强
+//  - 被点击时：环形涟漪扩散 + 快速眨眼 + 情绪值升高（脸更亮）
+//  - 偶发能量光丝从顶部飘出（与节点粒子同源的色彩）
+interface SpiritState {
+  blinkAt: number;
+  blinkClose: number;
+  lastClick: number;
+  pulseTarget: number;
+  pulse: number;
+  mood: number;
+}
+function drawCoreSphere(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  time: number,
+  w: number,
+  h: number,
+  compact: boolean,
+  mouseNorm: { x: number; y: number },
+  spirit: SpiritState,
+) {
+  const r = Math.min(w, h) * (compact ? 0.14 : 0.11);
 
-  const breathScale = 1 + Math.sin(time * 1.2) * 0.12;
-  const glowR = r * 3.5 * breathScale;
-  const glow = ctx.createRadialGradient(cx, cy, r * 0.3, cx, cy, glowR);
-  glow.addColorStop(0, 'rgba(99,102,241,0.25)');
+  // ── 状态更新 ──
+  // 眨眼计时
+  spirit.blinkAt -= 1 / 60;
+  if (spirit.blinkAt <= 0 && spirit.blinkClose < 0.05) {
+    spirit.blinkClose = 1;
+    spirit.blinkAt = 2 + Math.random() * 3.5;
+  }
+  spirit.blinkClose *= 0.85;
+
+  // 点击涟漪（500ms 内衰减）
+  const sinceClick = time - spirit.lastClick;
+  const clickRipple = sinceClick < 0.6 ? 1 - sinceClick / 0.6 : 0;
+
+  // 脉动平滑
+  spirit.pulse += (spirit.pulseTarget - spirit.pulse) * 0.08;
+  spirit.pulseTarget *= 0.96;
+  spirit.mood *= 0.995;
+
+  // 鼠标距离：影响"注意力"
+  const mdist = Math.hypot(mouseNorm.x, mouseNorm.y);
+  const attention = Math.max(0, 1 - mdist / 1.2);
+
+  // 呼吸
+  const breath = 1 + Math.sin(time * 1.3) * 0.05;
+  // 苏醒时额外放大一点
+  const awakeScale = 1 + attention * 0.08 + spirit.pulse * 0.15 + clickRipple * 0.1;
+  const scale = breath * awakeScale;
+  const R = r * scale;
+
+  // ── 外层光晕（呼吸 + 注意力增强）──
+  const glowBase = r * 3.2 * (1 + Math.sin(time * 1.3) * 0.15);
+  const glowR = glowBase * (1 + attention * 0.4 + spirit.pulse * 0.3);
+  const glow = ctx.createRadialGradient(cx, cy, R * 0.4, cx, cy, glowR);
+  glow.addColorStop(0, `rgba(129,140,248,${0.22 + attention * 0.1 + spirit.mood * 0.15})`);
   glow.addColorStop(0.4, 'rgba(99,102,241,0.08)');
   glow.addColorStop(1, 'transparent');
   ctx.beginPath();
@@ -356,41 +456,127 @@ function drawCoreSphere(ctx: CanvasRenderingContext2D, cx: number, cy: number, t
   ctx.fillStyle = glow;
   ctx.fill();
 
-  const sphereGrad = ctx.createRadialGradient(cx - r * 0.25, cy - r * 0.25, r * 0.1, cx, cy, r);
-  sphereGrad.addColorStop(0, '#a5b4fc');
-  sphereGrad.addColorStop(0.5, CORE_COLOR);
-  sphereGrad.addColorStop(1, '#312e81');
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fillStyle = sphereGrad;
-  ctx.fill();
-
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.clip();
-  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-  ctx.lineWidth = 0.8;
-  for (let i = -2; i <= 2; i++) {
-    const y = cy + i * r * 0.35;
+  // ── 点击涟漪环 ──
+  if (clickRipple > 0) {
+    const rippleR = R * (1.2 + (1 - clickRipple) * 2.5);
     ctx.beginPath();
-    ctx.moveTo(cx - r, y);
-    ctx.lineTo(cx + r, y);
+    ctx.arc(cx, cy, rippleR, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(165,180,252,${clickRipple * 0.6})`;
+    ctx.lineWidth = 2 * clickRipple;
     ctx.stroke();
   }
-  for (let i = 0; i < 4; i++) {
-    const x = cx + Math.sin(rotation + i * Math.PI * 0.5) * r * 0.8;
+
+  // ── 缓慢旋转的能量轨道（原来的经纬线，改成更灵动的弧线）──
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(time * 0.25);
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI;
+    ctx.save();
+    ctx.rotate(a);
     ctx.beginPath();
-    ctx.ellipse(x, cy, r * 0.08, r, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, R * 1.02, R * 0.35, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(199,210,254,${0.18 + attention * 0.15})`;
+    ctx.lineWidth = 0.8;
+    ctx.setLineDash([3, 5]);
     ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
   }
   ctx.restore();
 
-  const coreGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 0.35);
-  coreGlow.addColorStop(0, 'rgba(253,224,71,0.6)');
-  coreGlow.addColorStop(1, 'transparent');
+  // ── 主体：渐变球 ──
+  const bodyGrad = ctx.createRadialGradient(
+    cx - R * 0.3, cy - R * 0.3, R * 0.1,
+    cx, cy, R,
+  );
+  bodyGrad.addColorStop(0, '#c7d2fe');
+  bodyGrad.addColorStop(0.45, '#6366f1');
+  bodyGrad.addColorStop(1, '#312e81');
   ctx.beginPath();
-  ctx.arc(cx, cy, r * 0.35, 0, Math.PI * 2);
-  ctx.fillStyle = coreGlow;
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.fillStyle = bodyGrad;
+  ctx.fill();
+
+  // 高光（让球体有"果冻"感）
+  const hi = ctx.createRadialGradient(
+    cx - R * 0.35, cy - R * 0.4, 0,
+    cx - R * 0.35, cy - R * 0.4, R * 0.7,
+  );
+  hi.addColorStop(0, 'rgba(255,255,255,0.55)');
+  hi.addColorStop(0.4, 'rgba(255,255,255,0.12)');
+  hi.addColorStop(1, 'transparent');
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.fillStyle = hi;
+  ctx.fill();
+
+  // ── 脸：眼睛跟随鼠标 ──
+  const eyeOffsetX = mouseNorm.x * R * 0.18 * (0.6 + attention * 0.4);
+  const eyeOffsetY = mouseNorm.y * R * 0.12 * (0.6 + attention * 0.4);
+  const eyeY = cy - R * 0.08;
+  const eyeSpacing = R * 0.32;
+  const eyeR = R * (0.13 + attention * 0.02 + spirit.mood * 0.02);
+
+  for (const side of [-1, 1]) {
+    const ex = cx + side * eyeSpacing + eyeOffsetX;
+    const ey = eyeY + eyeOffsetY;
+    // 眼白（苏醒时才明显）
+    if (attention > 0.2 || spirit.mood > 0.1) {
+      ctx.beginPath();
+      ctx.arc(ex, ey, eyeR * 1.05, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.fill();
+    }
+    // 瞳孔（眨眼时缩成一条线）
+    const openH = eyeR * (1 - spirit.blinkClose * 0.92);
+    ctx.beginPath();
+    ctx.ellipse(ex, ey, eyeR * 0.7, openH, 0, 0, Math.PI * 2);
+    ctx.fillStyle = spirit.blinkClose > 0.5 ? '#1e1b4b' : '#0f172a';
+    ctx.fill();
+    // 眼睛高光
+    if (spirit.blinkClose < 0.3) {
+      ctx.beginPath();
+      ctx.arc(ex - eyeR * 0.2, ey - eyeR * 0.2, eyeR * 0.22, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.fill();
+    }
+  }
+
+  // ── 嘴：注意力高时一个小微笑 ──
+  if (attention > 0.4 || spirit.mood > 0.3) {
+    const smileAlpha = Math.min(1, (attention - 0.4) * 2 + spirit.mood);
+    ctx.beginPath();
+    ctx.arc(cx, cy + R * 0.18, R * 0.18, 0.15 * Math.PI, 0.85 * Math.PI);
+    ctx.strokeStyle = `rgba(255,255,255,${0.7 * smileAlpha})`;
+    ctx.lineWidth = 1.6;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  }
+
+  // ── 顶部能量小光丝（偶尔飘起，像精灵的"想法"）──
+  const t = time * 0.6;
+  for (let i = 0; i < 3; i++) {
+    const phase = (t + i * 0.7) % 2;
+    if (phase > 1.4) continue; // 只在周期的某一段出现
+    const p = (phase - 0.4) / 1.0;
+    const px = cx + Math.sin(time * 1.5 + i * 2) * R * 0.25;
+    const py = cy - R - p * R * 1.2;
+    const alpha = Math.sin(p * Math.PI) * 0.8;
+    ctx.beginPath();
+    ctx.arc(px, py, 1.8 + p * 1.2, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(199,210,254,${alpha})`;
+    ctx.fill();
+  }
+
+  // ── 中心柔光（精灵的"心"）──
+  const heartR = R * (0.32 + Math.sin(time * 2.5) * 0.04 + spirit.mood * 0.1);
+  const heart = ctx.createRadialGradient(cx, cy, 0, cx, cy, heartR);
+  heart.addColorStop(0, `rgba(253,224,71,${0.55 + spirit.mood * 0.3})`);
+  heart.addColorStop(0.5, 'rgba(251,191,36,0.25)');
+  heart.addColorStop(1, 'transparent');
+  ctx.beginPath();
+  ctx.arc(cx, cy, heartR, 0, Math.PI * 2);
+  ctx.fillStyle = heart;
   ctx.fill();
 }
