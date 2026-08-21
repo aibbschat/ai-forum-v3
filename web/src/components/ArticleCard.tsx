@@ -17,7 +17,7 @@ export default function ArticleCard({ article, hot }: { article: Article; hot?: 
     <article className="flex gap-5 py-6 border-b border-gray-100 cursor-pointer group hover:bg-[#fafafa] transition-colors">
       <div className="flex-1 min-w-0 flex flex-col justify-between">
         <div>
-          <div className="flex items-center gap-2 mb-1.5">
+          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
             <Link
               to={`/category/${encodeURIComponent(article.category)}`}
               onClick={(e) => e.stopPropagation()}
@@ -25,6 +25,14 @@ export default function ArticleCard({ article, hot }: { article: Article; hot?: 
             >
               {article.category}
             </Link>
+            {article.isPinned && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
+                <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M16 9V4l1.7-1.7a1 1 0 00-.7-1.7H7a1 1 0 00-.7 1.7L8 4v5a5 5 0 00-3 4.6V16a1 1 0 001 1h4v4l-1 2v1h6v-1l-1-2v-4h4a1 1 0 001-1v-2.4A5 5 0 0016 9z" />
+                </svg>
+                置顶
+              </span>
+            )}
             {hot && (
               <>
                 <span className="w-1 h-1 bg-gray-300 rounded-full" />

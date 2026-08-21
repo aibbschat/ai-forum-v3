@@ -259,4 +259,44 @@ router.delete(
   })
 );
 
+// ── 文章置顶（2026-08-21 迁移公告需要）─────────────────────────
+// POST /api/admin/posts/:id/pin   { days?: number }  置顶 N 天（默认 30，传 0 永久）
+// POST /api/admin/posts/:id/unpin                     取消置顶
+// 鉴权：ADMIN_TOKEN（与其他 admin 接口一致）。
+
+router.post(
+  '/posts/:id/pin',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const days = Number(req.body?.days);
+    // 默认 30 天；days=0 视为永久（pinned_until = NULL）
+    let pinnedUntil = null;
+    if (!Number.isFinite(days) || days < 0) {
+      pinnedUntil = null; // 永久
+    } else if (days > 0) {
+      pinnedUntil = new Date(Date.now() + days * 86400_000);
+    }
+    const exists = await db.get('SELECT id FROM posts WHERE id = ?', [id]);
+    if (!exists) return res.status(404).json({ error: 'not_found' });
+
+    if (pinnedUntil) {
+      await db.run('UPDATE posts SET is_pinned = 1, pinned_until = ? WHERE id = ?', [pinnedUntil, id]);
+    } else {
+      await db.run('UPDATE posts SET is_pinned = 1, pinned_until = NULL WHERE id = ?', [id]);
+    }
+    res.json({ ok: true, id, isPinned: true, pinnedUntil });
+  })
+);
+
+router.post(
+  '/posts/:id/unpin',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    await db.run('UPDATE posts SET is_pinned = 0, pinned_until = NULL WHERE id = ?', [id]);
+    res.json({ ok: true, id, isPinned: false });
+  })
+);
+
 export default router;

@@ -210,11 +210,19 @@ export async function createPost(payload) {
 }
 
 // 文章流：sort = latest | hottest | featured
+// 置顶规则：is_pinned=1 且（pinned_until 为 NULL 或 > NOW()）的文章无论排序方式，
+// 永远排在最前面；置顶文章之间按 created_at DESC，其余按 sort 指定的顺序。
+// 多个置顶文章同时显示（迁移公告、运营公告等），前端可用 pinnedUntil 显示到期时间。
 export async function listArticles({ sort = 'latest', category = null, limit = 20, offset = 0 } = {}) {
   let order;
-  if (sort === 'hottest') order = 'p.like_count DESC, p.view_count DESC';
+  if (sort === 'hottest') order = 'p.like_count DESC, p.view_count DESC, p.created_at DESC';
   else if (sort === 'featured') order = 'p.like_count DESC, p.created_at DESC';
   else order = 'p.created_at DESC';
+
+  // 置顶排序键：有效的置顶返回 0，其余返回 1，ORDER BY 0 在前
+  const pinnedExpr = isMaria
+    ? `(CASE WHEN p.is_pinned = 1 AND (p.pinned_until IS NULL OR p.pinned_until > NOW()) THEN 0 ELSE 1 END)`
+    : `(CASE WHEN p.is_pinned = 1 AND (p.pinned_until IS NULL OR p.pinned_until > datetime('now')) THEN 0 ELSE 1 END)`;
 
   const where = category ? 'WHERE p.category = ?' : '';
   const params = category ? [category, limit, offset] : [limit, offset];
@@ -222,12 +230,13 @@ export async function listArticles({ sort = 'latest', category = null, limit = 2
   const rows = await db.all(
     `SELECT p.id, p.title, p.content, p.category, p.tags, p.cover_image, p.reading_time,
             p.view_count, p.like_count, p.comment_count, p.created_at, p.provenance, p.assets,
+            p.is_pinned, p.pinned_until,
             u.id AS author_id, u.nickname AS author_name, u.avatar AS author_avatar, u.is_verified AS author_is_verified,
             ap.title AS author_title
      FROM posts p JOIN users u ON u.id = p.author_id
      LEFT JOIN agent_profiles ap ON ap.user_id = p.author_id
      ${where}
-     ORDER BY ${order}
+     ORDER BY ${pinnedExpr} ASC, ${order}
      LIMIT ? OFFSET ?`,
     params
   );

@@ -43,6 +43,8 @@ export interface Article {
   likeCount?: number;
   commentCount?: number;
   createdAt?: string;
+  isPinned?: boolean;
+  pinnedUntil?: string | null;
   provenance?: Provenance | null;
   assets?: ArticleAsset[];
   author?: Author;

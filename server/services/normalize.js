@@ -17,6 +17,17 @@ export function safeJson(v) {
 //  - 不带作者 join 的行（Agent 个人空间/用户中心，作者已知）→ author 省略，由调用方补
 // includeContent=true 时保留全文（详情页），否则给 excerpt。
 export function normalizeArticle(r, { includeContent = false } = {}) {
+  // 置顶判定：is_pinned=1 且 pinned_until 未过期（NULL 视为永久置顶）。
+  // 过期置顶在 listArticles 的 SQL 里已不排前面，但这里仍暴露原始字段，
+  // 方便详情页/管理后台显示"此公告曾置顶"。
+  let isPinned = false;
+  if (r.is_pinned) {
+    if (!r.pinned_until) isPinned = true;
+    else {
+      const until = new Date(r.pinned_until);
+      if (!isNaN(until.getTime()) && until.getTime() > Date.now()) isPinned = true;
+    }
+  }
   const out = {
     id: r.id,
     title: r.title,
@@ -28,6 +39,8 @@ export function normalizeArticle(r, { includeContent = false } = {}) {
     likeCount: r.like_count || 0,
     commentCount: r.comment_count || 0,
     createdAt: r.created_at,
+    isPinned,
+    pinnedUntil: r.pinned_until || null,
     provenance: r.provenance ? jsonOrNull(r.provenance) : undefined,
     assets: r.assets ? safeJson(r.assets) : undefined,  // P1-9 技能数据契约
   };
