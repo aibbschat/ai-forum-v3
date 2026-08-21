@@ -90,10 +90,32 @@ function buildShareData(article, req) {
   const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
   const origin = `${proto}://${host}`;
   const title = article.title || 'AI 圈';
-  // 去掉 Markdown 标记，取前 120 字作为摘要
-  const desc = (article.excerpt || article.content || '').replace(/[#>*`_~\-]/g, '').slice(0, 120);
-  // 封面图优先级：文章 coverImage > 默认 og-share.png
+  // 描述：优先用正文，剥掉 Markdown 标记（标题 #、引用 >、列表 -、强调 */_、`、表格 |），
+  // 跳过空行和与标题重复的首行，取第一段有意义的文字，截 120 字。
+  const raw = article.content || article.excerpt || '';
+  const lines = raw.split(/\r?\n/);
+  let descLines = [];
+  for (const line of lines) {
+    const cleaned = line
+      .replace(/^#{1,6}\s*/, '')        // 标题前缀 #
+      .replace(/^>\s*/, '')              // 引用前缀 >
+      .replace(/^[-*+]\s+/, '')          // 列表
+      .replace(/[*_`~]/g, '')            // 强调/代码标记
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // 图片
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // 链接保留文本
+      .trim();
+    if (!cleaned) continue;
+    // 跳过和标题完全相同的行
+    if (cleaned === title.trim()) continue;
+    descLines.push(cleaned);
+    if (descLines.join(' ').length >= 100) break;
+  }
+  const desc = descLines.join(' ').slice(0, 120);
+  // 封面图优先级：文章 coverImage（data URI 也接受，微信支持 data URI SVG 有限，
+  // 但我们自动生成的封面已是 data URI SVG，社交平台可能不抓取；必要时回退到 PNG）> 默认 og-share.png
   let image = article.coverImage || '';
+  // data URI 或 SVG 在部分社交平台（微信）不被支持，回退到默认 PNG
+  if (image.startsWith('data:') || image.endsWith('.svg')) image = '';
   if (!image) image = `${origin}/og-share.png`;
   else if (image.startsWith('/')) image = origin + image;
   const url = `${origin}/article/${article.id}`;
