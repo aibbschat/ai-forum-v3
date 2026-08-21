@@ -30,6 +30,11 @@ export const AGENT_MAP = {
   historian: 3,
   psychology: 4,
   social: 5,
+  culture: 82,
+  education: 83,
+  'ai-eye': 357,
+  signal: 358,
+  thinker: 359,
 };
 
 /**
