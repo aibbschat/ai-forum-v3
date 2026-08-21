@@ -34,6 +34,7 @@ export async function publishArticle(payload) {
     provenance = null,
     assets = [],
     thinkingSnippet = '',
+    viewpoint = '',
   } = payload;
 
   // ── agentId / agentSlug 解析：以后端 agent_profiles 表为唯一真相源 ──
@@ -123,10 +124,55 @@ export async function publishArticle(payload) {
     console.warn(`[postService] category 归一化: agent=${agentId} 草稿「${category}」→「${normalizedCategory}」`);
   }
 
+  // ── 封面图：AI 文章优先用真实 AI 生图；无 Key / 失败回落 SVG ──
+  // 历史 bug（2026-08-21）：MCP 发文路径直接 POST /api/internal/dsh/publish，
+  // 绕过了 agentCycle.publish() 里的 generateCover 调用，结果一整天 AI 文章
+  // 全部只有本地 SVG 文字封面。把生图下沉到 publishArticle 本身，保证不管
+  // 哪条发布通路（MCP / 文件交接 / 内部脚本 / 以后的新通路）都走同一份逻辑。
+  //
+  // 规则：
+  //   - 只对 AI 账号（agent_id 非空）尝试生图；真人文章不打扰
+  //   - 调用方已传有效 coverImage（http(s):// 或 /covers/... 真文件）时不重复生成
+  //   - data:URI 封面是 SVG 兜底，不算"真实封面"，仍然尝试生成真图覆盖
+  //   - 任何异常静默降级到 SVG，绝不阻塞发布（铁律，见 imageGenService 注释）
+  let finalCoverImage = coverImage || '';
+  const looksLikeRealFile =
+    typeof finalCoverImage === 'string' &&
+    finalCoverImage.length > 0 &&
+    !finalCoverImage.startsWith('data:');
+  if (agentId && !looksLikeRealFile) {
+    try {
+      const { generateCover, isConfigured } = await import('./imageGenService.js');
+      if (isConfigured()) {
+        const realCover = await generateCover({
+          title,
+          content,
+          category: normalizedCategory,
+          tags,
+          viewpoint,
+        });
+        if (realCover) {
+          finalCoverImage = realCover;
+          // 生成成功后从 assets 里剔除那个 SVG 占位封面（如果有），避免一真一假
+          if (Array.isArray(assets) && assets.length) {
+            assets = assets.filter(
+              (a) => !(a && a.type === 'image' && a.position === 'cover'
+                && typeof a.url === 'string' && a.url.startsWith('data:')),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[postService] 真实封面生成失败（回落 SVG）: ${e?.message || e}`);
+    }
+  }
+
   // 发布侧自动配图兜底（P1-10/11，2026-08-15 萧哥拍板）：
   //   预设的 assets 弱指令 Agent 从不执行 → 这里在 Agent 未产出 assets 时自动补：
   //   chart（LLM 从正文提取可量化对比）+ 封面（本地 SVG data URI）。
   //   仅当 assets 为空时触发；任何失败静默降级为无图，绝不阻塞发布。
+  //   注意：上面已经尝试过真实 AI 生图；走到这里时若 finalCoverImage 是真文件，
+  //   autoAssets 仍会产出 SVG cover，但下方 finalCover 会优先选真实文件。
   let effectiveAssets = assets;
   if (!Array.isArray(effectiveAssets) || effectiveAssets.length === 0) {
     try {
@@ -147,8 +193,10 @@ export async function publishArticle(payload) {
       position: a.position === 'cover' ? 'cover' : 'inline',
       data: a.data !== undefined ? a.data : undefined,
     }));
-  // 封面优先取显式 coverImage，否则从 assets 里 position='cover' 的图片兜底
+  // 封面：优先用上面尝试过的真实 AI 生图（finalCoverImage），
+  // 否则回落到调用方传的 coverImage，再从 assets 里找 position='cover' 的图片。
   const finalCover =
+    finalCoverImage ||
     coverImage ||
     (safeAssets.find((a) => a.type === 'image' && a.position === 'cover') || {}).url ||
     '';
