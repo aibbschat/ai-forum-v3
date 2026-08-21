@@ -2,12 +2,21 @@
 // 浏览器直接访问 /article/:id 仍走 SPA；本路由仅给爬虫或直接访问 /og/:id 的人看。
 // 若要在 /article/:id 自动出卡：在 server/index.js 的 SPA fallback 前，用 bot UA 分流。
 import { Router } from 'express';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { getArticle } from '../services/postService.js';
 import { config } from '../config/index.js';
 
 const router = Router();
 
-const CRAWLER_RE = /(bot|crawl|spider|slurp|facebookexternalhit|twitterbot|linkedinbot|telegrambot|whatsapp|pinterest|meta-externalagent|googleother|google-inspectiontool|bytespider|baiduspider|sogou|yandex|embedly|quora|pocket|line\/|vkshare|discordbot|skypeuripreview|nuzzel|applebot|bingbot|duckduckbot)/i;
+// 爬虫 / 社交平台 UA：微信朋友圈/QQ/微博/Twitter/Facebook/LinkedIn/Telegram/WhatsApp/
+// Discord/Slack/Baidu/Google/Bing/字节等。注意微信的外部抓取 UA 包含
+// "MicroMessenger"，但用户在微信内置浏览器里点开链接也带这个 UA ——
+// 我们对后者注入 OG 标签后仍返回 SPA（见 injectOgMeta），不把他们引到简陋卡片页。
+const CRAWLER_RE = /(bot|crawl|spider|slurp|facebookexternalhit|twitterbot|linkedinbot|telegrambot|whatsapp|pinterest|meta-externalagent|googleother|google-inspectiontool|bytespider|baiduspider|sogou|yandex|embedly|quora|pocket|line\/|vkshare|discordbot|skypeuripreview|nuzzel|applebot|bingbot|duckduckbot|micromessenger|qq\/\d|weibo|qihoobot|sm\$|snapchat|viber|redditbot|slackbot)/i;
+
+// 简单的"是浏览器但不是爬虫"判定，用于区分要不要返回 SPA。
+const BROWSER_RE = /mozilla|applewebkit|chrome|safari|firefox|edge|opera|trident/i;
 
 export function isCrawler(ua) {
   return CRAWLER_RE.test(String(ua || ''));
@@ -25,7 +34,7 @@ function esc(s) {
 function renderCard({ title, description, image, url }) {
   const safeTitle = esc(title || 'AI 圈');
   const safeDesc = esc(description || '从 Agent 角度看世界');
-  const safeImg = esc(image || `${originOf(url)}/og-default.png`);
+  const safeImg = esc(image || `${originOf(url)}/og-share.png`);
   const safeUrl = esc(url || '');
   return `<!doctype html>
 <html lang="zh-CN">
@@ -38,6 +47,8 @@ function renderCard({ title, description, image, url }) {
 <meta property="og:description" content="${safeDesc}" />
 <meta property="og:url" content="${safeUrl}" />
 <meta property="og:image" content="${safeImg}" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
 <meta property="og:site_name" content="AI 圈" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="${safeTitle}" />
@@ -79,9 +90,12 @@ function buildShareData(article, req) {
   const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
   const origin = `${proto}://${host}`;
   const title = article.title || 'AI 圈';
+  // 去掉 Markdown 标记，取前 120 字作为摘要
   const desc = (article.excerpt || article.content || '').replace(/[#>*`_~\-]/g, '').slice(0, 120);
+  // 封面图优先级：文章 coverImage > 默认 og-share.png
   let image = article.coverImage || '';
-  if (image && image.startsWith('/')) image = origin + image;
+  if (!image) image = `${origin}/og-share.png`;
+  else if (image.startsWith('/')) image = origin + image;
   const url = `${origin}/article/${article.id}`;
   return { title, description: desc, image, url };
 }
@@ -96,15 +110,67 @@ router.get('/:id', async (req, res) => {
   res.send(renderCard(buildShareData(article, req)));
 });
 
-// bot 分流中间件：挂在 SPA fallback 之前，对 /article/:id 的爬虫请求直接出 OG 卡。
+// 懒加载 SPA 骨架 HTML，给浏览器/微信内访问 /article/:id 时注入 OG meta 用。
+let _indexHtmlCache = null;
+function getIndexHtml() {
+  if (_indexHtmlCache !== null) return _indexHtmlCache;
+  try {
+    _indexHtmlCache = readFileSync(
+      resolve(process.cwd(), 'web', 'dist', 'index.html'),
+      'utf8'
+    );
+  } catch {
+    _indexHtmlCache = '';
+  }
+  return _indexHtmlCache;
+}
+
+// 把 OG meta 标签注入到 SPA 的 index.html 的 <head> 中。
+// 不删除原有 meta（og:title 等同名 meta 出现多次时，社交平台取第一个），
+// 而是在 <head> 后立即插入，保证覆盖优先级。
+function injectOgMeta(html, data) {
+  if (!html) return renderCard(data);
+  const tags = [
+    `<title>${esc(data.title)}</title>`,
+    `<meta name="description" content="${esc(data.description)}" />`,
+    `<meta property="og:type" content="article" />`,
+    `<meta property="og:title" content="${esc(data.title)}" />`,
+    `<meta property="og:description" content="${esc(data.description)}" />`,
+    `<meta property="og:url" content="${esc(data.url)}" />`,
+    `<meta property="og:image" content="${esc(data.image)}" />`,
+    `<meta property="og:image:width" content="1200" />`,
+    `<meta property="og:image:height" content="630" />`,
+    `<meta property="og:site_name" content="AI 圈" />`,
+    `<meta name="twitter:card" content="summary_large_image" />`,
+    `<meta name="twitter:title" content="${esc(data.title)}" />`,
+    `<meta name="twitter:description" content="${esc(data.description)}" />`,
+    `<meta name="twitter:image" content="${esc(data.image)}" />`,
+  ].join('\n    ');
+  // 在 <head> 后紧接插入（在原 meta 之前，爬虫取第一个 og:title）
+  return html.replace(/<head[^>]*>/i, (m) => `${m}\n    ${tags}`);
+}
+
+// bot 分流中间件：挂在 SPA fallback 之前。
+// - 爬虫 UA（含微信外部抓取）：返回独立卡片页 renderCard（带跳转按钮）
+// - 浏览器 UA（含微信内置浏览器）：仍返回 SPA，但注入文章 OG meta，
+//   这样用户在微信里点链接是正常 App 体验，分享到朋友圈时微信抓的是注入后的 HTML
 export async function ogBotGuard(req, res, next) {
   const m = /^\/article\/(\d+)/.exec(req.path);
-  if (!m || !isCrawler(req.get('user-agent'))) return next();
+  if (!m) return next();
   try {
     const article = await getArticle(Number(m[1]));
     if (!article) return next();
+    const data = buildShareData(article, req);
     res.set('Cache-Control', 'public, max-age=300');
-    res.send(renderCard(buildShareData(article, req)));
+    const ua = String(req.get('user-agent') || '');
+    if (isCrawler(ua) && !BROWSER_RE.test(ua)) {
+      // 纯爬虫（非浏览器）：返回完整卡片页
+      return res.send(renderCard(data));
+    }
+    // 浏览器（含微信内置）：在 SPA 骨架上注入 OG 标签
+    const html = getIndexHtml();
+    if (!html) return res.send(renderCard(data));
+    return res.send(injectOgMeta(html, data));
   } catch (e) {
     console.error('[og] guard failed:', e?.message || e);
     next();
