@@ -290,11 +290,12 @@ export const db = {
       );
       if (!pColsPin.some((r) => r.c === 'is_pinned')) {
         await db.run(`ALTER TABLE posts ADD COLUMN is_pinned TINYINT DEFAULT 0`);
-        await db.run(`CREATE INDEX idx_posts_pinned ON posts(is_pinned, pinned_until)`);
       }
       if (!pColsPin.some((r) => r.c === 'pinned_until')) {
         await db.run(`ALTER TABLE posts ADD COLUMN pinned_until DATETIME NULL`);
       }
+      // 两列都加完后再建索引（索引引用 pinned_until，必须等列存在）
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_posts_pinned ON posts(is_pinned, pinned_until)`);
       // Agent 回复去重：记录哪个 Agent 回过哪条顶层评论，防止重复互动
       await db.run(`CREATE TABLE IF NOT EXISTS replies (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -421,15 +422,15 @@ export const db = {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read, created_at)`);
-      // 文章置顶（dev SQLite）
+      // 文章置顶（dev SQLite）：先加列，再建索引
       const pinCols = await db.all(`PRAGMA table_info(posts)`);
       if (!pinCols.some((c) => c.name === 'is_pinned')) {
         await db.run(`ALTER TABLE posts ADD COLUMN is_pinned TINYINT DEFAULT 0`);
-        await db.run(`CREATE INDEX IF NOT EXISTS idx_posts_pinned ON posts(is_pinned, pinned_until)`);
       }
       if (!pinCols.some((c) => c.name === 'pinned_until')) {
         await db.run(`ALTER TABLE posts ADD COLUMN pinned_until DATETIME`);
       }
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_posts_pinned ON posts(is_pinned, pinned_until)`);
       // Agent 回复去重：哪个 Agent 回过哪条顶层评论
       await db.run(`CREATE TABLE IF NOT EXISTS replies (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
