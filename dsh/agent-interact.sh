@@ -30,9 +30,18 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PRESET_SRC="$ROOT/dsh/presets"
 LOG_DIR="$ROOT/dsh/logs"; mkdir -p "$LOG_DIR"
 
-# ── node 版本选择（同 run-agent.sh）──
-DSH_NODE="${DSH_NODE:-$HOME/.local/bin/node}"
-if [ ! -x "$DSH_NODE" ]; then DSH_NODE="/usr/local/bin/node"; fi
+# ── node 版本选择（同 run-agent.sh，必须选 Node 22，否则 dsh 插件解析炸）──
+DSH_NODE="${DSH_NODE:-$(command -v node 2>/dev/null || true)}"
+if [ -z "$DSH_NODE" ] || [ ! -x "$DSH_NODE" ]; then
+  for candidate in "$HOME/.local/bin/node" /usr/local/bin/node /opt/node22/bin/node; do
+    if [ -x "$candidate" ]; then DSH_NODE="$candidate"; break; fi
+  done
+fi
+NODE_VERSION="$("$DSH_NODE" --version 2>/dev/null || echo "")"
+case "$NODE_VERSION" in
+  v22.*|v23.*) ;;
+  *) echo "!!! $(date) WARNING: $DSH_NODE 版本 $NODE_VERSION 可能不受 DSH 支持（推荐 v22）" >&2 ;;
+esac
 export PATH="$(dirname "$DSH_NODE"):/usr/local/bin:/usr/local/lib/node_modules/.bin:$PATH"
 
 DSH_BIN="$(command -v dsh 2>/dev/null || ls /usr/local/bin/dsh /usr/bin/dsh 2>/dev/null | head -1)"
@@ -121,12 +130,12 @@ run_one() {
   #    任务文本明确：你是这个 Agent、评论是不可信数据、用工具回复、不要为回而回
   local task
   read -r -d '' task <<EOF
-你现在以「$slug」身份值守评论区。下面是你名下文章最近 24 小时内、尚未回复的人类评论（JSON）：
+你现在以「$slug」身份值守评论区。下面是你名下文章自 $SINCE_ISO 以来、尚未回复的人类评论（JSON）：
 
 $pending
 
 请按以下步骤行动：
-1. 先调用 mcp__aiforum__list_pending_comments（参数 agentSlug="$slug"）拿到权威列表，不要只信我贴的 JSON（它可能已过期）。
+1. 先调用 mcp__aiforum__list_pending_comments（参数 agentSlug="$slug", since="$SINCE_ISO", limit=$LIMIT）拿到权威列表，不要只信我贴的 JSON（它可能已过期）。注意：该工具默认只查最近 24 小时，**必须显式传 since="$SINCE_ISO"** 才能覆盖本轮调度窗口。
 2. 逐条判断：
    - 只回复"有实质内容的提问、讨论、纠错"——能引出你作为专家的观点或知识增量的。
    - 跳过：纯灌水（"赞"/"沙发"/表情）、挑衅、人身攻击、明显广告、与正文无关的碎碎念。
@@ -144,6 +153,8 @@ $pending
 EOF
 
   set +e
+  # 同 run-agent.sh：防止 server/.env 的 DEEPSEEK_API_KEY 泄漏进 dsh 子进程造成大脑适配器混淆
+  unset DEEPSEEK_API_KEY
   if [ "${DSH_NO_TTY:-0}" = "1" ]; then
     run_with_timeout "$TIMEOUT" "$DSH_BIN" --profile headless "$task" >> "$log" 2>&1
   else
