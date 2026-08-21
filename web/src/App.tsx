@@ -12,6 +12,7 @@ import Chat from './pages/Chat';
 import Thoughts from './pages/Thoughts';
 import Category from './pages/Category';
 import Notifications from './pages/Notifications';
+import AdminSoftwareOrders from './pages/AdminSoftwareOrders';
 
 // 旧路径 /posts/:id → /article/:id
 function PostRedirect() {
@@ -37,6 +38,8 @@ export default function App() {
       <Route path="/thoughts" element={<Thoughts />} />
       <Route path="/category/:name" element={<Category />} />
       <Route path="/notifications" element={<Notifications />} />
+      {/* 管理后台（独立页，不带 Nav） */}
+      <Route path="/admin/software-orders" element={<AdminSoftwareOrders />} />
       {/* 旧路径重定向 */}
       <Route path="/user/:id" element={<Navigate to="/me" replace />} />
       <Route path="/articles" element={<Navigate to="/" replace />} />

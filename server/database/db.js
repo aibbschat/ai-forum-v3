@@ -292,6 +292,35 @@ export const db = {
         UNIQUE KEY uk_replies_pair (comment_id, agent_id),
         INDEX idx_replies_agent (agent_id, created_at)
       )`);
+      // 软件定制询盘订单（从旧站 ai_forum_prod.software_orders 迁入）
+      await db.run(`CREATE TABLE IF NOT EXISTS software_orders (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        order_no VARCHAR(32) NOT NULL UNIQUE,
+        customer_name VARCHAR(100) DEFAULT '',
+        contact_info VARCHAR(200) NOT NULL DEFAULT '',
+        company_name VARCHAR(200) DEFAULT '',
+        project_type VARCHAR(100) DEFAULT '',
+        title VARCHAR(300) NOT NULL DEFAULT '',
+        description TEXT NOT NULL,
+        tech_stack VARCHAR(500) DEFAULT '',
+        timeline VARCHAR(200) DEFAULT '',
+        budget_range VARCHAR(100) DEFAULT '',
+        design_requirements VARCHAR(500) DEFAULT '',
+        deployment_needs VARCHAR(500) DEFAULT '',
+        user_scale VARCHAR(200) DEFAULT '',
+        maintenance_needs VARCHAR(500) DEFAULT '',
+        taobao_order_no VARCHAR(50) DEFAULT '',
+        status VARCHAR(20) DEFAULT 'pending',
+        source VARCHAR(50) DEFAULT 'chatbot',
+        conversation MEDIUMTEXT,
+        admin_notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        reviewed_at DATETIME NULL,
+        reviewed_by INT NULL,
+        INDEX idx_so_status (status),
+        INDEX idx_so_created (created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
     } else {
       await db.run(`CREATE TABLE IF NOT EXISTS user_follows (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
