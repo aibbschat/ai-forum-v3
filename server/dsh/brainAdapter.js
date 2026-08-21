@@ -50,14 +50,27 @@ export async function runAgent(agent, task) {
   return result;
 }
 
-// ── dsh 大脑：跑 headless，文件交接只取草稿（DSH_DRAFT_ONLY=1 不自动发） ──
-// 重要：run-agent.sh 在 DSH_DRAFT_ONLY 下，DSH 成功写稿后，其退出码偶发被 node 的
-// spawn 误判为非 0（脚本自身日志显示已 DRAFT-ONLY 退出 0）。故不以退出码判定成败，
-// 而以"是否生成了比运行前基线更新的草稿文件"为准——草稿才是我们要的产物。
+// ── dsh 大脑：跑 headless。两种发布通路 ──
+//   A) 文件交接（DSH_DRAFT_ONLY=1，默认）：DSH 写 JSON 草稿到 drafts/<slug>/，
+//      本函数读草稿返回 ArticleResult，由 runCycle 统一走 publish() 落库。
+//   B) MCP 直连（DSH_PUBLISH_VIA=mcp）：DSH 进程内直接调
+//      mcp__aiforum__publish_article 发布。本函数解析 DSH stdout 中的
+//      "已发布成功，文章 ID：N" / "标题：..." / "核心判断：..."，
+//      返回 ArticleResult 并标记 externalPublished=true，让 runCycle 跳过重复发布，
+//      但仍执行后续的记忆沉淀 / 素材标记 / 巩固。
 async function dshBrain(agent, task) {
   const slug = agent.presetId || agent.username;
+  const viaMcp = process.env.DSH_PUBLISH_VIA === 'mcp';
+
+  if (viaMcp) {
+    return dshBrainViaMcp(agent, task, slug);
+  }
+  return dshBrainViaFile(agent, task, slug);
+}
+
+async function dshBrainViaFile(agent, task, slug) {
   const dir = DRAFTS_DIR(slug);
-  const baseline = newestDraftMtime(dir); // 运行前最新草稿时间，用于判定"本次是否真产出新草稿"
+  const baseline = newestDraftMtime(dir);
   const code = await runBash(RUN_SH, [slug, task], { DSH_DRAFT_ONLY: '1' });
   // DSH 进程 exit 0 后，OUT_FILE 可能尚未完全落盘（子进程退出 ≠ 文件 flush 完成），
   // 直接 readdir 会短暂看不到新文件 → 误判"未产出"。故重试等待文件出现。
@@ -66,6 +79,82 @@ async function dshBrain(agent, task) {
     throw new Error(`dshBrain: ${slug} 未产出新草稿（run-agent.sh 退出码 ${code}）`);
   }
   return draftToArticleResult(draft, agent, 'dsh');
+}
+
+/**
+ * MCP 直连模式：DSH 进程内直接发布，不产生草稿文件。
+ * 解析 stdout 拿到 postId/title/viewpoint，构造 ArticleResult。
+ * 即使解析不到标题，也返回一个带 externalPublished 标记的最小结果，
+ * 避免 runCycle 抛错中断记忆沉淀/素材标记（文章其实已经发出去了）。
+ */
+async function dshBrainViaMcp(agent, task, slug) {
+  const code = await runBash(RUN_SH, [slug, task], {
+    DSH_PUBLISH_VIA: 'mcp',
+  });
+
+  // run-agent.sh 把 DSH 所有输出写到 dsh/logs/<slug>-YYYYMMDD.log（按天滚动）。
+  // 我们运行后读当天的日志，解析"已发布成功 / 标题 / 核心判断"。
+  const logText = readTodayAgentLog(slug);
+  const text = logText || '';
+
+  // MCP server 成功返回："✅ 发布成功：post id=109" 或 Agent 复述"已发布成功，文章 ID：109"
+  const idMatch =
+    text.match(/(?:发布成功|已发布成功)[^\n]{0,30}?(?:post\s*id|文章\s*ID)[=：:\s]+(\d+)/i) ||
+    text.match(/post\s*id[=：:\s]+(\d+)/i);
+  const postId = idMatch ? Number(idMatch[1]) : null;
+
+  // 幂等命中也算成功（"24h 内已发布过... post id=N"）
+  const idempotent = /未重复发帖|幂等命中|content_hash\s*命中/i.test(text);
+  const success = postId !== null || idempotent;
+
+  if (!success) {
+    // 真正失败：exit 非 0 且没找到发布标记。抛错让外层记日志/告警。
+    const tail = text.slice(-500);
+    throw new Error(
+      `dshBrain(MCP): ${slug} 未检测到发布成功标记（exit=${code}）。tail: ${tail}`
+    );
+  }
+
+  // 标题：DSH 任务要求 Agent 完成后复述 "标题：xxx"；剥掉 Markdown 加粗 **
+  const titleMatch = text.match(/标题[：:]\s*\*{0,2}\s*([^\n*]+?)\s*\*{0,2}\s*(?:\r?\n|$)/);
+  const title = titleMatch ? titleMatch[1].trim() : `(${slug} 已发布文章#${postId ?? '?'})`;
+
+  // 核心判断 → viewpoint（沉淀进 episodic 记忆）
+  const vpMatch = text.match(/核心判断[：:]\s*([^\n]+)/);
+  const viewpoint = vpMatch ? vpMatch[1].trim() : undefined;
+
+  return {
+    title,
+    // MCP 模式下正文已在 MCP 调用里发出去了，本地不需要再持有；给个占位即可
+    // （validateArticleResult 要求 content 是 string，下游 extractViewpoint 只读 viewpoint 字段）。
+    content: '',
+    category: agent.category || '未分类',
+    tags: [],
+    viewpoint,
+    provenance: {
+      agent: slug,
+      model: 'dsh-mcp',
+      sources: [],
+      confidence: 0.7,
+    },
+    // 关键标记：让 runCycle 知道文章已由 MCP 工具直接发布，不要再调 publish()
+    externalPublished: true,
+    externalPostId: postId,
+  };
+}
+
+/** 读当天的 Agent 运行日志（dsh/logs/<slug>-YYYYMMDD.log）。 */
+function readTodayAgentLog(slug) {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const logPath = resolve(__dirname, '..', '..', 'dsh', 'logs', `${slug}-${yyyy}${mm}${dd}.log`);
+  try {
+    return readFileSync(logPath, 'utf8');
+  } catch {
+    return '';
+  }
 }
 
 // 带重试的草稿读取：子进程刚退出时文件可能未落盘，短暂轮询直到新草稿出现或超时。

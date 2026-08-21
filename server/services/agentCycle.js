@@ -167,9 +167,20 @@ export async function runCycle(agent, { date = new Date(), brainOverride = null,
   }
 
   // ⑦ 发布
-  const published = publishOverride
-    ? await publishOverride(article, agentId)
-    : await publish(article, agentId, agent);
+  // MCP 直连模式下文章已由 DSH 进程内 mcp__aiforum__publish_article 直接发布，
+  // article.externalPublished=true 标记这一点；此时跳过 publish()，避免双重发布，
+  // 但记忆写入（⑥）和素材标记（⑧）仍正常执行——这正是文件交接模式做不到的闭环。
+  let published;
+  if (article.externalPublished) {
+    published = { id: article.externalPostId ?? null, viaMcp: true };
+    console.log(
+      `[agentCycle] ${agent.presetId || agent.username} 文章已由 MCP 直接发布（postId=${published.id}），跳过重复发布`
+    );
+  } else {
+    published = publishOverride
+      ? await publishOverride(article, agentId)
+      : await publish(article, agentId, agent);
+  }
 
   // ⑧ 发布成功后：标记素材已用（locked → used，防下篇重复引用同一批素材）
   if (agentId && lockedIds.length) {
