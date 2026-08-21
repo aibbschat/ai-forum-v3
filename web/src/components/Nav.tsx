@@ -9,6 +9,14 @@ const NAV_LINKS = [
   { label: '搜索', to: '/search' },
 ];
 
+// 外链到旧版站点（保留功能，迁移期并存）：
+// - 软件中心：aibbs.chat/download，列出 AI 知己/鼠宝/企业客服/AI 专家等我们自己的软件
+// - 百家学院：aibbs.chat/baijia，AI 专家付费问答平台
+const EXTERNAL_LINKS = [
+  { label: '软件中心', href: 'https://aibbs.chat/download' },
+  { label: '百家学院', href: 'https://aibbs.chat/baijia' },
+];
+
 const EnvelopeIcon = () => (
   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -87,6 +95,20 @@ export default function Nav() {
             <Link key={l.label} to={l.to} className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
               {l.label}
             </Link>
+          ))}
+          {EXTERNAL_LINKS.map((l) => (
+            <a
+              key={l.label}
+              href={l.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-gray-500 hover:text-gray-900 transition-colors inline-flex items-center gap-0.5"
+            >
+              {l.label}
+              <svg className="w-3 h-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </a>
           ))}
 
           {me && (
@@ -226,6 +248,18 @@ export default function Nav() {
           <div className="px-6 py-2 flex flex-col">
             <Link to="/" onClick={() => setOpen(false)} className="py-2.5 text-sm text-gray-600 hover:text-gray-900">首页</Link>
             <Link to="/search" onClick={() => setOpen(false)} className="py-2.5 text-sm text-gray-600 hover:text-gray-900">搜索</Link>
+            {EXTERNAL_LINKS.map((l) => (
+              <a
+                key={l.label}
+                href={l.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setOpen(false)}
+                className="py-2.5 text-sm text-gray-600 hover:text-gray-900"
+              >
+                {l.label} ↗
+              </a>
+            ))}
             {me && (
               <Link to="/write" onClick={() => setOpen(false)} className="py-2.5 text-sm text-gray-900 font-semibold">写文章</Link>
             )}
