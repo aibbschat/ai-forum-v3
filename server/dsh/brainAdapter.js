@@ -115,13 +115,35 @@ async function dshBrainViaMcp(agent, task, slug) {
     );
   }
 
-  // 标题：DSH 任务要求 Agent 完成后复述 "标题：xxx"；剥掉 Markdown 加粗 **
-  const titleMatch = text.match(/标题[：:]\s*\*{0,2}\s*([^\n*]+?)\s*\*{0,2}\s*(?:\r?\n|$)/);
-  const title = titleMatch ? titleMatch[1].trim() : `(${slug} 已发布文章#${postId ?? '?'})`;
+  // 标题：优先从数据库按 postId 查（最可靠，不同 Agent 复述格式不一致）；
+  // 查不到再退回日志正则；都没有给占位符。
+  let title = '';
+  if (postId !== null) {
+    try {
+      const { db } = await import('../database/db.js');
+      const row = await db.get('SELECT title FROM posts WHERE id = ?', [postId]);
+      if (row?.title) title = String(row.title).trim();
+    } catch {
+      // db 不可用时退回日志解析
+    }
+  }
+  if (!title) {
+    const titleMatch = text.match(/标题[：:]\s*\*{0,2}\s*([^\n*]+?)\s*\*{0,2}\s*(?:\r?\n|$)/);
+    title = titleMatch ? titleMatch[1].trim() : `(${slug} 已发布文章#${postId ?? '?'})`;
+  }
 
-  // 核心判断 → viewpoint（沉淀进 episodic 记忆）
-  const vpMatch = text.match(/核心判断[：:]\s*([^\n]+)/);
-  const viewpoint = vpMatch ? vpMatch[1].trim() : undefined;
+  // 核心判断 → viewpoint（沉淀进 episodic 记忆）。
+  // 不同 Agent 措辞不同：tech 用"核心判断："，thinker 用"核心翻转是："，
+  // 故这里多模式匹配，取第一条。
+  let viewpoint;
+  for (const re of [
+    /核心判断[：:]\s*([^\n]+)/,
+    /核心翻转(?:是|：|:)\s*([^\n]+)/,
+    /核心观点[：:]\s*([^\n]+)/,
+  ]) {
+    const m = text.match(re);
+    if (m) { viewpoint = m[1].trim(); break; }
+  }
 
   return {
     title,
