@@ -79,6 +79,28 @@ async function bootstrap() {
     await db.ensureSocialTables();
     await db.seedAgentsIfNeeded();
   }
+
+  // Agent 映射自检：AGENT_MAP（MCP/脚本兜底用）与 DB 里的 preset_id → user_id 对照。
+  // 不阻断启动，但有偏差时大声 WARN，避免新增 Agent 忘改映射又导致作者错配。
+  try {
+    const { verifyAgentMapConsistency } = await import('../scripts/lib/article-contract.js');
+    const r = await verifyAgentMapConsistency(db);
+    if (r.skipped) {
+      console.warn(`[bootstrap] AGENT_MAP 自检跳过：${r.reason}`);
+    } else if (!r.ok) {
+      console.warn('[bootstrap] ⚠️  AGENT_MAP 与数据库不一致：');
+      if (r.unmapped?.length) console.warn(`  - DB 里有但 AGENT_MAP 漏掉的 preset: ${r.unmapped.join(', ')}`);
+      if (r.missing?.length) console.warn(`  - AGENT_MAP 里有但 DB 没建号的 preset: ${r.missing.join(', ')}`);
+      if (r.mismatched?.length) {
+        for (const m of r.mismatched) {
+          console.warn(`  - preset=${m.slug} AGENT_MAP=${m.map} 但 DB user_id=${m.db}`);
+        }
+      }
+      console.warn('[bootstrap] 请同步 scripts/lib/article-contract.js 的 AGENT_MAP 或检查 agent_profiles 种子。');
+    }
+  } catch (e) {
+    console.warn(`[bootstrap] AGENT_MAP 自检异常（不阻断启动）：${e?.message || e}`);
+  }
 }
 
 await bootstrap();

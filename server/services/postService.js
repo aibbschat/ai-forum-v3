@@ -15,13 +15,18 @@ export function computeContentHash({ agentId, title, content }) {
 }
 
 // DSH / Agent 发布文章：写入 posts 表（post_type='article', agent_id）+ 回写 agent_profiles。
-// payload: { title, content, agentId, category, tags, coverImage, readingTime, provenance, assets, idempotencyKey? }
+// payload: { title, content, agentId?, agentSlug?, category, tags, coverImage, readingTime, provenance, assets, idempotencyKey? }
+//   - agentId:   数字 user_id（调用方已知时）
+//   - agentSlug: preset_id 字符串（如 'tech'/'ai-eye'），后端按 agent_profiles 表解析，
+//                这是**首选方式**——MCP/外部脚本只记 slug，不硬编码易漂移的数字 id。
+//   两者至少给一个；都给时以 agentId 为准（并校验 slug 匹配，不匹配会 WARN）。
 // 幂等：同 agentId + 同 content_hash 在 24h 内只发一次，重复请求返回首次 post id（deduped=true）。
 export async function publishArticle(payload) {
-  const {
+  let {
     title,
     content,
     agentId,
+    agentSlug,
     category = '未分类',
     tags = [],
     coverImage = '',
@@ -31,22 +36,53 @@ export async function publishArticle(payload) {
     thinkingSnippet = '',
   } = payload;
 
-  if (!title || !content || !agentId) {
+  // ── agentId / agentSlug 解析：以后端 agent_profiles 表为唯一真相源 ──
+  let agent;
+  if (agentId) {
+    agent = await db.get(
+      `SELECT u.id AS user_id, p.preset_id
+         FROM users u JOIN agent_profiles p ON p.user_id = u.id
+        WHERE u.id = ?`,
+      [agentId]
+    );
+    if (!agent) {
+      const e = new Error('unknown_agent');
+      e.status = 400;
+      throw e;
+    }
+    if (agentSlug && agent.preset_id !== agentSlug) {
+      console.warn(
+        `[postService] agentId/agentSlug 不匹配: id=${agentId} 的 preset_id=${agent.preset_id}, 收到 slug=${agentSlug}（以 id 为准）`
+      );
+    }
+  } else if (agentSlug) {
+    agent = await db.get(
+      `SELECT u.id AS user_id, p.preset_id
+         FROM users u JOIN agent_profiles p ON p.user_id = u.id
+        WHERE p.preset_id = ?`,
+      [agentSlug]
+    );
+    if (!agent) {
+      const e = new Error(`unknown_agent_slug: ${agentSlug}`);
+      e.status = 400;
+      throw e;
+    }
+    agentId = agent.user_id;
+  } else {
+    const e = new Error('missing_fields: agentId or agentSlug required');
+    e.status = 400;
+    throw e;
+  }
+
+  if (!title || !content) {
     const e = new Error('missing_fields');
     e.status = 400;
     throw e;
   }
 
-  // 校验 agent 存在，并取出 preset_id（用于本体层 Agent 分类归一化）
-  const agent = await db.get(
-    `SELECT u.id, p.preset_id FROM users u JOIN agent_profiles p ON p.user_id = u.id WHERE u.id = ?`,
-    [agentId]
-  );
-  if (!agent) {
-    const e = new Error('unknown_agent');
-    e.status = 400;
-    throw e;
-  }
+  // 校验 agent 存在（agent 已在上面解析时取出；这里保留 preset_id 供分类归一化用）
+  // 重新格式化 agent 以兼容下面代码（它期望 {id, preset_id}）
+  agent = { id: agent.user_id, preset_id: agent.preset_id };
 
   // ── 跨进程幂等：同 agent + 同内容指纹 24h 内只发一次 ──
   // MCP 通路每次 headless 起新进程，MCP server 内的内存去重拦不住跨进程重试，

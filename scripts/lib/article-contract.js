@@ -169,13 +169,15 @@ export function validateDraftArticle(data) {
  *
  * @param {object} data
  * @param {object} ctx
- * @param {number} ctx.agentId      已解析的数字 agentId
- * @param {string} [ctx.agentSlug]  实际使用的 slug（来自 provenance.agent 或外部传入）
+ * @param {number} [ctx.agentId]    已解析的数字 agentId（可选；后端会按 agentSlug 解析）
+ * @param {string} [ctx.agentSlug]  实际使用的 slug（来自 provenance.agent 或外部传入；推荐只传这个）
  * @returns {object} 可直接 JSON.stringify 发去发布桥的 payload
  */
 export function buildPublishPayload(data, { agentId, agentSlug }) {
-  if (!agentId || !Number.isInteger(agentId)) {
-    throw new Error(`buildPublishPayload: agentId 非法 (${agentId})`);
+  // 新约定：只传 agentSlug，后端 publishArticle 按 agent_profiles 表解析 agentId。
+  // 仍兼容旧调用（同时传 agentId），但 agentId 不再是必填。
+  if ((!agentId || !Number.isInteger(agentId)) && !agentSlug) {
+    throw new Error('buildPublishPayload: 需要 agentId 或 agentSlug');
   }
   const prov = (data.provenance && typeof data.provenance === 'object') ? data.provenance : {};
   let snippet = typeof data.thinkingSnippet === 'string' ? data.thinkingSnippet.trim() : '';
@@ -184,7 +186,9 @@ export function buildPublishPayload(data, { agentId, agentSlug }) {
   return {
     title: String(data.title).trim(),
     content: String(data.content),
-    agentId,
+    // 只传已知的：有 id 传 id，没有就让后端按 slug 查（不要传 0/null）
+    ...(agentId ? { agentId } : {}),
+    agentSlug: agentSlug || (agentId ? String(agentId) : undefined),
     category: typeof data.category === 'string' && data.category.trim() ? data.category : '未分类',
     tags: Array.isArray(data.tags) ? data.tags.filter((t) => typeof t === 'string') : [],
     coverImage: typeof data.coverImage === 'string' ? data.coverImage : '',
@@ -202,19 +206,20 @@ export function buildPublishPayload(data, { agentId, agentSlug }) {
 }
 
 /**
- * 生成幂等键：同 agentId + 同标题 + 同正文 24h 内视为重复发布。
+ * 生成幂等键：同 agent + 同标题 + 同正文 24h 内视为重复发布。
+ * agent 可以是数字 id 或 slug 字符串（推荐用 slug，避免硬编码 id 漂移）。
  * 返回 64 字符 hex（sha256）。
  *
  * MCP 工具在调用发布桥前用此键让后端去重；文件交接通路也可以用它做预检查。
  *
- * @param {number} agentId
+ * @param {number|string} agentIdOrSlug
  * @param {object} data
  * @returns {string}
  */
-export async function idempotencyKey(agentId, data) {
+export async function idempotencyKey(agentIdOrSlug, data) {
   const title = (data.title || '').toString().trim();
   const content = (data.content || '').toString();
-  const payload = `${agentId}\n${title}\n${content}`;
+  const payload = `${agentIdOrSlug}\n${title}\n${content}`;
   // 使用 Node 20+ 全局 Web Crypto；如运行环境不支持则回退到 crypto.createHash
   if (globalThis.crypto && globalThis.crypto.subtle) {
     const buf = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload));
@@ -222,4 +227,43 @@ export async function idempotencyKey(agentId, data) {
   }
   const { createHash } = await import('node:crypto');
   return createHash('sha256').update(payload).digest('hex');
+}
+
+/**
+ * 启动时自检：对比 AGENT_MAP 与"真相源"（DB 中 agent_profiles.preset_id → users.id）。
+ *
+ * 为什么需要这个？
+ *   AGENT_MAP 是硬编码的 slug→id 兜底，曾经在 2026-08 新增 5 个 Agent 时漏更新，
+ *   导致 MCP 发文作者错配（ai-eye 的文章被归到 tech_observer 名下）。
+ *   现在发布通路已改成"传 agentSlug、后端查库"，AGENT_MAP 不再是热路径，
+ *   但为了防御未来新增 Agent 时又忘了同步，加一个启动时 WARN（不阻断启动）。
+ *
+ * @param {object} db  server/database/db.js 的 db 对象
+ * @returns {Promise<{ok: boolean, missing: string[], mismatched: Array<{slug, map, db}>}>}
+ */
+export async function verifyAgentMapConsistency(db) {
+  const missing = [];
+  const mismatched = [];
+  try {
+    const rows = await db.all(
+      `SELECT u.id AS user_id, ap.preset_id
+         FROM users u JOIN agent_profiles ap ON ap.user_id = u.id
+        WHERE ap.preset_id IS NOT NULL AND ap.preset_id <> ''`
+    );
+    const dbMap = new Map(rows.map((r) => [r.preset_id, Number(r.user_id)]));
+    for (const [slug, id] of Object.entries(AGENT_MAP)) {
+      if (!dbMap.has(slug)) {
+        // DB 里没这个 preset_id：可能是该 Agent 还没建号（测试环境），也可能是 map 过期
+        missing.push(slug);
+      } else if (dbMap.get(slug) !== id) {
+        mismatched.push({ slug, map: id, db: dbMap.get(slug) });
+      }
+    }
+    // 反方向：DB 里有但 AGENT_MAP 没有 → 新增 Agent 时漏加映射（最危险的情况）
+    const unmapped = [...dbMap.keys()].filter((s) => !(s in AGENT_MAP));
+    return { ok: missing.length === 0 && mismatched.length === 0 && unmapped.length === 0, missing, mismatched, unmapped };
+  } catch (e) {
+    // DB 不可用时不要让启动炸掉（开发环境可能还没跑迁移）
+    return { ok: true, skipped: true, reason: e?.message || String(e) };
+  }
 }

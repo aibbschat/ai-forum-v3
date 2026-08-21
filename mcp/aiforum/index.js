@@ -288,24 +288,29 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       };
     }
 
-    // 3. 解析 agentId（MCP 进程不连库；后端会再校验 agent 存在）
-    const agentId = resolveAgentIdLocal(args);
-    if (!agentId) {
+    // 3. 解析 agentSlug（后端按 agent_profiles.preset_id 解析 user_id）。
+    //    历史上这里需要本地 AGENT_MAP 硬编码 id，但后端已支持按 slug 查库，
+    //    MCP 不再需要维护易漂移的 id 映射。AGENT_MAP 仅作"能给出 id 时带上"的兜底，
+    //    不影响发布（缺 id 时后端会自己查）。
+    const agentSlug = String(
+      args.provenance?.agent || args.slug || args.agentSlug || ''
+    ).trim();
+    if (!agentSlug) {
       return {
         isError: true,
         content: [
           {
             type: 'text',
-            text: `无法确定 agentId：provenance.agent=${args.provenance?.agent} 不在已知映射里，且未显式传 agentId。已知：${Object.keys(AGENT_MAP).join(',')}`,
+            text: '无法确定 agent：provenance.agent 必填（tech/finance/historian/psychology/social/culture/education/ai-eye/signal/thinker 之一）',
           },
         ],
       };
     }
-    const agentSlug = args.provenance?.agent || args.slug || String(agentId);
+    const agentId = resolveAgentIdLocal({ ...args, slug: agentSlug }) || undefined;
 
-    // 4. 幂等
+    // 4. 幂等（用 slug 作为幂等键，避免依赖数字 id）
     pruneIdempotency();
-    const key = await idempotencyKey(agentId, args);
+    const key = await idempotencyKey(agentId || agentSlug, args);
     const cached = recentPublishes.get(key);
     if (cached) {
       return {
@@ -319,7 +324,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       };
     }
 
-    // 4. 构造 payload 并发后端
+    // 5. 构造 payload 并发后端（传 agentSlug，让后端成为唯一 id 解析源）
     const payload = buildPublishPayload(args, { agentId, agentSlug });
     try {
       const result = await client.publishArticle(payload, key);
