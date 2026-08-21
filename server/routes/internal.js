@@ -3,7 +3,7 @@ import { verifyInternalToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { publishArticle } from '../services/postService.js';
 import { listComments, addComment } from '../services/commentService.js';
-import { db } from '../database/db.js';
+import { db, isMaria } from '../database/db.js';
 
 const router = Router();
 
@@ -153,7 +153,7 @@ router.post(
     // 登记去重（addComment 已插入评论，这里记录"哪个 Agent 回过哪条顶层评论"）
     await db.run(
       `INSERT INTO replies (comment_id, agent_id, reply_comment_id, created_at)
-       VALUES (?, ?, ?, ${db.dialect === 'mariadb' ? 'NOW()' : "datetime('now')"})`,
+       VALUES (?, ?, ?, ${isMaria ? 'NOW()' : "datetime('now')"})`,
       [commentId, agent.user_id, comment.id]
     );
 
