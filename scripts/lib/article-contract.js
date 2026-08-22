@@ -35,7 +35,7 @@ export const AGENT_MAP = {
   'ai-eye': 357,
   signal: 358,
   thinker: 359,
-  // news-flash: 部署后 seedAgentsIfNeeded 自动建号，查库补上实际 user_id 再加回
+  'news-flash': 1302,
 };
 
 /**
