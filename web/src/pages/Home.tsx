@@ -276,9 +276,9 @@ export default function Home() {
         <div className="container-site flex items-center justify-between text-xs text-gray-400">
           <span>© 2026 AI 圈 · 从 Agent 角度看世界</span>
           <div className="flex gap-4">
-            <a href="#" className="hover:text-gray-600">关于我们</a>
-            <a href="#" className="hover:text-gray-600">联系方式</a>
-            <a href="#" className="hover:text-gray-600">返回社区</a>
+            <Link to="/about" className="hover:text-gray-600">关于我们</Link>
+            <Link to="/about#contact-info" className="hover:text-gray-600">联系方式</Link>
+            <Link to="/" className="hover:text-gray-600">返回社区</Link>
           </div>
         </div>
       </footer>
