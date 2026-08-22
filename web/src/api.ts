@@ -177,6 +177,13 @@ function authHeaders(): Record<string, string> {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
+/** 需要登录的 GET 请求（companion 等需鉴权接口） */
+async function authGet<T>(url: string): Promise<T> {
+  const res = await fetch(url, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`请求失败 ${res.status}: ${url}`);
+  return res.json() as Promise<T>;
+}
+
 async function post<T>(url: string, body: unknown, withAuth = false): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (withAuth) Object.assign(headers, authHeaders());
@@ -609,19 +616,19 @@ export function createCompanion(input: CompanionInput) {
 }
 
 export function listCompanions() {
-  return get<{ companions: Record<string, unknown>[] }>('/api/companions').then((r) => ({
+  return authGet<{ companions: Record<string, unknown>[] }>('/api/companions').then((r) => ({
     companions: r.companions.map((c) => normCompanion(c)),
   }));
 }
 
 export function getCompanion(id: number) {
-  return get<{ companion: Record<string, unknown> }>(`/api/companions/${id}`).then((r) => ({
+  return authGet<{ companion: Record<string, unknown> }>(`/api/companions/${id}`).then((r) => ({
     companion: normCompanion(r.companion),
   }));
 }
 
 export function getCompanionByUsername(username: string) {
-  return get<{ companion: Record<string, unknown> }>(
+  return authGet<{ companion: Record<string, unknown> }>(
     `/api/companions/u/${encodeURIComponent(username)}`
   ).then((r) => ({ companion: normCompanion(r.companion) }));
 }
@@ -676,7 +683,7 @@ function normMessage(raw: Record<string, unknown>): CompanionMessage {
 }
 
 export function listCompanionSessions(companionId: number) {
-  return get<{ sessions: Record<string, unknown>[] }>(`/api/companions/${companionId}/sessions`).then(
+  return authGet<{ sessions: Record<string, unknown>[] }>(`/api/companions/${companionId}/sessions`).then(
     (r) => ({ sessions: r.sessions.map(normSession) })
   );
 }
@@ -688,7 +695,7 @@ export function createCompanionSession(companionId: number) {
 }
 
 export function getCompanionMessages(sessionId: number) {
-  return get<{ messages: Record<string, unknown>[] }>(`/api/companions/sessions/${sessionId}/messages`).then(
+  return authGet<{ messages: Record<string, unknown>[] }>(`/api/companions/sessions/${sessionId}/messages`).then(
     (r) => ({ messages: r.messages.map(normMessage) })
   );
 }
@@ -732,7 +739,7 @@ function normDraft(raw: Record<string, unknown>): CompanionDraft {
 }
 
 export function listCompanionDrafts(companionId: number) {
-  return get<{ drafts: Record<string, unknown>[] }>(`/api/companions/${companionId}/drafts`).then((r) => ({
+  return authGet<{ drafts: Record<string, unknown>[] }>(`/api/companions/${companionId}/drafts`).then((r) => ({
     drafts: r.drafts.map(normDraft),
   }));
 }
@@ -744,7 +751,7 @@ export function createCompanionDraft(companionId: number, content: string) {
 }
 
 export function getCompanionDraft(draftId: number) {
-  return get<{ draft: Record<string, unknown> }>(`/api/companions/drafts/${draftId}`).then((r) => ({
+  return authGet<{ draft: Record<string, unknown> }>(`/api/companions/drafts/${draftId}`).then((r) => ({
     draft: normDraft(r.draft),
   }));
 }
