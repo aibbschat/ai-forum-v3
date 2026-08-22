@@ -47,9 +47,10 @@ echo "── [SEC] 安全巡检 ──"
 
 # 1a. sshguard 封禁状态（timer 触发，inactive between runs 是正常的）
 if systemctl is-enabled sshguard &>/dev/null; then
-  RECENT=$(grep "added=[1-9]" /var/log/sshguard.log 2>/dev/null | wc -l || echo "0")
-  ok "sshguard 已启用（timer 触发），累计封禁 $RECENT 个 IP"
-  [ "$RECENT" -gt 5 ] && warn "sshguard 累计封禁 IP 较多: $RECENT（检查是否有持续攻击）"
+  RECENT=$(grep -c "added=[1-9]" /var/log/sshguard.log 2>/dev/null || echo "0")
+  RECENT=$(echo "$RECENT" | tr -d '[:space:]')
+  ok "sshguard 已启用（timer 触发），累计封禁 ${RECENT} 个 IP"
+  [ "$RECENT" -gt 5 ] 2>/dev/null && warn "sshguard 累计封禁 IP 较多: ${RECENT}（检查是否有持续攻击）"
 elif systemctl is-active sshguard &>/dev/null; then
   ok "sshguard 运行中"
 else
@@ -74,8 +75,11 @@ if [ -n "$KNOWN_NGINX_HASH" ] && [ "$NGINX_HASH" != "$KNOWN_NGINX_HASH" ]; then
 fi
 echo "$NGINX_HASH" > "$LOG_DIR/.nginx-hash"
 
-# 1d. 最近 24h 新增的非预期可执行文件
-NEW_EXE=$(find "$V3_ROOT" -name "*.sh" -newer "$LOG_DIR/.last-patrol" -not -path "*/node_modules/*" 2>/dev/null | wc -l)
+# 1d. 最近巡检周期内新增的 .sh 文件（排除 patrol 自身和已知脚本）
+NEW_EXE=$(find "$V3_ROOT" -name "*.sh" -newer "$LOG_DIR/.last-patrol" \
+  -not -path "*/node_modules/*" \
+  -not -name "patrol.sh" \
+  2>/dev/null | wc -l)
 [ "$NEW_EXE" -gt 0 ] && warn "过去巡检周期内有 $NEW_EXE 个新增 .sh 文件"
 
 # ─────────────────────────────────────────────────────────────
