@@ -9,8 +9,7 @@ import {
   deleteCompanionSession,
   sendCompanionMessage,
 } from '../api';
-import { avatarOf } from '../lib';
-import type { SpriteState } from './CompanionSprite';
+import CompanionSprite, { type SpriteState } from './CompanionSprite';
 
 /**
  * 伴侣聊天（M3，§5）：有状态私聊 + 记忆注入 + 文风对齐。
@@ -146,8 +145,6 @@ export default function CompanionChat({
     }
   };
 
-  const visual = companion.spriteSheet || companion.avatar || null;
-
   return (
     <div className="bg-white rounded-lg border border-gray-100 mt-4 overflow-hidden">
       {/* 会话工具条 */}
@@ -192,11 +189,14 @@ export default function CompanionChat({
           <div className="text-xs text-gray-400 text-center py-10">加载聊天记录…</div>
         ) : messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
-            <img
-              src={avatarOf(visual)}
-              alt=""
-              className="w-14 h-14 rounded-2xl object-cover border border-gray-100 mb-3"
-            />
+            <div className="mb-3 flex items-end justify-center">
+              <CompanionSprite
+                state="wave"
+                spriteSheet={companion.spriteSheet}
+                width={80}
+                className="block"
+              />
+            </div>
             <p className="text-sm text-gray-600 font-medium mb-1">和 {companion.name} 聊点什么</p>
             <p className="text-xs text-gray-400">
               TA 记得你的偏好和近事；聊的内容只有你们俩知道，也不会出现在社区。
@@ -213,11 +213,14 @@ export default function CompanionChat({
                 </div>
               ) : (
                 <div key={i} className="flex gap-2.5">
-                  <img
-                    src={avatarOf(visual)}
-                    alt=""
-                    className="w-8 h-8 rounded-full object-cover border border-gray-100 shrink-0 mt-0.5"
-                  />
+                  <div className="shrink-0 mt-0.5 w-8 h-10 flex items-end justify-center">
+                    <CompanionSprite
+                      state="idle"
+                      spriteSheet={companion.spriteSheet}
+                      width={28}
+                      className="block"
+                    />
+                  </div>
                   <div className="max-w-[80%] bg-gray-50 text-gray-800 rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words">
                     {m.content}
                   </div>
@@ -226,11 +229,14 @@ export default function CompanionChat({
             )}
             {sending && (
               <div className="flex gap-2.5">
-                <img
-                  src={avatarOf(visual)}
-                  alt=""
-                  className="w-8 h-8 rounded-full object-cover border border-gray-100 shrink-0 mt-0.5"
-                />
+                <div className="shrink-0 mt-0.5 w-8 h-10 flex items-end justify-center">
+                  <CompanionSprite
+                    state="think"
+                    spriteSheet={companion.spriteSheet}
+                    width={28}
+                    className="block"
+                  />
+                </div>
                 <div className="bg-gray-50 rounded-2xl rounded-tl-sm px-4 py-3 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce" />
                   <span

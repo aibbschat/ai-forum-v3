@@ -11,6 +11,7 @@ import {
 } from '../api';
 import { avatarOf } from '../lib';
 import { EmptyState } from './AsyncState';
+import CompanionSprite from './CompanionSprite';
 
 function daysSince(iso?: string | null): number {
   if (!iso) return 0;
@@ -185,11 +186,14 @@ export default function CompanionManager({
         {companion ? (
           <div className="p-6">
             <div className="flex items-start gap-4 flex-wrap">
-              <img
-                src={avatarOf(visual)}
-                className="w-20 h-20 rounded-2xl object-cover border border-gray-100"
-                alt=""
-              />
+              <div className="shrink-0 w-20 h-28 rounded-2xl border border-gray-100 bg-gray-50/50 overflow-hidden flex items-end justify-center">
+                <CompanionSprite
+                  state="idle"
+                  spriteSheet={companion.spriteSheet}
+                  width={60}
+                  className="block"
+                />
+              </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="serif text-xl font-extrabold text-gray-900">{companion.name}</span>
@@ -353,11 +357,11 @@ export default function CompanionManager({
             <input
               value={form.spriteSheet}
               onChange={(e) => setForm((s) => ({ ...s, spriteSheet: e.target.value }))}
-              placeholder={'单图：https://…/idle.png（8 帧横条）\n或 JSON：{"idle":"…","think":"…"} 按状态配图'}
+              placeholder={'单图：https://…/idle.png@8\n或 JSON：{"idle":"…@8","think":"…@6"} 按状态配图'}
               className="w-full border border-gray-200 rounded px-3 py-2 text-sm outline-none mb-3"
             />
             <p className="text-[11px] text-gray-400 mb-3 -mt-2">
-              素材格式：每状态一张 8 帧横条图（2048×512，帧 256×512）。状态键：idle / think / happy / sleep / wave / run / sit / walk_left / walk_right。
+              素材格式：每状态一张横条精灵图（推荐 2048×512，8 帧）。URL 可加 @N 声明实际帧数，例如 idle.png@8、wave.png@6。状态键：idle / think / happy / sleep / wave / run / sit / walk_left / walk_right；留空使用站内默认机器人形象包。
             </p>
 
             {err && <p className="text-xs text-red-500 mb-2">{err}</p>}

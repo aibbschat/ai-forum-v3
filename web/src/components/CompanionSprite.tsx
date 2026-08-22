@@ -3,10 +3,13 @@ import { useEffect, useRef } from 'react';
 /**
  * 伴侣精灵播放器（§13.4 渲染引擎集成接口 / 多图策略）
  *
- * 素材约定：每个状态一张「8 帧横条精灵图」（2048×512，每帧 256×512，1 行 8 列）。
+ * 素材约定：每个状态一张「横条精灵图」。推荐 8 帧横条（2048×512，每帧 256×512），
+ * 但允许状态实际帧数不足 8 帧。URL 可加 `@N` 后缀显式声明帧数，例如：
+ *   /assets/companions/sprites/wave.png@6
+ *
  * sprite_sheet 字段两种填法：
- *   1. JSON：{ "idle": "/assets/.../idle.png", "think": "..." }（缺的状态回落默认形象包）
- *   2. 单 URL：所有状态共用一张图
+ *   1. JSON：{ "idle": "/assets/.../idle.png@8", "think": "..." }（缺的状态回落默认形象包）
+ *   2. 单 URL：所有状态共用一张图（可带 @N）
  *   3. 空：使用站内默认机器人形象包（/assets/companions/sprites/）
  */
 
@@ -34,30 +37,69 @@ export const DEFAULT_SPRITES: Record<SpriteState, string> = {
   walk_right: '/assets/companions/sprites/walk_right.png',
 };
 
+/** 默认包各状态实际帧数（由素材实测得到；idle 完整 8 帧，其余动作 6–7 帧） */
+export const DEFAULT_FRAMES: Partial<Record<SpriteState, number>> = {
+  idle: 8,
+  think: 6,
+  happy: 6,
+  sleep: 6,
+  wave: 6,
+  run: 6,
+  sit: 6,
+  walk_left: 7,
+  walk_right: 7,
+};
+
 /** 播完一轮自动回落的状态（如入场挥手 → 待机） */
 const ONE_SHOT_FALLBACK: Partial<Record<SpriteState, SpriteState>> = {
   wave: 'idle',
 };
 
-/** 解析 sprite_sheet 字段 → 状态到图片 URL 的映射 */
-export function parseSpriteSheet(raw?: string | null): Record<SpriteState, string> {
-  if (!raw) return DEFAULT_SPRITES;
+export interface SpriteFrameConfig {
+  url: string;
+  frames: number;
+}
+
+function parseFrameUrl(raw: string): SpriteFrameConfig {
+  const m = raw.match(/^(.*)@(\d+)$/);
+  if (m) {
+    const frames = Math.max(1, parseInt(m[2], 10));
+    return { url: m[1].trim(), frames };
+  }
+  return { url: raw.trim(), frames: 8 };
+}
+
+/** 解析 sprite_sheet 字段 → 状态到（图片 URL + 实际帧数）的映射 */
+export function parseSpriteSheet(raw?: string | null): Record<SpriteState, SpriteFrameConfig> {
+  const defaults: Record<SpriteState, SpriteFrameConfig> = Object.fromEntries(
+    (Object.keys(DEFAULT_SPRITES) as SpriteState[]).map((k) => [
+      k,
+      { url: DEFAULT_SPRITES[k], frames: DEFAULT_FRAMES[k] ?? 8 },
+    ])
+  ) as Record<SpriteState, SpriteFrameConfig>;
+
+  if (!raw) return defaults;
   const s = raw.trim();
   if (s.startsWith('{')) {
     try {
       const obj = JSON.parse(s) as Record<string, string>;
-      return { ...DEFAULT_SPRITES, ...(obj as Partial<Record<SpriteState, string>>) };
+      const out = { ...defaults };
+      (Object.keys(obj) as SpriteState[]).forEach((k) => {
+        if (obj[k] != null) out[k] = parseFrameUrl(obj[k]);
+      });
+      return out;
     } catch {
-      return DEFAULT_SPRITES;
+      return defaults;
     }
   }
   // 单 URL：全部状态共用
-  const all = {} as Record<SpriteState, string>;
-  (Object.keys(DEFAULT_SPRITES) as SpriteState[]).forEach((k) => (all[k] = s));
+  const cfg = parseFrameUrl(s);
+  const all = {} as Record<SpriteState, SpriteFrameConfig>;
+  (Object.keys(DEFAULT_SPRITES) as SpriteState[]).forEach((k) => (all[k] = cfg));
   return all;
 }
 
-const COLS = 8; // 素材为 8 帧横条
+const COLS = 8; // 素材总列数（2048px / 8 = 256px/帧），实际播放帧数由 cfg.frames 决定
 const FRAME_MS = 125; // 8 fps
 
 interface Props {
@@ -107,13 +149,14 @@ export default function CompanionSprite({
     };
 
     // 预热全部状态图（切换状态零延迟）
-    Object.values(mapping).forEach((url) => getSheet(url));
+    Object.values(mapping).forEach((cfg) => getSheet(cfg.url));
 
     const draw = () => {
       if (disposed) return;
       const effective = overrideRef.current ?? stateRef.current;
-      const url = mapping[effective] || mapping.idle;
-      const img = url ? getSheet(url) : null;
+      const cfg = mapping[effective] || mapping.idle;
+      const img = cfg.url ? getSheet(cfg.url) : null;
+      const frameCount = cfg.frames;
 
       if (img) {
         const fw = Math.floor(img.naturalWidth / COLS);
@@ -127,7 +170,7 @@ export default function CompanionSprite({
             canvas.style.width = `${width}px`;
             canvas.style.height = `${dispH}px`;
           }
-          const frame = frameRef.current % COLS;
+          const frame = frameRef.current % frameCount;
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           ctx.drawImage(
             img,
@@ -140,7 +183,7 @@ export default function CompanionSprite({
             canvas.width,
             canvas.height
           );
-          frameRef.current = (frame + 1) % COLS;
+          frameRef.current = (frame + 1) % frameCount;
           // 一轮播完 → 一次性状态回落
           if (frameRef.current === 0) {
             const fb = ONE_SHOT_FALLBACK[effective];
