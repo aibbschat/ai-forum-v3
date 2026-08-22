@@ -6,13 +6,16 @@ import {
   AuthUser,
   Conversation,
   DMessage,
+  MentionUser,
   listConversations,
   getMessageThread,
   sendMessage,
   markMessagesRead,
+  searchUsers,
+  getUserProfile,
 } from '../api';
 import Nav from '../components/Nav';
-import { timeAgo } from '../lib';
+import { timeAgo, avatarOf } from '../lib';
 import { EmptyState } from '../components/AsyncState';
 
 export default function Messages() {
@@ -27,9 +30,48 @@ export default function Messages() {
   const [sending, setSending] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // 发起新私信（M6 §8.2①）：用户名/昵称搜索 → 选人起会话
+  const [newOpen, setNewOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<MentionUser[]>([]);
+  const [searching, setSearching] = useState(false);
+  // 会话列表外的对象（新发起的会话）→ 头部显示名
+  const [nameCache, setNameCache] = useState<Record<number, string>>({});
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     if (getToken()) fetchMe().then(setMe).catch(() => {});
   }, []);
+
+  // 防抖搜索用户
+  useEffect(() => {
+    if (!newOpen) return;
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (!query.trim()) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    searchTimer.current = setTimeout(() => {
+      searchUsers(query.trim())
+        .then((r) => setResults(r.users))
+        .catch(() => setResults([]))
+        .finally(() => setSearching(false));
+    }, 200);
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    };
+  }, [query, newOpen]);
+
+  // 会话列表里找不到的对象（如 ?to= 直达）→ 拉资料补头部显示名
+  useEffect(() => {
+    if (!activeId) return;
+    if (conversations.some((c) => c.user.id === activeId) || nameCache[activeId]) return;
+    getUserProfile(activeId)
+      .then((p) => setNameCache((prev) => ({ ...prev, [activeId]: p.user.nickname || `用户 ${activeId}` })))
+      .catch(() => {});
+  }, [activeId, conversations, nameCache]);
 
   const refreshConversations = useCallback(() => {
     if (!getToken()) return;
@@ -50,6 +92,14 @@ export default function Messages() {
     setParams({ to: String(id) }, { replace: true });
     refreshThread(id);
     markMessagesRead(id).catch(() => {});
+  };
+
+  const startChatWith = (u: MentionUser) => {
+    setNameCache((prev) => ({ ...prev, [u.id]: u.nickname || u.username }));
+    setNewOpen(false);
+    setQuery('');
+    setResults([]);
+    openThread(u.id);
   };
 
   useEffect(() => {
@@ -108,10 +158,62 @@ export default function Messages() {
         <div className="bg-white rounded-lg border border-gray-100 flex overflow-hidden" style={{ height: '70vh' }}>
           {/* 会话列表 */}
           <aside className="w-72 border-r border-gray-100 overflow-y-auto shrink-0">
-            <div className="px-4 py-3 border-b border-gray-100 text-sm font-bold text-gray-900">私信</div>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+              <span className="text-sm font-bold text-gray-900">私信</span>
+              <button
+                type="button"
+                onClick={() => setNewOpen((v) => !v)}
+                className="w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+                aria-label="发起新私信"
+                title="发起新私信"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={newOpen ? 'M6 18L18 6M6 6l12 12' : 'M12 4v16m8-8H4'} />
+                </svg>
+              </button>
+            </div>
+            {newOpen && (
+              <div className="border-b border-gray-100 p-3">
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="输入昵称或用户名搜索…"
+                  className="w-full border border-gray-200 rounded-full px-3.5 py-1.5 text-sm outline-none focus:border-gray-400"
+                />
+                <div className="mt-2 max-h-56 overflow-y-auto">
+                  {searching ? (
+                    <div className="py-2 text-center text-xs text-gray-400">搜索中…</div>
+                  ) : results.length === 0 ? (
+                    <div className="py-2 text-center text-xs text-gray-400">
+                      {query.trim() ? '没有找到用户' : '输入昵称或用户名'}
+                    </div>
+                  ) : (
+                    results.map((u) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => startChatWith(u)}
+                        disabled={u.id === me?.id}
+                        className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left hover:bg-gray-50 transition-colors disabled:opacity-40"
+                      >
+                        <img src={avatarOf(u.avatar)} className="w-7 h-7 rounded-full" alt="" />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-semibold text-gray-900 truncate">{u.nickname || u.username}</div>
+                          <div className="text-[11px] text-gray-400 truncate">@{u.username}</div>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
             {conversations.length === 0 ? (
               <div className="p-4">
-                <EmptyState title="还没有会话。" hint="在用户主页点击「发私信」开始。" />
+                <EmptyState
+                  title="还没有会话。"
+                  hint="点右上角「+」搜索用户名，直接发第一条私信。"
+                />
               </div>
             ) : (
               conversations.map((c) => (
@@ -144,7 +246,7 @@ export default function Messages() {
             {activeId ? (
               <>
                 <div className="px-5 py-3 border-b border-gray-100 text-sm font-semibold text-gray-900">
-                  {conversations.find((c) => c.user.id === activeId)?.user.name || '会话'}
+                  {conversations.find((c) => c.user.id === activeId)?.user.name || nameCache[activeId] || '会话'}
                 </div>
                 <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
                   {thread.map((m) => {

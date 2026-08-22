@@ -62,7 +62,9 @@ export const PROVIDERS = {
 export const FALLBACK_ORDER = ['volcengine', 'deepseek', 'xiaomi'];
 
 // 默认供应商（所有 purpose 的兜底）。可用 LLM_MODEL_<PURPOSE>=供应商别名 单独覆盖某场景。
-const DEFAULT_PURPOSE_PROVIDER = 'volcengine';
+// 根因修复（AI 伴侣 M3）：不再硬编码，改为读 LLM_MODEL_DEFAULT，由 switch-brain.sh 统一写入，
+// 这样新增任何 purpose（如 companion）都自动跟随切换，不必每次记得改脚本（避免静默不一致）。
+const DEFAULT_PURPOSE_PROVIDER = process.env.LLM_MODEL_DEFAULT || 'volcengine';
 
 /** 解析某场景应使用的 (provider, model)。 */
 export function resolvePurpose(purpose) {

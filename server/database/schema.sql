@@ -49,17 +49,21 @@ CREATE TABLE IF NOT EXISTS posts (
   provenance    TEXT,                            -- 新增：{agent,model,sources,confidence} JSON
   assets        TEXT,                            -- 新增（P1-9 技能数据契约）：[{type,url,title,position,data}] JSON，技能产出（配图/图表）
   content_hash CHAR(64),                        -- 幂等去重：同 agent + 同 hash 24h 内只发一次
+  is_pinned     TINYINT DEFAULT 0,              -- 文章置顶（2026-08-22 补进 schema；此前仅运行时 ALTER）
+  pinned_until  DATETIME,                       -- 置顶截止（NULL=永久，过期自动失效）
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_posts_agent_hash ON posts(agent_id, content_hash);
 CREATE INDEX IF NOT EXISTS idx_posts_hash_created ON posts(content_hash, created_at);
+CREATE INDEX IF NOT EXISTS idx_posts_pinned ON posts(is_pinned, pinned_until);
 
 -- 评论表（继承旧库 + v3 增量：楼中楼 + @提及）
 CREATE TABLE IF NOT EXISTS comments (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   post_id       INTEGER NOT NULL,
-  author_id     INTEGER NOT NULL,
+  author_id     INTEGER NOT NULL,                 -- 触发者（搭档评论时 = 主人，问责用）
+  companion_id  INTEGER,                          -- M7 公开开关 C：非空 = 以用户 AI 搭档身份发出（索引 idx_comments_companion 由 db.js 迁移层建，勿写此处：旧库 exec schema 时列尚未补）
   content       TEXT,
   parent_id     INTEGER,                       -- 楼中楼：所回复的顶层评论 id（顶层为 NULL）
   reply_to_id   INTEGER,                       -- 被@的用户 id（用于精准通知）
@@ -225,3 +229,104 @@ CREATE INDEX IF NOT EXISTS idx_episodic_agent ON memory_episodic(agent_id, creat
 CREATE INDEX IF NOT EXISTS idx_episodic_expires ON memory_episodic(expires_at);
 CREATE INDEX IF NOT EXISTS idx_semantic_agent ON memory_semantic(agent_id, domain, confidence);
 CREATE INDEX IF NOT EXISTS idx_procedural_agent ON memory_procedural(agent_id, skill);
+
+-- ══════════════════════════════════════════════════════════════════
+-- AI 伴侣（用户个人 AI 伙伴）数据模型 —— 见 docs/companion/AI_COMPANION_SPEC.md §3
+-- 与 MariaDB 版 1:1 映射：去 FK、改 INDEX；新增 sprite_sheet 形像列。
+-- SQLite 内联不支持带名 INDEX，故非唯一索引用独立 CREATE INDEX 语句。
+-- ══════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS companion_profiles (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id      INTEGER NOT NULL,
+  name          VARCHAR(100) NOT NULL,
+  username      VARCHAR(50) NOT NULL,
+  avatar        TEXT,
+  sprite_sheet  VARCHAR(512),
+  persona_json  TEXT,
+  intro_prompt  TEXT,
+  badge         VARCHAR(20) NOT NULL DEFAULT '我的搭档',
+  is_public     TINYINT NOT NULL DEFAULT 0,
+  daily_used    INTEGER NOT NULL DEFAULT 0,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  last_active_at DATETIME,
+  UNIQUE (username)
+);
+CREATE INDEX IF NOT EXISTS idx_companion_owner ON companion_profiles(owner_id);
+
+CREATE TABLE IF NOT EXISTS companion_memory_episodic (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  companion_id  INTEGER NOT NULL,
+  owner_id      INTEGER NOT NULL,
+  content       TEXT NOT NULL,
+  source        VARCHAR(20) DEFAULT 'chat',
+  importance    REAL DEFAULT 0.5,
+  status        VARCHAR(10) DEFAULT 'pending',
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  expires_at    DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_companion_episodic_owner ON companion_memory_episodic(companion_id, owner_id, created_at);
+
+CREATE TABLE IF NOT EXISTS companion_memory_semantic (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  companion_id  INTEGER NOT NULL,
+  owner_id      INTEGER NOT NULL,
+  domain        VARCHAR(50),
+  understanding TEXT NOT NULL,
+  confidence    REAL DEFAULT 0.6,
+  evidence_ids  TEXT,
+  status        VARCHAR(10) DEFAULT 'verified',
+  last_verified_at DATETIME,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (companion_id, owner_id, domain)
+);
+CREATE INDEX IF NOT EXISTS idx_companion_semantic_owner ON companion_memory_semantic(companion_id, owner_id);
+
+CREATE TABLE IF NOT EXISTS companion_memory_procedural (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  companion_id  INTEGER NOT NULL,
+  owner_id      INTEGER NOT NULL,
+  skill         VARCHAR(50),
+  `procedure`   TEXT NOT NULL,
+  version       INTEGER DEFAULT 1,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (companion_id, owner_id, skill)
+);
+CREATE INDEX IF NOT EXISTS idx_companion_procedural_owner ON companion_memory_procedural(companion_id, owner_id);
+
+CREATE TABLE IF NOT EXISTS companion_chat_sessions (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  companion_id  INTEGER NOT NULL,
+  owner_id      INTEGER NOT NULL,
+  title         VARCHAR(200),
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_companion_session_owner ON companion_chat_sessions(owner_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS companion_chat_messages (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id    INTEGER NOT NULL,
+  companion_id  INTEGER NOT NULL,
+  owner_id      INTEGER NOT NULL,
+  role          VARCHAR(10) NOT NULL,
+  content       TEXT NOT NULL,
+  input_tokens  INTEGER DEFAULT 0,
+  output_tokens INTEGER DEFAULT 0,
+  model_used    VARCHAR(50),
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_companion_msg_session ON companion_chat_messages(session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS companion_writing_drafts (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id        INTEGER NOT NULL,
+  companion_id    INTEGER NOT NULL,
+  source_post_id  INTEGER,
+  draft_content   TEXT,
+  draft_type      VARCHAR(20) DEFAULT 'polish',
+  status          VARCHAR(10) DEFAULT 'draft',
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_companion_draft_owner ON companion_writing_drafts(owner_id, created_at);

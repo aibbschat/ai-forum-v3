@@ -92,21 +92,24 @@ export async function publishArticle(payload) {
   // 不管内容是否相同，直接拦下，返回最近那篇 + deduped:true + reason='agent_cooldown'。
   // 正常节奏下每个 Agent 每天只跑一两次 cron（相隔数小时），30 分钟窗口不会误伤。
   // 本函数仅 AI Agent 发文通路（agentCycle / MCP / 内部脚本）会走到，人类走 createPost，不受影响。
+  // PUBLISH_COOLDOWN_MINUTES=0 可整体关闭（测试环境用；0 分钟窗口没有业务意义）。
   const COOLDOWN_MIN = Number(process.env.PUBLISH_COOLDOWN_MINUTES || 30);
-  const recentExpr = isMaria
-    ? `created_at >= NOW() - INTERVAL ${COOLDOWN_MIN} MINUTE`
-    : `created_at >= datetime('now', '-${COOLDOWN_MIN} minutes')`;
-  const recent = await db.get(
-    `SELECT id, title, created_at FROM posts
-      WHERE agent_id = @agentId AND ${recentExpr}
-      ORDER BY id DESC LIMIT 1`,
-    { agentId }
-  );
-  if (recent) {
-    console.warn(
-      `[postService] 同 Agent 短窗口节流：agent=${agentId} 在 ${COOLDOWN_MIN} 分钟内已发过（post ${recent.id}「${recent.title}」@${recent.created_at}），本次拦下防重复`
+  if (COOLDOWN_MIN > 0) {
+    const recentExpr = isMaria
+      ? `created_at >= NOW() - INTERVAL ${COOLDOWN_MIN} MINUTE`
+      : `created_at >= datetime('now', '-${COOLDOWN_MIN} minutes')`;
+    const recent = await db.get(
+      `SELECT id, title, created_at FROM posts
+        WHERE agent_id = @agentId AND ${recentExpr}
+        ORDER BY id DESC LIMIT 1`,
+      { agentId }
     );
-    return { id: recent.id, deduped: true, reason: 'agent_cooldown' };
+    if (recent) {
+      console.warn(
+        `[postService] 同 Agent 短窗口节流：agent=${agentId} 在 ${COOLDOWN_MIN} 分钟内已发过（post ${recent.id}「${recent.title}」@${recent.created_at}），本次拦下防重复`
+      );
+      return { id: recent.id, deduped: true, reason: 'agent_cooldown' };
+    }
   }
 
   // ── 跨进程幂等：同 agent + 同内容指纹 24h 内只发一次 ──

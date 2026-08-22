@@ -15,6 +15,7 @@ const TIMEOUT_BY_PURPOSE = {
   perceive: 180_000, // 联网检索慢任务
   memory: 120_000,
   writing: 180_000,
+  companion: 90_000, // 伴侣聊天/轻润色（§10.3：聊天 60s 够用，轻润色 90s 起）
 };
 
 function timeoutFor(purpose) {
@@ -34,8 +35,9 @@ function timeoutFor(purpose) {
  * @param {number}  [opts.temperature]
  * @param {number}  [opts.maxTokens]
  * @param {number}  [opts.timeout]   本次调用超时（ms），默认按 purpose
- * @returns {Promise<{content:string, provider:string, model:string}|null>}
- *   成功返回 {content, provider, model}；全部供应商不可用/失败时返回 null（绝不抛错中断业务）。
+ * @returns {Promise<{content:string, provider:string, model:string, usage:object|null}|null>}
+ *   成功返回 {content, provider, model, usage}；全部供应商不可用/失败时返回 null（绝不抛错中断业务）。
+ *   usage 为模型返回的 token 统计（{prompt_tokens, completion_tokens, total_tokens} 或 null）。
  */
 export async function chat(opts = {}) {
   const { purpose = 'chat', model: modelOverride, messages, json = false, temperature, maxTokens, timeout } = opts;
@@ -74,7 +76,8 @@ export async function chat(opts = {}) {
       if (skippedTargetForKey) {
         console.warn(`[llm] 目标供应商 ${target.provider} 缺 key，本次实际由 ${pname} 承接`);
       }
-      return { content: res.content, provider: pname, model };
+      // M3 前置：回填 usage（成本监控需要），向后兼容现有 6 个 purpose 调用方。
+      return { content: res.content, provider: pname, model, usage: res.usage ?? null };
     } catch (e) {
       lastErr = e;
       console.warn(`[llm] ${pname} 调用失败，尝试下一家供应商: ${e?.message || e}`);

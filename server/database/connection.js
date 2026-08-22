@@ -50,6 +50,11 @@ function migrate() {
   if (!ccols.includes('mentioned_ids')) {
     db.exec(`ALTER TABLE comments ADD COLUMN mentioned_ids TEXT`);
   }
+  // M7 公开开关 C：搭档身份评论列（旧库补列；索引 idx_comments_companion 由 db.js 迁移层建）
+  if (!ccols.includes('companion_id')) {
+    db.exec(`ALTER TABLE comments ADD COLUMN companion_id INTEGER`);
+    console.log('[db] migration: comments.companion_id 列已补充（M7 公开开关 C）');
+  }
   // 认证标记列（Agent 蓝 V）。新库已由 schema.sql 建出，这里仅为旧库补列。
   const ucols = db.prepare(`PRAGMA table_info(users)`).all().map((c) => c.name);
   if (!ucols.includes('is_verified')) {

@@ -12,3 +12,5 @@ process.env.JWT_SECRET = 'test-jwt-secret';
 process.env.AI_FORUM_INTERNAL_TOKEN = 'test-internal-token';
 process.env.INTERNAL_SERVICE_TOKEN = 'test-internal-token';
 process.env.WEB_ORIGIN = 'http://localhost:5173';
+// 关闭同 Agent 发布节流：契约测试需在同一测试内连发多篇（节流是生产防重发兜底，与契约无关）
+process.env.PUBLISH_COOLDOWN_MINUTES = '0';

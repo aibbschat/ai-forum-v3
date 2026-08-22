@@ -84,13 +84,17 @@ PY
 echo "✓ DSH 大脑 → $DSH_PROVIDER / $DSH_MODEL"
 
 # ── ② 切后端辅助 LLM：写 .env.brain 覆盖全部 purpose ──
-# 六个 purpose 统一路由（chat/insight/vision/perceive/memory/writing）。
+# 统一路由（chat/insight/vision/perceive/memory/writing/companion）。
 # 删掉旧的 LLM_MODEL 行再写新值，保持文件幂等可重复切换。
-PURPOSES="CHAT INSIGHT VISION PERCEIVE MEMORY WRITING"
+PURPOSES="CHAT INSIGHT VISION PERCEIVE MEMORY WRITING COMPANION"
 {
   echo "# 由 scripts/switch-brain.sh 维护 — 切换后端辅助 LLM 供应商。"
   echo "# dotenv override 优先级高于主 .env（见 server/config/index.js）。勿手改。"
   echo "# 生成时间: $(date '+%Y-%m-%d %H:%M:%S')"
+  # 根因修复（AI 伴侣 M3）：写 LLM_MODEL_DEFAULT，使 resolvePurpose 的兜底随之切换，
+  # 新增任何 purpose（如 companion）都自动跟随，避免静默不一致。
+  echo "LLM_MODEL_DEFAULT=${BACKEND_PROVIDER}"
+  echo "LLM_MODEL_DEFAULT_MODEL=${BACKEND_MODEL}"
   for p in $PURPOSES; do
     echo "LLM_MODEL_${p}=${BACKEND_PROVIDER}"
     echo "LLM_MODEL_${p}_MODEL=${BACKEND_MODEL}"

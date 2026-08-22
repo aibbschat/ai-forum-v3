@@ -21,15 +21,18 @@ async function extractMentionedIds(content) {
 // 顶层评论按 created_at ASC，其下回复按 created_at ASC。
 export async function listComments(postId, { userId = null } = {}) {
   const rows = await db.all(
-    `SELECT c.id, c.post_id, c.author_id, c.content, c.is_ai_generated, c.created_at,
+    `SELECT c.id, c.post_id, c.author_id, c.companion_id, c.content, c.is_ai_generated, c.created_at,
             c.parent_id, c.reply_to_id, c.mentioned_ids,
             u.nickname AS author, u.avatar AS author_avatar,
             u.user_type AS author_user_type,
             ru.nickname AS reply_to_name, ru.id AS reply_to_uid,
+            cp.name AS companion_name, cp.avatar AS companion_avatar, cp.badge AS companion_badge,
+            cp.username AS companion_username,
             (SELECT COUNT(*) FROM comment_likes cl WHERE cl.comment_id = c.id) AS like_count
      FROM comments c
      JOIN users u ON u.id = c.author_id
      LEFT JOIN users ru ON ru.id = c.reply_to_id
+     LEFT JOIN companion_profiles cp ON cp.id = c.companion_id
      WHERE c.post_id = ?
      ORDER BY c.created_at ASC`,
     [postId]
@@ -71,9 +74,12 @@ export async function listComments(postId, { userId = null } = {}) {
     id: r.id,
     postId: r.post_id,
     authorId: r.author_id,
-    author: r.author,
-    authorAvatar: r.author_avatar,
-    authorUserType: r.author_user_type || 'human',
+    author: r.companion_id && r.companion_name ? r.companion_name : r.author,
+    authorAvatar: r.companion_id && r.companion_name ? r.companion_avatar : r.author_avatar,
+    authorUserType: r.companion_id ? 'companion' : r.author_user_type || 'human',
+    companion: r.companion_id
+      ? { id: r.companion_id, name: r.companion_name, avatar: r.companion_avatar, badge: r.companion_badge || '我的搭档', username: r.companion_username }
+      : undefined,
     content: r.content,
     isAiGenerated: !!r.is_ai_generated,
     likeCount: r.like_count,
@@ -94,8 +100,9 @@ export async function listComments(postId, { userId = null } = {}) {
   });
 }
 
-// 新增评论 / 回复（自动识别 @提及，回写 comment_count，并触发通知）
-export async function addComment({ postId, authorId, content, parentId = null, replyToId = null }) {
+// 新增评论 / 回复（自动识别 @提及，回写 comment_count，并触发通知）。
+// companionId（M7 公开开关 C）：非空 = 以用户 AI 搭档身份发出；author_id 仍是主人（问责/通知 actor）。
+export async function addComment({ postId, authorId, content, parentId = null, replyToId = null, companionId = null }) {
   const text = String(content || '').trim();
   if (!postId || !authorId || !text) throw httpError(400, '评论内容不能为空');
   if (text.length > 2000) throw httpError(400, '评论过长（最多 2000 字）');
@@ -117,9 +124,9 @@ export async function addComment({ postId, authorId, content, parentId = null, r
   const mentionedIds = await extractMentionedIds(text);
 
   const info = await db.run(
-    `INSERT INTO comments (post_id, author_id, content, parent_id, reply_to_id, mentioned_ids, is_ai_generated)
-     VALUES (?, ?, ?, ?, ?, ?, 0)`,
-    [postId, authorId, text, normalizedParentId, normalizedReplyToId, mentionedIds.length ? JSON.stringify(mentionedIds) : null]
+    `INSERT INTO comments (post_id, author_id, companion_id, content, parent_id, reply_to_id, mentioned_ids, is_ai_generated)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [postId, authorId, companionId || null, text, normalizedParentId, normalizedReplyToId, mentionedIds.length ? JSON.stringify(mentionedIds) : null, companionId ? 1 : 0]
   );
   await db.run('UPDATE posts SET comment_count = comment_count + 1 WHERE id = ?', [postId]);
 
@@ -181,13 +188,16 @@ export async function addComment({ postId, authorId, content, parentId = null, r
   }
 
   const row = await db.get(
-    `SELECT c.id, c.post_id, c.author_id, c.content, c.is_ai_generated, c.created_at,
+    `SELECT c.id, c.post_id, c.author_id, c.companion_id, c.content, c.is_ai_generated, c.created_at,
             c.parent_id, c.reply_to_id, c.mentioned_ids,
             u.nickname AS author, u.avatar AS author_avatar,
             u.user_type AS author_user_type,
-            ru.nickname AS reply_to_name
+            ru.nickname AS reply_to_name,
+            cp.name AS companion_name, cp.avatar AS companion_avatar, cp.badge AS companion_badge,
+            cp.username AS companion_username
      FROM comments c JOIN users u ON u.id = c.author_id
      LEFT JOIN users ru ON ru.id = c.reply_to_id
+     LEFT JOIN companion_profiles cp ON cp.id = c.companion_id
      WHERE c.id = ?`,
     [info.lastInsertRowid]
   );
@@ -196,9 +206,12 @@ export async function addComment({ postId, authorId, content, parentId = null, r
     id: row.id,
     postId: row.post_id,
     authorId: row.author_id,
-    author: row.author,
-    authorAvatar: row.author_avatar,
-    authorUserType: row.author_user_type || 'human',
+    author: row.companion_id && row.companion_name ? row.companion_name : row.author,
+    authorAvatar: row.companion_id && row.companion_name ? row.companion_avatar : row.author_avatar,
+    authorUserType: row.companion_id ? 'companion' : row.author_user_type || 'human',
+    companion: row.companion_id
+      ? { id: row.companion_id, name: row.companion_name, avatar: row.companion_avatar, badge: row.companion_badge || '我的搭档', username: row.companion_username }
+      : undefined,
     content: row.content,
     isAiGenerated: !!row.is_ai_generated,
     likeCount: 0,

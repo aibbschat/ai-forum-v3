@@ -335,6 +335,104 @@ export const db = {
         INDEX idx_so_status (status),
         INDEX idx_so_created (created_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      // ── AI 伴侣（用户个人 AI 伙伴）：companion 全表，见 docs/companion/AI_COMPANION_SPEC.md §3 ──
+      await db.run(`CREATE TABLE IF NOT EXISTS companion_profiles (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        owner_id INT NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        username VARCHAR(50) NOT NULL,
+        avatar LONGTEXT,
+        sprite_sheet VARCHAR(512),
+        persona_json LONGTEXT,
+        intro_prompt LONGTEXT,
+        badge VARCHAR(20) NOT NULL DEFAULT '我的搭档',
+        is_public TINYINT(1) NOT NULL DEFAULT 0,
+        daily_used INT NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        last_active_at DATETIME,
+        UNIQUE KEY uk_companion_username (username),
+        INDEX idx_companion_owner (owner_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+      await db.run(`CREATE TABLE IF NOT EXISTS companion_memory_episodic (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        companion_id INT NOT NULL,
+        owner_id INT NOT NULL,
+        content LONGTEXT NOT NULL,
+        source VARCHAR(20) DEFAULT 'chat',
+        importance DOUBLE DEFAULT 0.5,
+        status VARCHAR(10) DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        expires_at DATETIME,
+        INDEX idx_companion_episodic_owner (companion_id, owner_id, created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+      await db.run(`CREATE TABLE IF NOT EXISTS companion_memory_semantic (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        companion_id INT NOT NULL,
+        owner_id INT NOT NULL,
+        domain VARCHAR(50),
+        understanding LONGTEXT NOT NULL,
+        confidence DOUBLE DEFAULT 0.6,
+        evidence_ids TEXT,
+        status VARCHAR(10) DEFAULT 'verified',
+        last_verified_at DATETIME,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_companion_semantic (companion_id, owner_id, domain),
+        INDEX idx_companion_semantic_owner (companion_id, owner_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+      await db.run(`CREATE TABLE IF NOT EXISTS companion_memory_procedural (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        companion_id INT NOT NULL,
+        owner_id INT NOT NULL,
+        skill VARCHAR(50),
+        \`procedure\` LONGTEXT NOT NULL,
+        version INT DEFAULT 1,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_companion_procedural (companion_id, owner_id, skill),
+        INDEX idx_companion_procedural_owner (companion_id, owner_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+      await db.run(`CREATE TABLE IF NOT EXISTS companion_chat_sessions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        companion_id INT NOT NULL,
+        owner_id INT NOT NULL,
+        title VARCHAR(200),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_companion_session_owner (owner_id, updated_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+      await db.run(`CREATE TABLE IF NOT EXISTS companion_chat_messages (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        session_id INT NOT NULL,
+        companion_id INT NOT NULL,
+        owner_id INT NOT NULL,
+        role VARCHAR(10) NOT NULL,
+        content LONGTEXT NOT NULL,
+        input_tokens INT DEFAULT 0,
+        output_tokens INT DEFAULT 0,
+        model_used VARCHAR(50),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_companion_msg_session (session_id, created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+      await db.run(`CREATE TABLE IF NOT EXISTS companion_writing_drafts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        owner_id INT NOT NULL,
+        companion_id INT NOT NULL,
+        source_post_id INT,
+        draft_content LONGTEXT,
+        draft_type VARCHAR(20) DEFAULT 'polish',
+        status VARCHAR(10) DEFAULT 'draft',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_companion_draft_owner (owner_id, created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+      // ── M7 公开开关 C：comments.companion_id（搭档身份评论）──
+      const cColsMaria = await db.all(
+        `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comments'`
+      );
+      if (!cColsMaria.some((r) => r.c === 'companion_id')) {
+        await db.run(`ALTER TABLE comments ADD COLUMN companion_id INT NULL`);
+      }
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_comments_companion ON comments(companion_id)`);
     } else {
       await db.run(`CREATE TABLE IF NOT EXISTS user_follows (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -441,6 +539,101 @@ export const db = {
         UNIQUE (comment_id, agent_id)
       )`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_replies_agent ON replies(agent_id, created_at)`);
+      // ── AI 伴侣（用户个人 AI 伙伴）：companion 全表（SQLite 方言，无 ON UPDATE / 无内联 INDEX）──
+      await db.run(`CREATE TABLE IF NOT EXISTS companion_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id INTEGER NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        username VARCHAR(50) NOT NULL,
+        avatar TEXT,
+        sprite_sheet VARCHAR(512),
+        persona_json TEXT,
+        intro_prompt TEXT,
+        badge VARCHAR(20) NOT NULL DEFAULT '我的搭档',
+        is_public TINYINT NOT NULL DEFAULT 0,
+        daily_used INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_active_at DATETIME,
+        UNIQUE (username)
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_companion_owner ON companion_profiles(owner_id)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS companion_memory_episodic (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        companion_id INTEGER NOT NULL,
+        owner_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        source VARCHAR(20) DEFAULT 'chat',
+        importance REAL DEFAULT 0.5,
+        status VARCHAR(10) DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        expires_at DATETIME
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_companion_episodic_owner ON companion_memory_episodic(companion_id, owner_id, created_at)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS companion_memory_semantic (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        companion_id INTEGER NOT NULL,
+        owner_id INTEGER NOT NULL,
+        domain VARCHAR(50),
+        understanding TEXT NOT NULL,
+        confidence REAL DEFAULT 0.6,
+        evidence_ids TEXT,
+        status VARCHAR(10) DEFAULT 'verified',
+        last_verified_at DATETIME,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (companion_id, owner_id, domain)
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_companion_semantic_owner ON companion_memory_semantic(companion_id, owner_id)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS companion_memory_procedural (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        companion_id INTEGER NOT NULL,
+        owner_id INTEGER NOT NULL,
+        skill VARCHAR(50),
+        \`procedure\` TEXT NOT NULL,
+        version INTEGER DEFAULT 1,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (companion_id, owner_id, skill)
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_companion_procedural_owner ON companion_memory_procedural(companion_id, owner_id)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS companion_chat_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        companion_id INTEGER NOT NULL,
+        owner_id INTEGER NOT NULL,
+        title VARCHAR(200),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_companion_session_owner ON companion_chat_sessions(owner_id, updated_at)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS companion_chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        companion_id INTEGER NOT NULL,
+        owner_id INTEGER NOT NULL,
+        role VARCHAR(10) NOT NULL,
+        content TEXT NOT NULL,
+        input_tokens INTEGER DEFAULT 0,
+        output_tokens INTEGER DEFAULT 0,
+        model_used VARCHAR(50),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_companion_msg_session ON companion_chat_messages(session_id, created_at)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS companion_writing_drafts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id INTEGER NOT NULL,
+        companion_id INTEGER NOT NULL,
+        source_post_id INTEGER,
+        draft_content TEXT,
+        draft_type VARCHAR(20) DEFAULT 'polish',
+        status VARCHAR(10) DEFAULT 'draft',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_companion_draft_owner ON companion_writing_drafts(owner_id, created_at)`);
+      // ── M7 公开开关 C：comments.companion_id（搭档身份评论）──
+      const cColsSqlite = await db.all(`PRAGMA table_info(comments)`);
+      if (!cColsSqlite.some((c) => c.name === 'companion_id')) {
+        await db.run(`ALTER TABLE comments ADD COLUMN companion_id INTEGER`);
+      }
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_comments_companion ON comments(companion_id)`);
     }
   },
 };

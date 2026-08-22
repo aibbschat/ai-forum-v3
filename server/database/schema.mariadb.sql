@@ -56,17 +56,21 @@ CREATE TABLE IF NOT EXISTS posts (
   provenance    TEXT,                          -- {agent,model,sources,confidence} JSON
   assets        TEXT,                          -- P1-9 技能数据契约：[{type,url,title,position,data}] JSON
   content_hash CHAR(64),                      -- 幂等去重：同 agent + 同 hash 24h 内只发一次
+  is_pinned     TINYINT DEFAULT 0,            -- 文章置顶（2026-08-22 补进 schema；此前仅运行时 ALTER）
+  pinned_until  DATETIME,                     -- 置顶截止（NULL=永久，过期自动失效）
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_posts_agent_hash ON posts(agent_id, content_hash);
 CREATE INDEX idx_posts_hash_created ON posts(content_hash, created_at);
+CREATE INDEX idx_posts_pinned ON posts(is_pinned, pinned_until);
 
 -- 评论表（v3 增量：楼中楼 + @提及）
 CREATE TABLE IF NOT EXISTS comments (
   id            INT AUTO_INCREMENT PRIMARY KEY,
   post_id       INT NOT NULL,
-  author_id     INT NOT NULL,
+  author_id     INT NOT NULL,                    -- 触发者（搭档评论时 = 主人，问责用）
+  companion_id  INT,                             -- M7 公开开关 C：非空 = 以用户 AI 搭档身份发出（索引 idx_comments_companion 由 db.js 迁移层建）
   content       LONGTEXT,
   parent_id     INT,                            -- 楼中楼：所回复的顶层评论 id（顶层为 NULL）
   reply_to_id   INT,                            -- 被@的用户 id（用于精准通知）
@@ -226,3 +230,111 @@ CREATE INDEX IF NOT EXISTS idx_episodic_agent ON memory_episodic(agent_id, creat
 CREATE INDEX IF NOT EXISTS idx_episodic_expires ON memory_episodic(expires_at);
 CREATE INDEX IF NOT EXISTS idx_semantic_agent ON memory_semantic(agent_id, domain, confidence);
 CREATE INDEX IF NOT EXISTS idx_procedural_agent ON memory_procedural(agent_id, skill);
+
+-- ══════════════════════════════════════════════════════════════════
+-- AI 伴侣（用户个人 AI 伙伴）数据模型 —— 见 docs/companion/AI_COMPANION_SPEC.md §3
+-- 从 §3.2 草案落地：去掉 FK（与 v3 增量表 user_follows/messages/bookmarks 等一致，仅建 INDEX），
+-- 新增 sprite_sheet 形像分镜列（§13 九宫格/精灵图资源）。与 SQLite 版 1:1 映射。
+-- 非唯一索引统一用独立 CREATE INDEX（与 memory 三表一致），内联 INDEX 会被 1:1 守护测试误判为列。
+-- ══════════════════════════════════════════════════════════════════
+
+-- 搭档档案：每个主人可创建 1 个（二期可多个）
+CREATE TABLE IF NOT EXISTS companion_profiles (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  owner_id      INT NOT NULL,                    -- 主人（users.id）
+  name          VARCHAR(100) NOT NULL,           -- 展示名，如"聿安"
+  username      VARCHAR(50)  NOT NULL,           -- 唯一句柄，如"聿安_45wi"（迁移防冲突加后缀）
+  avatar        LONGTEXT,                        -- 头像（与 users.avatar 同 LONGTEXT 口径）
+  sprite_sheet  VARCHAR(512),                    -- 形像分镜资源（九宫格/精灵图 URL 或本地路径，§13）
+  persona_json  LONGTEXT,                        -- 性格/兴趣/人格标签（旧版 ai_personality 迁移目标）
+  intro_prompt  LONGTEXT,                        -- 注入 LLM 的 system 前缀（身份 + 主人偏好）
+  badge         VARCHAR(20)  NOT NULL DEFAULT '我的搭档',  -- 视觉角标
+  is_public     TINYINT(1)   NOT NULL DEFAULT 0, -- 公开开关 C：0 私域 / 1 进社区评论
+  daily_used    INT          NOT NULL DEFAULT 0, -- 公开态当日已发评论数（限流计数，每日 0 点重置）
+  created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  last_active_at DATETIME,                       -- 在场感："已陪你 N 天 / 最后活跃"
+  UNIQUE KEY uk_companion_username (username)
+);
+
+-- 伴侣记忆：复用官方 Agent 三层范式，维度从 agent_id 改为 companion_id + owner_id
+CREATE TABLE IF NOT EXISTS companion_memory_episodic (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  companion_id  INT NOT NULL,
+  owner_id      INT NOT NULL,
+  content       LONGTEXT NOT NULL,
+  source        VARCHAR(20) DEFAULT 'chat',      -- chat / writing / explicit / feedback
+  importance    DOUBLE DEFAULT 0.5,
+  status        VARCHAR(10) DEFAULT 'pending',
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  expires_at    DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS companion_memory_semantic (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  companion_id  INT NOT NULL,
+  owner_id      INT NOT NULL,
+  domain        VARCHAR(50),
+  understanding LONGTEXT NOT NULL,
+  confidence    DOUBLE DEFAULT 0.6,
+  evidence_ids  TEXT,
+  status        VARCHAR(10) DEFAULT 'verified',
+  last_verified_at DATETIME,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_companion_semantic (companion_id, owner_id, domain)
+);
+
+CREATE TABLE IF NOT EXISTS companion_memory_procedural (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  companion_id  INT NOT NULL,
+  owner_id      INT NOT NULL,
+  skill         VARCHAR(50),
+  `procedure`   LONGTEXT NOT NULL,
+  version       INT DEFAULT 1,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_companion_procedural (companion_id, owner_id, skill)
+);
+
+-- 伴侣聊天会话（有状态，区别于 chatService 无状态问答）
+CREATE TABLE IF NOT EXISTS companion_chat_sessions (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  companion_id  INT NOT NULL,
+  owner_id      INT NOT NULL,
+  title         VARCHAR(200),
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS companion_chat_messages (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  session_id    INT NOT NULL,
+  companion_id  INT NOT NULL,
+  owner_id      INT NOT NULL,
+  role          VARCHAR(10) NOT NULL,            -- 'user' / 'assistant'
+  content       LONGTEXT NOT NULL,
+  input_tokens  INT DEFAULT 0,
+  output_tokens INT DEFAULT 0,
+  model_used    VARCHAR(50),
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 辅助写作草稿（搭档只出草稿，不代发）
+CREATE TABLE IF NOT EXISTS companion_writing_drafts (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  owner_id        INT NOT NULL,
+  companion_id    INT NOT NULL,
+  source_post_id  INT,
+  draft_content   LONGTEXT,
+  draft_type      VARCHAR(20) DEFAULT 'polish',  -- polish / expand / brainstorm / qa
+  status          VARCHAR(10) DEFAULT 'draft',   -- draft / polishing / approved
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 非唯一索引（独立语句，与 SQLite 版 1:1）
+CREATE INDEX IF NOT EXISTS idx_companion_owner ON companion_profiles(owner_id);
+CREATE INDEX IF NOT EXISTS idx_companion_episodic_owner ON companion_memory_episodic(companion_id, owner_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_companion_semantic_owner ON companion_memory_semantic(companion_id, owner_id);
+CREATE INDEX IF NOT EXISTS idx_companion_procedural_owner ON companion_memory_procedural(companion_id, owner_id);
+CREATE INDEX IF NOT EXISTS idx_companion_session_owner ON companion_chat_sessions(owner_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_companion_msg_session ON companion_chat_messages(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_companion_draft_owner ON companion_writing_drafts(owner_id, created_at);

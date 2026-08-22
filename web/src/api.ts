@@ -138,6 +138,8 @@ export interface Comment {
   author: string;
   authorAvatar: string;
   authorUserType?: string;
+  // M7 公开开关 C：以用户 AI 搭档身份发出的评论（authorUserType === 'companion'）
+  companion?: { id: number; name: string; avatar?: string | null; badge?: string; username?: string };
   content: string;
   isAiGenerated?: boolean;
   likeCount?: number;
@@ -265,6 +267,18 @@ export function addComment(postId: number, content: string, parentId?: number | 
 
 export function likeComment(commentId: number) {
   return post<LikeResult>(`/api/comments/${commentId}/like`, {}, true);
+}
+
+// ── M7 公开开关 C：以我的 AI 搭档身份评论（需登录；内容可留空由搭档生成） ──
+export function commentAsCompanion(
+  companionId: number,
+  data: { postId: number; content?: string; instruction?: string; parentId?: number | null }
+) {
+  return post<{ comment: Comment }>(
+    `/api/companions/${companionId}/comments`,
+    { postId: data.postId, content: data.content || '', instruction: data.instruction || '', parentId: data.parentId ?? null },
+    true
+  );
 }
 
 // ── 互动（帖子点赞 / 阅读计数） ──
@@ -505,4 +519,385 @@ export function uploadImage(dataUrl: string) {
 
 // 暴露常量给不使用 hook 的组件（ReportModal 同步引用）
 export const REPORT_REASONS = REPORT_REASONS_FALLBACK;
+
+// ── AI 伴侣（用户个人 AI 伙伴） ─────────────────────────────────
+// 后端返回 snake_case（companionService 直读 DB + withParsed 仅补 persona），此处归一化。
+export interface CompanionPersona {
+  bio?: string;
+  interests?: string[];
+  traits?: Record<string, number>; // talkative / warmth 等 0-1
+  [k: string]: unknown;
+}
+
+export interface Companion {
+  id: number;
+  ownerId: number;
+  name: string;
+  username: string;
+  avatar: string | null;
+  spriteSheet: string | null; // 用户自制的九宫格分镜图（见规格书 §13），未提供时为 null
+  persona: CompanionPersona;
+  introPrompt?: string; // 仅主人可见
+  badge: string;
+  isPublic: number; // 0 私域 / 1 进社区
+  lastActiveAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface CompanionInput {
+  name: string;
+  username: string;
+  avatar?: string | null;
+  spriteSheet?: string | null;
+  persona?: CompanionPersona;
+  introPrompt?: string;
+  badge?: string;
+  isPublic?: number;
+}
+
+function safeParseJSON(s?: string | null): Record<string, unknown> {
+  if (!s) return {};
+  try {
+    const v = JSON.parse(s);
+    return typeof v === 'object' && v ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function normCompanion(raw: Record<string, unknown>): Companion {
+  const persona =
+    (raw.persona as CompanionPersona) ||
+    (typeof raw.persona_json === 'string' ? (safeParseJSON(raw.persona_json) as CompanionPersona) : {});
+  return {
+    id: raw.id as number,
+    ownerId: raw.owner_id as number,
+    name: raw.name as string,
+    username: raw.username as string,
+    avatar: (raw.avatar as string) || null,
+    spriteSheet: (raw.sprite_sheet as string) || null,
+    persona,
+    introPrompt: raw.intro_prompt as string | undefined,
+    badge: (raw.badge as string) || '我的搭档',
+    isPublic: (raw.is_public as number) ?? 0,
+    lastActiveAt: (raw.last_active_at as string) || null,
+    createdAt: (raw.created_at as string) || null,
+    updatedAt: (raw.updated_at as string) || null,
+  };
+}
+
+// 后端 companion 接口吃 snake_case（companionService 直读 req.body），
+// 前端统一用 camelCase —— 此处收口映射，调用方无需感知。
+function companionBody(input: Partial<CompanionInput>): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (input.name != null) body.name = input.name;
+  if (input.username != null) body.username = input.username;
+  if (input.avatar !== undefined) body.avatar = input.avatar;
+  if (input.spriteSheet !== undefined) body.sprite_sheet = input.spriteSheet;
+  if (input.persona !== undefined) body.persona_json = input.persona;
+  if (input.introPrompt !== undefined) body.intro_prompt = input.introPrompt;
+  if (input.badge != null) body.badge = input.badge;
+  if (input.isPublic !== undefined) body.is_public = input.isPublic ? 1 : 0;
+  return body;
+}
+
+export function createCompanion(input: CompanionInput) {
+  return post<{ companion: Companion }>('/api/companions', companionBody(input), true).then((r) => ({
+    companion: normCompanion(r.companion as unknown as Record<string, unknown>),
+  }));
+}
+
+export function listCompanions() {
+  return get<{ companions: Record<string, unknown>[] }>('/api/companions').then((r) => ({
+    companions: r.companions.map((c) => normCompanion(c)),
+  }));
+}
+
+export function getCompanion(id: number) {
+  return get<{ companion: Record<string, unknown> }>(`/api/companions/${id}`).then((r) => ({
+    companion: normCompanion(r.companion),
+  }));
+}
+
+export function getCompanionByUsername(username: string) {
+  return get<{ companion: Record<string, unknown> }>(
+    `/api/companions/u/${encodeURIComponent(username)}`
+  ).then((r) => ({ companion: normCompanion(r.companion) }));
+}
+
+export function updateCompanion(id: number, patch: Partial<CompanionInput>) {
+  return put<{ companion: Record<string, unknown> }>(`/api/companions/${id}`, companionBody(patch)).then((r) => ({
+    companion: normCompanion(r.companion),
+  }));
+}
+
+export function deleteCompanion(id: number) {
+  return del<{ ok: boolean }>(`/api/companions/${id}`);
+}
+
+// ── M3 伴侣聊天（§5）：会话 + 消息 ──────────────────────────
+export interface CompanionSession {
+  id: number;
+  companionId: number;
+  title: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface CompanionMessage {
+  id?: number;
+  sessionId?: number;
+  role: 'user' | 'assistant';
+  content: string;
+  modelUsed?: string | null;
+  createdAt?: string | null;
+}
+
+function normSession(raw: Record<string, unknown>): CompanionSession {
+  return {
+    id: Number(raw.id),
+    companionId: Number(raw.companion_id),
+    title: String(raw.title || '新对话'),
+    createdAt: (raw.created_at as string) ?? null,
+    updatedAt: (raw.updated_at as string) ?? null,
+  };
+}
+
+function normMessage(raw: Record<string, unknown>): CompanionMessage {
+  return {
+    id: raw.id != null ? Number(raw.id) : undefined,
+    sessionId: raw.session_id != null ? Number(raw.session_id) : undefined,
+    role: raw.role === 'assistant' ? 'assistant' : 'user',
+    content: String(raw.content ?? ''),
+    modelUsed: (raw.model_used as string) ?? null,
+    createdAt: (raw.created_at as string) ?? null,
+  };
+}
+
+export function listCompanionSessions(companionId: number) {
+  return get<{ sessions: Record<string, unknown>[] }>(`/api/companions/${companionId}/sessions`).then(
+    (r) => ({ sessions: r.sessions.map(normSession) })
+  );
+}
+
+export function createCompanionSession(companionId: number) {
+  return post<{ session: Record<string, unknown> }>(`/api/companions/${companionId}/sessions`, {}, true).then(
+    (r) => ({ session: normSession(r.session) })
+  );
+}
+
+export function getCompanionMessages(sessionId: number) {
+  return get<{ messages: Record<string, unknown>[] }>(`/api/companions/sessions/${sessionId}/messages`).then(
+    (r) => ({ messages: r.messages.map(normMessage) })
+  );
+}
+
+export function deleteCompanionSession(sessionId: number) {
+  return del<{ ok: boolean }>(`/api/companions/sessions/${sessionId}`);
+}
+
+export function sendCompanionMessage(companionId: number, sessionId: number, content: string) {
+  return post<{ userMessage: CompanionMessage; reply: CompanionMessage }>(
+    `/api/companions/${companionId}/sessions/${sessionId}/messages`,
+    { content },
+    true
+  );
+}
+
+// ── M4 辅助写作（§6）：草稿 + 搭档辅助 ──────────────────────
+export interface CompanionDraft {
+  id: number;
+  companionId: number;
+  sourcePostId?: number | null;
+  draftContent: string;
+  draftType: string;
+  status: 'draft' | 'polishing' | 'confirmed';
+  createdAt?: string | null;
+}
+
+export type AssistAction = 'polish' | 'expand' | 'angles' | 'brainstorm';
+
+function normDraft(raw: Record<string, unknown>): CompanionDraft {
+  const status = raw.status === 'polishing' || raw.status === 'confirmed' ? raw.status : 'draft';
+  return {
+    id: Number(raw.id),
+    companionId: Number(raw.companion_id),
+    sourcePostId: raw.source_post_id != null ? Number(raw.source_post_id) : null,
+    draftContent: String(raw.draft_content ?? ''),
+    draftType: String(raw.draft_type ?? 'polish'),
+    status,
+    createdAt: (raw.created_at as string) ?? null,
+  };
+}
+
+export function listCompanionDrafts(companionId: number) {
+  return get<{ drafts: Record<string, unknown>[] }>(`/api/companions/${companionId}/drafts`).then((r) => ({
+    drafts: r.drafts.map(normDraft),
+  }));
+}
+
+export function createCompanionDraft(companionId: number, content: string) {
+  return post<{ draft: Record<string, unknown> }>(`/api/companions/${companionId}/drafts`, { content }, true).then(
+    (r) => ({ draft: normDraft(r.draft) })
+  );
+}
+
+export function getCompanionDraft(draftId: number) {
+  return get<{ draft: Record<string, unknown> }>(`/api/companions/drafts/${draftId}`).then((r) => ({
+    draft: normDraft(r.draft),
+  }));
+}
+
+export function updateCompanionDraft(draftId: number, draftContent: string) {
+  return put<{ draft: Record<string, unknown> }>(`/api/companions/drafts/${draftId}`, { draft_content: draftContent }).then(
+    (r) => ({ draft: normDraft(r.draft) })
+  );
+}
+
+export function deleteCompanionDraft(draftId: number) {
+  return del<{ ok: boolean }>(`/api/companions/drafts/${draftId}`);
+}
+
+export function setCompanionDraftStatus(draftId: number, status: CompanionDraft['status']) {
+  return put<{ draft: Record<string, unknown> }>(`/api/companions/drafts/${draftId}/status`, { status }).then((r) => ({
+    draft: normDraft(r.draft),
+  }));
+}
+
+export function assistCompanionDraft(
+  companionId: number,
+  draftId: number,
+  action: AssistAction,
+  instruction?: string
+) {
+  return post<{ action: AssistAction; revised?: string; suggestions?: string }>(
+    `/api/companions/${companionId}/drafts/${draftId}/assist`,
+    { action, instruction },
+    true
+  );
+}
+
+// ── M5 记忆面板（§7.4）：透明与控制权 ────────────────────────
+export type MemoryLayer = 'episodic' | 'semantic' | 'procedural';
+
+export interface EpisodicMemory {
+  id: number;
+  content: string;
+  source: string;
+  importance: number;
+  status: 'pending' | 'verified' | 'rejected' | 'expired';
+  createdAt?: string | null;
+}
+
+export interface SemanticMemory {
+  id: number;
+  domain: string;
+  understanding: string;
+  confidence: number;
+  updatedAt?: string | null;
+}
+
+export interface ProceduralMemory {
+  id: number;
+  skill: string;
+  procedure: string;
+  version: number;
+  updatedAt?: string | null;
+}
+
+export interface CompanionMemories {
+  episodic: EpisodicMemory[];
+  semantic: SemanticMemory[];
+  procedural: ProceduralMemory[];
+}
+
+export function listCompanionMemories(companionId: number) {
+  return get<Record<string, Record<string, unknown>[]>>(
+    `/api/companions/${companionId}/memories`
+  ).then((r) => ({
+    episodic: (r.episodic || []).map(normEpisodic),
+    semantic: (r.semantic || []).map(normSemantic),
+    procedural: (r.procedural || []).map(normProcedural),
+  }));
+}
+
+function normEpisodic(raw: Record<string, unknown>): EpisodicMemory {
+  return {
+    id: Number(raw.id),
+    content: String(raw.content ?? ''),
+    source: String(raw.source ?? 'chat'),
+    importance: Number(raw.importance ?? 0.5),
+    status: (['pending', 'verified', 'rejected', 'expired'].includes(String(raw.status))
+      ? raw.status
+      : 'pending') as EpisodicMemory['status'],
+    createdAt: (raw.created_at as string) ?? null,
+  };
+}
+
+function normSemantic(raw: Record<string, unknown>): SemanticMemory {
+  return {
+    id: Number(raw.id),
+    domain: String(raw.domain ?? ''),
+    understanding: String(raw.understanding ?? ''),
+    confidence: Number(raw.confidence ?? 0.6),
+    updatedAt: (raw.updated_at as string) ?? null,
+  };
+}
+
+function normProcedural(raw: Record<string, unknown>): ProceduralMemory {
+  return {
+    id: Number(raw.id),
+    skill: String(raw.skill ?? ''),
+    procedure: String(raw.procedure ?? ''),
+    version: Number(raw.version ?? 1),
+    updatedAt: (raw.updated_at as string) ?? null,
+  };
+}
+
+export function addCompanionSemanticMemory(companionId: number, domain: string, understanding: string) {
+  return post<{ memory: Record<string, unknown> }>(
+    `/api/companions/${companionId}/memories`,
+    { domain, understanding },
+    true
+  ).then((r) => ({ memory: normSemantic(r.memory) }));
+}
+
+export function deleteCompanionMemory(companionId: number, layer: MemoryLayer, memId: number) {
+  return del<{ ok: boolean }>(`/api/companions/${companionId}/memories/${layer}/${memId}`);
+}
+
+export function clearCompanionMemories(companionId: number, layer?: MemoryLayer) {
+  const q = layer ? `?layer=${layer}` : '';
+  return del<{ ok: boolean; cleared: string }>(`/api/companions/${companionId}/memories${q}`);
+}
+
+export function setCompanionEpisodicStatus(companionId: number, memId: number, status: EpisodicMemory['status']) {
+  return put<{ memory: Record<string, unknown> }>(
+    `/api/companions/${companionId}/memories/episodic/${memId}/status`,
+    { status }
+  ).then((r) => ({ memory: normEpisodic(r.memory) }));
+}
+
+export function consolidateCompanionMemories(companionId: number) {
+  return post<{ consolidated: number; considered?: number }>(
+    `/api/companions/${companionId}/memories/consolidate`,
+    {},
+    true
+  );
+}
+
+// 后端伴侣接口用 PUT（更新档案），api.ts 已无通用 put；补一个本地实现。
+async function put<T>(url: string, body: unknown): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...authHeaders() };
+  const res = await fetch(url, { method: 'PUT', headers, body: JSON.stringify(body ?? {}) });
+  if (!res.ok) {
+    const e = new Error(`请求失败 ${res.status}`) as Error & { status?: number };
+    e.status = res.status;
+    const data = await res.json().catch(() => null);
+    if (data && (data.message || data.error)) e.message = data.message || data.error;
+    throw e;
+  }
+  return res.json() as Promise<T>;
+}
 

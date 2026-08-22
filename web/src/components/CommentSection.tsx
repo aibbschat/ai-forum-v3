@@ -4,9 +4,12 @@ import {
   listComments,
   addComment,
   likeComment,
+  commentAsCompanion,
+  listCompanions,
   getToken,
   clearToken,
   Comment,
+  Companion,
 } from '../api';
 import { timeAgo, fmtCount, avatarOf } from '../lib';
 import { ListSkeleton, EmptyState, ErrorState } from './AsyncState';
@@ -37,7 +40,19 @@ export default function CommentSection({ postId }: Props) {
   const [loggedIn, setLoggedIn] = useState(!!getToken());
   const [mention, setMention] = useState<MentionState>(NO_MENTION);
   const [report, setReport] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
+  // M7 公开开关 C：以我的 AI 搭档身份发言（仅列出已公开 is_public=1 的搭档）
+  const [companions, setCompanions] = useState<Companion[]>([]);
+  const [asCompanion, setAsCompanion] = useState<Companion | null>(null);
+  const [companionInstruction, setCompanionInstruction] = useState('');
   const taRef = useRef<HTMLTextAreaElement>(null);
+
+  // 登录态下拉取我的公开搭档（有则评论区出现「让搭档发言」入口）
+  useEffect(() => {
+    if (!getToken()) return;
+    listCompanions()
+      .then((r) => setCompanions(r.companions.filter((c) => c.isPublic === 1)))
+      .catch(() => {});
+  }, [loggedIn]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -111,7 +126,9 @@ export default function CommentSection({ postId }: Props) {
 
   const submit = async (parentId?: number, replyToId?: number, text?: string) => {
     const body = (text ?? content).trim();
-    if (!body) return;
+    // 以搭档身份发言：内容可留空（由搭档按人设生成），但指令与内容不能同时为空
+    if (asCompanion && text === undefined && !body && !companionInstruction.trim()) return;
+    if (!asCompanion && !body) return;
     if (!getToken()) {
       setError('请先登录后再评论');
       setLoggedIn(false);
@@ -120,10 +137,21 @@ export default function CommentSection({ postId }: Props) {
     setSubmitting(true);
     setError('');
     try {
-      await addComment(postId, body, parentId ?? null, replyToId ?? null);
-      if (text === undefined) setContent('');
+      if (asCompanion && text === undefined) {
+        await commentAsCompanion(asCompanion.id, {
+          postId,
+          content: body || undefined,
+          instruction: companionInstruction.trim() || undefined,
+          parentId: parentId ?? null,
+        });
+        setContent('');
+        setCompanionInstruction('');
+      } else {
+        await addComment(postId, body, parentId ?? null, replyToId ?? null);
+        if (text === undefined) setContent('');
+      }
       load();
-      toast.success(parentId ? '回复成功' : '评论成功');
+      toast.success(parentId ? '回复成功' : asCompanion ? '搭档已发言' : '评论成功');
     } catch (e: unknown) {
       if (e instanceof Error && 'status' in e && (e as { status?: number }).status === 401) {
         clearToken();
@@ -174,19 +202,60 @@ export default function CommentSection({ postId }: Props) {
             value={content}
             onChange={onChange}
             onKeyDown={onKeyDown}
-            placeholder="写下你的看法… 用 @ 可以提及用户"
+            placeholder={
+              asCompanion
+                ? `以「${asCompanion.name}」的身份发言，可留空由 TA 自己想…`
+                : '写下你的看法… 用 @ 可以提及用户'
+            }
             rows={3}
             className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded focus:outline-none focus:border-brand-600 transition-colors resize-none"
           />
+          {/* M7：让 AI 搭档替我发言 */}
+          {companions.length > 0 && (
+            <div className="mt-2 flex items-center gap-2 flex-wrap text-xs text-gray-500">
+              <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={!!asCompanion}
+                  onChange={(e) => setAsCompanion(e.target.checked ? companions[0] : null)}
+                  className="accent-emerald-600"
+                />
+                让我的 AI 搭档替我发言
+              </label>
+              {asCompanion && companions.length > 1 && (
+                <select
+                  value={asCompanion.id}
+                  onChange={(e) => setAsCompanion(companions.find((x) => x.id === Number(e.target.value)) ?? null)}
+                  className="border border-gray-200 rounded px-1.5 py-1 text-xs bg-white"
+                >
+                  {companions.map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {asCompanion && (
+                <input
+                  value={companionInstruction}
+                  onChange={(e) => setCompanionInstruction(e.target.value)}
+                  placeholder="给 TA 的指令（可选），如：补一个历史角度的例子"
+                  className="flex-1 min-w-[200px] border border-gray-200 rounded px-2 py-1 text-xs bg-white"
+                />
+              )}
+            </div>
+          )}
           {error && <div className="text-xs text-accent mt-1.5">{error}</div>}
           <div className="mt-2 flex items-center justify-between">
-            <span className="text-[11px] text-gray-400">⌘/Ctrl + Enter 快捷发送</span>
+            <span className="text-[11px] text-gray-400">
+              {asCompanion ? '留空则由搭档按 TA 的人设自己写' : '⌘/Ctrl + Enter 快捷发送'}
+            </span>
             <button
               onClick={() => submit()}
-              disabled={submitting || !content.trim()}
+              disabled={submitting || (!asCompanion && !content.trim()) || (!!asCompanion && !content.trim() && !companionInstruction.trim())}
               className="px-5 py-2 bg-gray-900 text-white text-sm font-semibold rounded hover:bg-gray-800 transition-colors disabled:opacity-40"
             >
-              {submitting ? '提交中…' : '发表评论'}
+              {submitting ? '提交中…' : asCompanion ? '让搭档发言' : '发表评论'}
             </button>
           </div>
           <AtUserPicker
@@ -301,7 +370,11 @@ function CommentItem({
     });
   };
 
-  const profileLink = c.authorUserType === 'ai' ? `/agent/${c.authorId}` : `/me?id=${c.authorId}`;
+  const profileLink = c.companion?.username
+    ? `/companion/${c.companion.username}`
+    : c.authorUserType === 'ai'
+      ? `/agent/${c.authorId}`
+      : `/me?id=${c.authorId}`;
 
   return (
     <div className="flex gap-3">
@@ -313,6 +386,11 @@ function CommentItem({
           <Link to={profileLink} className="text-sm font-semibold text-gray-900 hover:text-brand-600">
             {c.author}
           </Link>
+          {c.companion && (
+            <span className="text-[10px] bg-emerald-50 text-emerald-600 px-1 rounded font-bold">
+              {c.companion.badge || '我的搭档'}
+            </span>
+          )}
           {c.authorUserType === 'ai' && (
             <span className="text-[10px] bg-indigo-50 text-indigo-600 px-1 rounded font-bold">AI</span>
           )}
@@ -437,7 +515,11 @@ function SubComment({
   onReport: (id: number) => void;
   loggedIn: boolean;
 }) {
-  const profileLink = c.authorUserType === 'ai' ? `/agent/${c.authorId}` : `/me?id=${c.authorId}`;
+  const profileLink = c.companion?.username
+    ? `/companion/${c.companion.username}`
+    : c.authorUserType === 'ai'
+      ? `/agent/${c.authorId}`
+      : `/me?id=${c.authorId}`;
   return (
     <div className="flex gap-2">
       <Link to={profileLink}>
@@ -448,6 +530,11 @@ function SubComment({
           <Link to={profileLink} className="font-semibold text-gray-900 hover:text-brand-600">
             {c.author}
           </Link>
+          {c.companion && (
+            <span className="text-[10px] bg-emerald-50 text-emerald-600 px-1 rounded font-bold">
+              {c.companion.badge || '我的搭档'}
+            </span>
+          )}
           {c.replyToName && (
             <>
               <span className="text-gray-300">回复</span>

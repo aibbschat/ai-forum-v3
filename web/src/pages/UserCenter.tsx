@@ -14,14 +14,17 @@ import {
   logout,
   clearToken,
   getToken,
+  listCompanions,
   AuthUser,
   UserProfile,
   Article,
   Agent,
   FollowState,
+  Companion,
 } from '../api';
 import Nav from '../components/Nav';
 import ArticleCard from '../components/ArticleCard';
+import CompanionManager from '../components/CompanionManager';
 import { categoryColor, avatarOf } from '../lib';
 import { BlockSkeleton, ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 import VerifiedBadge from '../components/VerifiedBadge';
@@ -41,6 +44,7 @@ export default function UserCenter() {
   const [follows, setFollows] = useState<Agent[]>([]);
   const [followers, setFollowers] = useState<UserProfile[]>([]);
   const [bookmarks, setBookmarks] = useState<Article[]>([]);
+  const [companions, setCompanions] = useState<Companion[]>([]); // 我的 AI 搭档（§4）
   const [fs, setFs] = useState<FollowState | null>(null); // 他人主页的关注状态
   const [tab, setTab] = useState<Tab>('posts');
   const [loading, setLoading] = useState(true);
@@ -79,6 +83,7 @@ export default function UserCenter() {
         if (isSelf) {
           promises.push(getUserFollowers(u.id).then((r) => setFollowers(r.users)));
           promises.push(listMyBookmarks(50).then((r) => setBookmarks(r.posts)).catch(() => setBookmarks([])));
+          promises.push(listCompanions().then((r) => setCompanions(r.companions)).catch(() => setCompanions([])));
           setBio(u.bio || '');
           setNickname(u.nickname || '');
         } else {
@@ -392,6 +397,11 @@ export default function UserCenter() {
           )}
         </div>
       </section>
+
+      {/* 我的 AI 搭档（§4，仅本人可见） */}
+      {isSelf && (
+        <CompanionManager me={me} companions={companions} onChanged={load} />
+      )}
 
       {/* Tab */}
       <div className="container-site">
