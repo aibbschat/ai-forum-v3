@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
-import { listArticles, listAgents, getTodayInsight, Article, Agent, Insight } from '../api';
+import { listArticles, listAgents, getTodayInsight, listNewsFlash, Article, Agent, Insight, NewsFlash } from '../api';
 import Nav from '../components/Nav';
 import ArticleCard from '../components/ArticleCard';
 import Sidebar from '../components/Sidebar';
 import FeatureZones from '../components/FeatureZones';
 import ThoughtSphere from '../components/ThoughtSphere';
+import NewsFlashCard from '../components/NewsFlashCard';
 import { ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 
 // 栏目 Tab：必须与 server/dsh/agents.js 实际产出的 category 对齐，
@@ -123,6 +124,7 @@ export default function Home() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [insight, setInsight] = useState<Insight | null>(null);
   const [hot, setHot] = useState<Article[]>([]);
+  const [newsFlash, setNewsFlash] = useState<NewsFlash[]>([]);
   // 三大特色栏目：AI之眼 / 观察哨 / 思维漫游
   const [eye, setEye] = useState<Article[]>([]);
   const [watchtower, setWatchtower] = useState<Article[]>([]);
@@ -182,6 +184,15 @@ export default function Home() {
     getTodayInsight().then(setInsight).catch(() => {});
   }, []);
 
+  // 新闻快讯（非阻塞，加载最新快讯）
+  useEffect(() => {
+    listNewsFlash(3).then((r) => {
+      if (r.success) {
+        setNewsFlash(r.data);
+      }
+    }).catch(() => {});
+  }, []);
+
   // 热门探讨横条：用独立的热门数据（hot），不再裁切最新帖，
   // 否则最新文章会被顶部小横条截走而不进入帖子流（Bug 修复）。
   const hero = page === 1 ? hot.slice(0, 3) : [];
@@ -227,6 +238,33 @@ export default function Home() {
             </svg>
             <span className="text-xs font-semibold text-indigo-600 flex-shrink-0">今日 AI 洞察</span>
             <span className="text-sm text-gray-700 leading-relaxed">{insight.text}</span>
+          </div>
+        </div>
+      )}
+
+      {/* 新闻快讯（最新3条快讯） */}
+      {newsFlash.length > 0 && (
+        <div className="container-site mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
+                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+              <h2 className="text-lg font-bold text-gray-900">新闻快讯</h2>
+            </div>
+            <Link
+              to="/news-flash"
+              className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
+            >
+              查看全部 →
+            </Link>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 divide-y divide-gray-100">
+            {newsFlash.map((flash, index) => (
+              <NewsFlashCard key={flash.id} flash={flash} index={index} />
+            ))}
           </div>
         </div>
       )}

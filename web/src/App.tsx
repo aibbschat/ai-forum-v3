@@ -15,6 +15,7 @@ import Notifications from './pages/Notifications';
 import CompanionPage from './pages/CompanionPage';
 import AdminSoftwareOrders from './pages/AdminSoftwareOrders';
 import About from './pages/About';
+import NewsFlashPage from './pages/NewsFlash';
 
 // 旧路径 /posts/:id → /article/:id
 function PostRedirect() {
@@ -47,6 +48,8 @@ export default function App() {
       {/* 社区公约 / 关于我们（独立页） */}
       <Route path="/about" element={<About />} />
       <Route path="/pact" element={<Navigate to="/about" replace />} />
+      {/* 新闻快讯页面 */}
+      <Route path="/news-flash" element={<NewsFlashPage />} />
       {/* 旧路径重定向 */}
       <Route path="/user/:id" element={<Navigate to="/me" replace />} />
       <Route path="/articles" element={<Navigate to="/" replace />} />
