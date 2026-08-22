@@ -45,14 +45,15 @@ echo "════════════════════════�
 echo ""
 echo "── [SEC] 安全巡检 ──"
 
-# 1a. sshguard 封禁状态
-if systemctl is-active sshguard &>/dev/null; then
-  TOTAL_BLOCKED=$(grep -c "added=" /var/log/sshguard.log 2>/dev/null | tail -1 || echo "?")
-  RECENT=$(grep "added=[1-9]" /var/log/sshguard.log 2>/dev/null | tail -5 | wc -l)
-  ok "sshguard 运行中，累计 ${TOTAL_BLOCKED} 条记录"
-  [ "$RECENT" -gt 0 ] && warn "最近 sshguard 新增封禁 $RECENT 条"
+# 1a. sshguard 封禁状态（timer 触发，inactive between runs 是正常的）
+if systemctl is-enabled sshguard &>/dev/null; then
+  RECENT=$(grep "added=[1-9]" /var/log/sshguard.log 2>/dev/null | wc -l || echo "0")
+  ok "sshguard 已启用（timer 触发），累计封禁 $RECENT 个 IP"
+  [ "$RECENT" -gt 5 ] && warn "sshguard 累计封禁 IP 较多: $RECENT（检查是否有持续攻击）"
+elif systemctl is-active sshguard &>/dev/null; then
+  ok "sshguard 运行中"
 else
-  warn "sshguard 未运行"
+  warn "sshguard 未启用（建议 systemctl enable sshguard.timer）"
 fi
 
 # 1b. 最近 24h 失败 SSH 登录
@@ -104,11 +105,12 @@ for i in "${!AGENTS[@]}"; do
   LOG_FILE="$V3_ROOT/dsh/logs/cron-${slug}.log"
   if [ -f "$LOG_FILE" ]; then
     LAST_RUN=$(stat -c %y "$LOG_FILE" 2>/dev/null | cut -d. -f1 || echo "?")
-    # 检查最近一次是否有错误
-    LAST_ERRORS=$(tail -20 "$LOG_FILE" 2>/dev/null | grep -ci "error\|fail\|异常\|超时" || echo "0")
+    # 检查最近一次是否有错误（只取最后 20 行）
+    LAST_ERRORS=$(tail -20 "$LOG_FILE" 2>/dev/null | grep -ciE "error|fail|异常|超时|ERR" || true)
+    LAST_ERRORS=${LAST_ERRORS:-0}
   else
     LAST_RUN="无日志"
-    LAST_ERRORS="?"
+    LAST_ERRORS="0"
   fi
 
   if [ "$POST_24H" = "0" ] || [ "$POST_24H" = "?" ]; then
@@ -116,7 +118,7 @@ for i in "${!AGENTS[@]}"; do
   else
     ok "$name($slug): 24h 发文 $POST_24H 篇, 最新=$LAST_POST"
   fi
-  [ "$LAST_ERRORS" != "0" ] && [ "$LAST_ERRORS" != "?" ] && warn "  └─ 最近日志含 $LAST_ERRORS 条错误"
+  [ "$LAST_ERRORS" != "0" ] && warn "  └─ 最近日志含 ${LAST_ERRORS} 条错误"
 done
 
 # Agent 注册表一致性检查
@@ -248,9 +250,17 @@ for proc in ai-forum-v3 ai-forum-prod; do
   if echo "$STATUS" | grep -q "online"; then
     ok "$proc: $STATUS"
   elif echo "$STATUS" | grep -q "NOT_FOUND"; then
-    warn "$proc: 未运行"
+    if [ "$proc" = "ai-forum-prod" ]; then
+      ok "$proc: 未运行（V2 已迁移到 V3，已停止是正常的）"
+    else
+      crit "$proc: 未运行！"
+    fi
   else
-    crit "$proc: $STATUS"
+    if [ "$proc" = "ai-forum-prod" ]; then
+      warn "$proc: $STATUS（V2 老站，非关键）"
+    else
+      crit "$proc: $STATUS"
+    fi
   fi
 done
 
