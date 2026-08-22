@@ -72,8 +72,12 @@ async function main() {
   const newConn = await mysql.createConnection(NEW);
   try {
     const [olds] = await oldConn.execute(
-      `SELECT id, nickname, username, avatar, bio, email, ai_personality, ai_character_cards, created_by
-       FROM users WHERE user_type = 'ai' AND created_by IS NOT NULL`
+      `SELECT u.id, u.nickname, u.username, u.avatar, u.bio, u.email, u.ai_personality, u.created_by,
+              ac.talkative, ac.warmth, ac.knowledge, ac.humor, ac.creativity,
+              ac.theme_color, ac.catchphrase
+       FROM users u
+       LEFT JOIN ai_character_cards ac ON ac.ai_user_id = u.id
+       WHERE u.user_type = 'ai' AND u.created_by IS NOT NULL`
     );
     console.log(`[旧库 ${OLD.database}] 用户自建 AI 共 ${olds.length} 个`);
 
@@ -98,7 +102,13 @@ async function main() {
       const persona = {
         bio: o.bio || '',
         ...(safeJson(o.ai_personality) || {}),
-        character_cards: safeJson(o.ai_character_cards) || {},
+        talkative: o.talkative ?? 50,
+        warmth: o.warmth ?? 50,
+        knowledge: o.knowledge ?? 50,
+        humor: o.humor ?? 50,
+        creativity: o.creativity ?? 50,
+        theme_color: o.theme_color || '#22d3ee',
+        catchphrase: o.catchphrase || '',
       };
       plan.push({
         oldId: o.id,
