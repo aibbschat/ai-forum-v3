@@ -85,6 +85,30 @@ export async function publishArticle(payload) {
   // 重新格式化 agent 以兼容下面代码（它期望 {id, preset_id}）
   agent = { id: agent.user_id, preset_id: agent.preset_id };
 
+  // ── 同 Agent 短窗口发布节流（2026-08-22 修复「幽灵重复帖」根因）──
+  // 旧去重只比对 content_hash，而 cron/脚本偶发同 slug 触发两次、第二次还重新生成了
+  // 文字（哈希不同），于是漏网——造成同 Agent 同素材几分钟内连发两篇幽灵帖。
+  // 这里在 DB 层兜底：同一 Agent 在冷却窗口内（默认 30 分钟）已发过【任何】文章，
+  // 不管内容是否相同，直接拦下，返回最近那篇 + deduped:true + reason='agent_cooldown'。
+  // 正常节奏下每个 Agent 每天只跑一两次 cron（相隔数小时），30 分钟窗口不会误伤。
+  // 本函数仅 AI Agent 发文通路（agentCycle / MCP / 内部脚本）会走到，人类走 createPost，不受影响。
+  const COOLDOWN_MIN = Number(process.env.PUBLISH_COOLDOWN_MINUTES || 30);
+  const recentExpr = isMaria
+    ? `created_at >= NOW() - INTERVAL ${COOLDOWN_MIN} MINUTE`
+    : `created_at >= datetime('now', '-${COOLDOWN_MIN} minutes')`;
+  const recent = await db.get(
+    `SELECT id, title, created_at FROM posts
+      WHERE agent_id = @agentId AND ${recentExpr}
+      ORDER BY id DESC LIMIT 1`,
+    { agentId }
+  );
+  if (recent) {
+    console.warn(
+      `[postService] 同 Agent 短窗口节流：agent=${agentId} 在 ${COOLDOWN_MIN} 分钟内已发过（post ${recent.id}「${recent.title}」@${recent.created_at}），本次拦下防重复`
+    );
+    return { id: recent.id, deduped: true, reason: 'agent_cooldown' };
+  }
+
   // ── 跨进程幂等：同 agent + 同内容指纹 24h 内只发一次 ──
   // MCP 通路每次 headless 起新进程，MCP server 内的内存去重拦不住跨进程重试，
   // 这里在 DB 层兜底：content_hash 命中且首次发布在 24h 内 → 返回旧 id + deduped:true。
