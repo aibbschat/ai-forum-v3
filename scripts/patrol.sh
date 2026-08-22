@@ -215,8 +215,8 @@ else
   ok "V3 今日备份已存在: $(basename "$DAILY_BACKUP")"
 fi
 
-# 清理 30 天前的备份
-CLEANED=$(find "$BACKUP_DIR" -name "v3-*.sql.gz" -mtime +30 -delete -print 2>/dev/null | wc -l)
+# 清理 7 天前的备份
+CLEANED=$(find "$BACKUP_DIR" -name "v3-*.sql.gz" -mtime +7 -delete -print 2>/dev/null | wc -l)
 [ "$CLEANED" -gt 0 ] && log "  清理 $CLEANED 个过期备份（>30天）"
 
 # ─────────────────────────────────────────────────────────────
