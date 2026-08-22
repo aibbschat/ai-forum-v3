@@ -55,15 +55,32 @@ location = /writing-camp      { return 301 /experts/; }
 location = /writing-camp/     { return 301 /experts/; }
 location /writing-camp/       { rewrite ^/writing-camp/?(.*)$ /$1 break; proxy_pass http://127.0.0.1:3007; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_read_timeout 300s; proxy_buffering off; }
 
-# ── V2 软件中心（3001）：/download /download/zhiji /download/shubao /download/csbot ──
-# 注意：是 /download（单数，V2 软件介绍页），不是 /downloads/（复数，APK 静态下载目录）
+# ── V2 软件中心（/download 及子路径）──────────────────────────────
+# 老的架构是 nginx 直接服务 V2 frontend/dist 静态文件，只有 /api 才进后端。
+# 切换时把整段 /download 反代到 3001 是错的——V2 后端只对 /、/download/shubao、
+# /download/zhiji 做了 SSR，其他路径（如 /download/csbot）直接返 JSON 404，
+# 浏览器里就看到"接口不存在"。
+# 正确做法：先在 V2 的 dist 里找静态文件（包括 SPA 的 assets/DownloadCSBot-*.js），
+# 找不到再交给 V2 后端（做 OG 卡片 SSR）。
 location ^~ /download {
+    alias /var/www/ai-forum/prod/frontend/dist;
+    try_files $uri @v2_download_api;
+}
+location @v2_download_api {
     proxy_pass http://127.0.0.1:3001;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
 }
+
+# V2 根目录引用的小图标（V3 没有，但 /download/shubao 等 V2 页面会用到）
+location = /shubao-logo.png { alias /var/www/ai-forum/prod/frontend/dist/shubao-logo.png; }
+location = /aiqlogo.png     { alias /var/www/ai-forum/prod/frontend/dist/aiqlogo.png; }
+location = /wechat-qr.png   { alias /var/www/ai-forum/prod/frontend/dist/wechat-qr.png; }
+location = /zfb-qr.png      { alias /var/www/ai-forum/prod/frontend/dist/zfb-qr.png; }
+location = /logo.png        { alias /var/www/ai-forum/prod/frontend/dist/logo.png; }
+location = /default-avatar.png { alias /var/www/ai-forum/prod/frontend/dist/default-avatar.png; }
 
 # ── V2 老链接 SEO 兜底（3001）：让外部旧链接 /post/123 /tag/xxx /qa 等继续可访问 ──
 location ~ ^/post/\d+        { proxy_pass http://127.0.0.1:3001; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-Proto $scheme; }
@@ -124,8 +141,22 @@ location = /robots.txt  { proxy_pass http://127.0.0.1:3002; proxy_set_header Hos
 location = /sitemap.xml { proxy_pass http://127.0.0.1:3002; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto $scheme; }
 
 # ── V3 静态资源 ──
+# V2 的 /download 页面也会请求 /assets/DownloadCSBot-*.js 等动态 import chunk；
+# V3 自己也用 /assets/index-*.js。两者构建都带 hash，不会撞名，所以用 try_files
+# 先找 V3 的，找不到再回落到 V2 的 dist。
 location /avatars/ { expires 30d; add_header Cache-Control "public, immutable"; }
-location /assets/  { expires 30d; add_header Cache-Control "public, immutable"; }
+location /assets/ {
+    root /var/www/ai-forum-v3/current/web/dist;
+    try_files $uri @v2_assets;
+    expires 30d;
+    add_header Cache-Control "public, immutable";
+}
+location @v2_assets {
+    root /var/www/ai-forum/prod/frontend/dist;
+    try_files $uri =404;
+    expires 30d;
+    add_header Cache-Control "public, immutable";
+}
 location /covers/ {
     alias /var/www/ai-forum-v3/covers/;
     expires 30d;
