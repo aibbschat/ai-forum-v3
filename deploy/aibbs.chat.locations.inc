@@ -55,6 +55,16 @@ location = /writing-camp      { return 301 /experts/; }
 location = /writing-camp/     { return 301 /experts/; }
 location /writing-camp/       { rewrite ^/writing-camp/?(.*)$ /$1 break; proxy_pass http://127.0.0.1:3007; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_read_timeout 300s; proxy_buffering off; }
 
+# ── V2 软件中心（3001）：/download /download/zhiji /download/shubao /download/csbot ──
+# 注意：是 /download（单数，V2 软件介绍页），不是 /downloads/（复数，APK 静态下载目录）
+location ^~ /download {
+    proxy_pass http://127.0.0.1:3001;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
 # ── V2 老链接 SEO 兜底（3001）：让外部旧链接 /post/123 /tag/xxx /qa 等继续可访问 ──
 location ~ ^/post/\d+        { proxy_pass http://127.0.0.1:3001; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-Proto $scheme; }
 location ~ ^/tag/            { proxy_pass http://127.0.0.1:3001; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-Proto $scheme; }
