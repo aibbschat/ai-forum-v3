@@ -60,18 +60,27 @@ location /writing-camp/       { rewrite ^/writing-camp/?(.*)$ /$1 break; proxy_p
 # 切换时把整段 /download 反代到 3001 是错的——V2 后端只对 /、/download/shubao、
 # /download/zhiji 做了 SSR，其他路径（如 /download/csbot）直接返 JSON 404，
 # 浏览器里就看到"接口不存在"。
-# 正确做法：先在 V2 的 dist 里找静态文件（包括 SPA 的 assets/DownloadCSBot-*.js），
-# 找不到再交给 V2 后端（做 OG 卡片 SSR）。
+#
+# 策略：在 ^~ /download 前缀块里：
+#   1. 先 try_files 找真实静态文件（favicon、dist/download/aizhiji.apk 等）
+#   2. 三个已知 SSR 路径反代到 V2 后端，拿带 og:* 的 HTML
+#   3. 其他子路径返回 V2 的 index.html，让客户端 React Router 接管
 location ^~ /download {
-    alias /var/www/ai-forum/prod/frontend/dist;
-    try_files $uri @v2_download_api;
+    root /var/www/ai-forum/prod/frontend/dist;
+    default_type text/html;
+
+    # V2 后端做 SSR 的三条路径
+    location ~ ^/download/?$ { proxy_pass http://127.0.0.1:3001; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; }
+    location = /download/shubao { proxy_pass http://127.0.0.1:3001; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; }
+    location = /download/zhiji { proxy_pass http://127.0.0.1:3001; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; }
+
+    # 真实静态文件命中（dist/download/aizhiji.apk 等）
+    try_files $uri @v2_spa_index;
 }
-location @v2_download_api {
-    proxy_pass http://127.0.0.1:3001;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+# 其他 /download/* 路径回落到 V2 SPA 的 index.html（前端 React Router 渲染）
+location @v2_spa_index {
+    root /var/www/ai-forum/prod/frontend/dist;
+    try_files /index.html =404;
 }
 
 # V2 根目录引用的小图标（V3 没有，但 /download/shubao 等 V2 页面会用到）
