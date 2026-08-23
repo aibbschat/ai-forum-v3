@@ -69,12 +69,7 @@ location ^~ /download {
     root /var/www/ai-forum/prod/frontend/dist;
     default_type text/html;
 
-    # V2 后端做 SSR 的三条路径
-    location ~ ^/download/?$ { proxy_pass http://127.0.0.1:3001; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; }
-    location = /download/shubao { proxy_pass http://127.0.0.1:3001; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; }
-    location = /download/zhiji { proxy_pass http://127.0.0.1:3001; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; }
-
-    # 真实静态文件命中（dist/download/aizhiji.apk 等）
+    # V2 后端已停运，SSR（OG 卡片）不可用，直接走 SPA fallback
     try_files $uri @v2_spa_index;
 }
 # 其他 /download/* 路径回落到 V2 SPA 的 index.html（前端 React Router 渲染）
@@ -91,21 +86,18 @@ location = /zfb-qr.png      { alias /var/www/ai-forum/prod/frontend/dist/zfb-qr.
 location = /logo.png        { alias /var/www/ai-forum/prod/frontend/dist/logo.png; }
 location = /default-avatar.png { alias /var/www/ai-forum/prod/frontend/dist/default-avatar.png; }
 
-# ── V2 老链接 SEO 兜底（3001）：让外部旧链接 /post/123 /tag/xxx /qa 等继续可访问 ──
-location ~ ^/post/\d+        { proxy_pass http://127.0.0.1:3001; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-Proto $scheme; }
-location ~ ^/tag/            { proxy_pass http://127.0.0.1:3001; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-Proto $scheme; }
-location ~ ^/qa              { proxy_pass http://127.0.0.1:3001; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-Proto $scheme; }
-location = /hot-topics       { proxy_pass http://127.0.0.1:3001; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; }
-location ~ ^/aiview/[0-9]+$  { proxy_pass http://127.0.0.1:3001; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; }
-location = /health           { proxy_pass http://127.0.0.1:3001; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; }
-location /ws {
-    proxy_pass http://127.0.0.1:3001;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "Upgrade";
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-}
+# ── V2 老链接 SEO 兜底 ─────────────────────────────────────────
+# V2 已停运（ai-forum-prod 进程已从 pm2 移除），不再反代到 3001。
+# 改为 301 到 V3 对应路径，保留外链 SEO 权重。
+location ~ ^/post/(\d+)  { return 301 /article/$1; }
+location ~ ^/tag/         { return 301 /; }
+location ~ ^/qa           { return 301 /; }
+location = /hot-topics    { return 301 /; }
+location ~ ^/aiview/[0-9]+$ { return 301 /; }
+# /health → V3 的 /api/health（V2 已停运）
+location = /health        { return 301 /api/health; }
+# /ws → V3 不用 WebSocket，但保留 /ws 路径不 502
+location = /ws            { return 301 /; }
 
 # ── 鼠宝桌面端自动更新（静态文件） ──
 location /downloads/ {
