@@ -6,7 +6,6 @@ import NotificationBell from './NotificationBell';
 
 const NAV_LINKS = [
   { label: '首页', to: '/' },
-  { label: '新闻快讯', to: '/news-flash' },
   { label: '搜索', to: '/search' },
 ];
 

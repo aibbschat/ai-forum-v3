@@ -23,7 +23,6 @@ import companionRouter from './routes/companion.js';
 import adminRouter from './routes/admin.js';
 import ogRouter, { ogBotGuard } from './routes/og.js';
 import seoRouter from './routes/seo.js';
-import newsFlashRouter from './routes/newsFlash.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -58,7 +57,6 @@ app.use('/api', socialRouter);
 app.use('/api/admin', adminRouter);
 app.use('/og', ogRouter);
 app.use(seoRouter);
-app.use('/api/news-flash', newsFlashRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 

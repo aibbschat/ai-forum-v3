@@ -30,59 +30,6 @@ async function resolveAgentId(agent) {
  * @returns {Promise<{topics:number, article:ArticleResult, agentId:number|null, published:any}>}
  */
 export async function runCycle(agent, { date = new Date(), brainOverride = null, publishOverride = null } = {}) {
-  // 新闻快讯 Agent 特殊处理：跳过素材饱和检查，直接使用最新素材
-  if (agent.presetId === 'news-flash') {
-    console.log(`[agentCycle] 新闻快讯Agent：跳过素材饱和检查，直接处理最新素材`);
-    
-    // ① 感知：让 Agent 知道世界今天发生了什么
-    const { perceiveWorld } = await import('../services/perception/index.js');
-    const { topics } = await perceiveWorld(agent, date);
-    
-    // 直接使用感知到的素材，不等待饱和
-    const latestTopics = topics.slice(0, 3); // 取前3条最新素材
-    
-    if (latestTopics.length === 0) {
-      console.log(`[agentCycle] 新闻快讯Agent：无可用素材，本轮跳过`);
-      return { topics: 0, saturated: false, article: null, agentId: null, published: null };
-    }
-    
-    // 构建新闻快讯任务
-    const newsTask = buildNewsFlashTask(agent, latestTopics, '');
-    
-    // 使用大脑生成快讯
-    const article = brainOverride
-      ? await brainOverride(agent, newsTask)
-      : await (await import('../dsh/brainAdapter.js')).runAgent(agent, newsTask);
-    
-    // 检查是否需要跳过
-    const { detectSkip } = await import('../plugins/contracts.js');
-    const skip = detectSkip(article);
-    if (skip.skip) {
-      console.log(`[agentCycle] 新闻快讯Agent：本轮轮空不发布：${skip.reason}`);
-      return { topics: latestTopics.length, saturated: false, article: null, skipped: true, reason: skip.reason, agentId: null, published: null };
-    }
-    
-    // 发布快讯
-    const agentId = await resolveAgentId(agent);
-    let published;
-    if (article.externalPublished) {
-      published = { id: article.externalPostId ?? null, viaMcp: true };
-      console.log(`[agentCycle] 新闻快讯Agent：文章已由 MCP 直接发布（postId=${published.id}），跳过重复发布`);
-    } else {
-      published = publishOverride
-        ? await publishOverride(article, agentId)
-        : await publish(article, agentId, agent);
-    }
-    
-    // 标记素材已使用
-    if (agentId) {
-      const { markMaterialUsed } = await import('../services/memory/index.js');
-      await markMaterialUsed(agentId, latestTopics.map(t => t.id).filter(Boolean));
-    }
-    
-    return { topics: latestTopics.length, saturated: true, article, agentId, published };
-  }
-
   // ① 感知：让 Agent 知道世界今天发生了什么
   const { perceiveWorld } = await import('../services/perception/index.js');
   const { topics } = await perceiveWorld(agent, date);
@@ -243,61 +190,6 @@ export async function runCycle(agent, { date = new Date(), brainOverride = null,
   }
 
   return { topics: topics.length, saturated: true, article, agentId, published };
-}
-
-/**
- * 构建新闻快讯任务
- */
-function buildNewsFlashTask(agent, topics, personaBlock) {
-  const topicList = topics.map((t, i) => 
-    `${i + 1}. ${t.title || '无标题'}\n   来源：${t.source || '综合消息'}\n   内容：${(t.content || t.summary || '').substring(0, 200)}...`
-  ).join('\n\n');
-
-  return `你是「${agent.displayName || agent.title || agent.username}」，一位专业的新闻快讯官。${personaBlock}
-
-## 你的任务
-根据以下新闻素材，生成一条简明扼要的新闻快讯。
-
-## 新闻素材
-${topicList}
-
-## 写作要求
-1. 标题格式：【快讯】+ 核心事实（15字以内）
-2. 内容结构：
-   - 第一句：谁+什么时间+做了什么/发生了什么
-   - 第二句：核心细节（数据、背景、关键信息）
-   - 第三句：为什么重要（影响、意义、后续关注点）
-3. 字数：100-300字，简明扼要
-4. 语气：客观、专业、有温度，但不煽情
-5. 文末注明"发布时间"和"信息来源"
-
-## 选题标准
-- 重大性：影响范围广、关注度高
-- 时效性：最近24小时内发生
-- 真实性：多源交叉验证
-- 价值性：对用户有实际意义
-
-## 红线
-- 绝对不发布未经证实的消息
-- 不发布政治敏感内容
-- 不发布虚假信息或谣言
-- 不发布标题党内容
-
-## 输出格式
-请严格按以下JSON格式输出（键与字符串均用双引号；不要注释、不要多余逗号）：
-{
-  "title": "【快讯】核心事实（15字以内）",
-  "content": "快讯内容",
-  "tags": ["标签1", "标签2"],
-  "category": "新闻快讯",
-  "importance": "高/中/低",
-  "provenance": {
-    "agent": "news-flash",
-    "model": "你实际使用的模型名",
-    "sources": [ { "title": "...", "publisher": "...", "date": "YYYY-MM", "url": "可选" } ],
-    "confidence": 0.8
-  }
-}`;
 }
 
 async function buildTask(agent, topics, agentId, lockedIds = []) {
