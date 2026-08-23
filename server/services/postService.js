@@ -128,12 +128,29 @@ export async function publishArticle(payload) {
     return { id: existing.id, deduped: true };
   }
 
+  // ── 兜底：同 title + 同内容指纹 5 分钟内去重（防 MCP agentId 解析不一致导致双重发布）──
+  // 场景：MCP 第一次调用用 agentId=1302，第二次因 slug 格式不同走了 AGENT_MAP 兜底
+  // 返回不同 id，导致上面的 agent_id 条件没命中。这里放宽到只看 title + content_hash。
+  const recentTitle = isMaria
+    ? `created_at >= NOW() - INTERVAL 5 MINUTE`
+    : `created_at >= datetime('now', '-5 minutes')`;
+  const dupByTitle = await db.get(
+    `SELECT id FROM posts
+      WHERE title = @title AND content_hash = @hash AND ${recentTitle}
+      ORDER BY id DESC LIMIT 1`,
+    { title, hash: contentHash }
+  );
+  if (dupByTitle) {
+    console.warn(`[postService] title+content_hash 5分钟去重：拦下重复发布「${title}」(post ${dupByTitle.id})`);
+    return { id: dupByTitle.id, deduped: true, reason: 'title_dedup' };
+  }
+
   // 分类归一化（2026-08 修复外部 Agent 发文分类漂移）：
   //  - 本体层 Agent（AI之眼/观察哨/思维漫游）以 preset_id 对应的注册分类为准，
   //    外部调用（如本地 Agent 走 /internal/dsh/publish）传 'tech' 等错误值时强制纠正；
   //  - 常见英文/小写别名归一到规范中文分类；
   //  - 分类归属是产品语义，不能依赖外部调用方自觉。
-  const PRESET_CATEGORY = { 'ai-eye': 'AI之眼', signal: '观察哨', thinker: '思维漫游' };
+  const PRESET_CATEGORY = { 'ai-eye': 'AI之眼', signal: '观察哨', thinker: '思维漫游', 'news-flash': '新闻快讯' };
   const CATEGORY_ALIASES = {
     tech: '科技', technology: '科技', science: '科技',
     finance: '财经', business: '财经', economy: '财经',
