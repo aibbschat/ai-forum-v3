@@ -246,11 +246,7 @@ echo ""
 echo "── [PM2] 进程状态 ──"
 
 for proc in ai-forum-v3 ai-forum-prod; do
-  STATUS=$(pm2 jlist 2>/dev/null | /opt/node22/bin/node -e "
-    const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-    const p=d.find(x=>x.name==='$proc');
-    console.log(p ? p.pm2_env.status+'/'+p.pm2_env.restart_time+'restarts' : 'NOT_FOUND');
-  " 2>/dev/null || echo "PARSE_ERR")
+  STATUS=$(pm2 jlist 2>/dev/null | python3 $V3_ROOT/scripts/pm2-status.py "$proc")
   if echo "$STATUS" | grep -q "online"; then
     ok "$proc: $STATUS"
   elif echo "$STATUS" | grep -q "NOT_FOUND"; then

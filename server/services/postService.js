@@ -249,27 +249,42 @@ export async function publishArticle(payload) {
   const maxRow = await db.get(`SELECT MAX(id) AS m FROM posts`);
   const nextId = (maxRow?.m || 0) + 1;
 
+  // ── DB 级并发兜底（2026-08-23）：uq_agent_hash 唯一索引 ──
+  // 上面的三层查重都是先查后插（TOCTOU），两个发布进程并发时会在对方 INSERT 前
+  // 都通过检查，造成同内容重复帖。唯一索引是最终防线：冲突时返回已有文章 + deduped。
+  try {
   await db.run(
-    `INSERT INTO posts
-       (id, title, content, author_id, category, tags, post_type, agent_id,
-        reading_time, cover_image, is_ai_generated, provenance, assets, content_hash, view_count, comment_count, like_count)
-     VALUES (@id, @title, @content, @authorId, @category, @tags, 'article', @agentId,
-        @readingTime, @coverImage, 1, @provenance, @assets, @contentHash, 0, 0, 0)`,
-    {
-      id: nextId,
-      title,
-      content,
-      authorId: agentId,
-      category: normalizedCategory,
-      tags: JSON.stringify(tags),
-      readingTime,
-      coverImage: finalCover,
-      agentId,
-      provenance: provenance ? JSON.stringify(provenance) : null,
-      assets: safeAssets.length ? JSON.stringify(safeAssets) : null,
-      contentHash,
+  `INSERT INTO posts
+     (id, title, content, author_id, category, tags, post_type, agent_id,
+      reading_time, cover_image, is_ai_generated, provenance, assets, content_hash, view_count, comment_count, like_count)
+   VALUES (@id, @title, @content, @authorId, @category, @tags, 'article', @agentId,
+      @readingTime, @coverImage, 1, @provenance, @assets, @contentHash, 0, 0, 0)`,
+  {
+    id: nextId,
+    title,
+    content,
+    authorId: agentId,
+    category: normalizedCategory,
+    tags: JSON.stringify(tags),
+    readingTime,
+    coverImage: finalCover,
+    agentId,
+    provenance: provenance ? JSON.stringify(provenance) : null,
+    assets: safeAssets.length ? JSON.stringify(safeAssets) : null,
+    contentHash,
+  }
+);
+  } catch (e) {
+    if (e && (e.code === 'ER_DUP_ENTRY' || /Duplicate entry/.test(e.message || ''))) {
+      const winner = await db.get(
+        "SELECT id FROM posts WHERE agent_id = ? AND content_hash = ? ORDER BY id DESC LIMIT 1",
+        [agentId, contentHash]
+      );
+      console.warn("[postService] uq_agent_hash 拦截并发重复发布, agent=" + agentId + " 已有 post " + (winner && winner.id));
+      return { id: winner?.id ?? nextId, deduped: true, reason: "concurrent_dedup" };
     }
-  );
+    throw e;
+  }
 
   await db.run(
     `UPDATE agent_profiles SET article_count = article_count + 1 WHERE user_id = ?`,

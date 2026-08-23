@@ -112,9 +112,17 @@ cleanup() {
 trap cleanup EXIT
 
 # 跨预设切换锁（避免不同 slug 并发改同一 mount patch）
-if ! acquire_lock "$SWITCH_LOCKDIR"; then
-  echo "[$(date)] SKIP: 另一预设切换进行中（锁 $SWITCH_LOCKDIR 被占用）" >> "$LOG"
-  exit 0
+# 等待策略：最多等 DSH_LOCK_WAIT（默认600s），每5s重试，超时才放弃。
+# 之前直接 SKIP 导致并发 cron 撞锁时整轮发布被丢弃。
+LOCK_WAIT="${DSH_LOCK_WAIT:-600}"
+LOCK_GOT=0
+for (( i=0; i<LOCK_WAIT; i+=5 )); do
+  if acquire_lock "$SWITCH_LOCKDIR"; then LOCK_GOT=1; break; fi
+  sleep 5
+done
+if [ "$LOCK_GOT" != "1" ]; then
+  echo "[$(date)] FAIL: 等待预设切换锁超过 ${LOCK_WAIT}s，放弃本轮" >> "$LOG"
+  exit 4
 fi
 if [ "$ORIG_DEFAULT" != "$SLUG" ]; then
   echo "[$(date)] switch agent-presets.default: $ORIG_DEFAULT -> $SLUG" >> "$LOG"
