@@ -44,7 +44,7 @@ export async function chat(opts = {}) {
   if (!Array.isArray(messages) || !messages.length) return null;
 
   const target = resolvePurpose(purpose);
-  const model = modelOverride ?? target.model;
+  const requestedModel = modelOverride ?? target.model;
   const callTimeout = timeout ?? timeoutFor(purpose);
 
   // 尝试顺序：目标供应商在前，其余按降级链（去重）
@@ -68,6 +68,9 @@ export async function chat(opts = {}) {
       }
       continue;
     }
+    // 跨供应商降级时模型名要跟随供应商切换：目标供应商用请求的模型，
+    // 其余降级供应商用它自己的默认模型（否则会带着 ark-code-latest 去打小米接口必然 400）。
+    const model = pname === target.provider ? requestedModel : prov.modelId();
     try {
       const res = await callOpenAI(prov, key, { model, messages, json, temperature, maxTokens, timeout: callTimeout });
       if (res.usage) {
@@ -136,7 +139,7 @@ export async function chatStream(opts = {}, onEvent) {
   if (!Array.isArray(messages) || !messages.length) return null;
 
   const target = resolvePurpose(purpose);
-  const model = modelOverride ?? target.model;
+  const requestedModel = modelOverride ?? target.model;
   const callTimeout = timeout ?? timeoutFor(purpose);
   const order = [target.provider, ...FALLBACK_ORDER.filter((p) => p !== target.provider)];
 
@@ -155,6 +158,7 @@ export async function chatStream(opts = {}, onEvent) {
       }
       continue;
     }
+    const model = pname === target.provider ? requestedModel : prov.modelId();
     try {
       const result = await streamOpenAI(prov, key, { model, messages, temperature, maxTokens, timeout: callTimeout }, onEvent);
       if (skippedTargetForKey) {
