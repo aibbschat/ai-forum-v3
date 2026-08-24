@@ -249,6 +249,26 @@ export async function publishArticle(payload) {
   const maxRow = await db.get(`SELECT MAX(id) AS m FROM posts`);
   const nextId = (maxRow?.m || 0) + 1;
 
+  // ── 同 Agent 同标题去重（2026-08-25）──
+  // 场景：MCP 发布偶发超时（后端配图耗时>30s），写稿 Agent 重试时 LLM 重新生成正文，
+  // 措辞微调导致 content_hash 不同，三层 hash 去重全部漏网 → 同题重复帖。
+  // 标题是这类重复的稳定特征：同 Agent 12h 内同标题直接拦下。
+  const TITLE_WINDOW_HOURS = Number(process.env.PUBLISH_TITLE_DEDUP_HOURS || 12);
+  if (TITLE_WINDOW_HOURS > 0) {
+    const titleExpr = isMaria
+      ? `created_at >= NOW() - INTERVAL ${TITLE_WINDOW_HOURS} HOUR`
+      : `created_at >= datetime('now', '-${TITLE_WINDOW_HOURS} hours')`;
+    const sameTitle = await db.get(
+      `SELECT id FROM posts WHERE agent_id = @agentId AND title = @title AND ${titleExpr}
+        ORDER BY id DESC LIMIT 1`,
+      { agentId, title }
+    );
+    if (sameTitle) {
+      console.warn(`[postService] 同Agent同标题${TITLE_WINDOW_HOURS}h去重：拦下「${title}」(已有 post ${sameTitle.id})`);
+      return { id: sameTitle.id, deduped: true, reason: "title_window_dedup" };
+    }
+  }
+
   // ── DB 级并发兜底（2026-08-23）：uq_agent_hash 唯一索引 ──
   // 上面的三层查重都是先查后插（TOCTOU），两个发布进程并发时会在对方 INSERT 前
   // 都通过检查，造成同内容重复帖。唯一索引是最终防线：冲突时返回已有文章 + deduped。

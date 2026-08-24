@@ -99,7 +99,7 @@
         args:
           - __REPO_ROOT__/mcp/aiforum/index.js
         # MCP server 自己会读仓库根 .env；这里不再显式传 token，避免落到 cordis 配置文件里
-        toolCallTimeoutMs: 30000
+        toolCallTimeoutMs: 120000
         failOnStartupError: true
         reconnect:
           enabled: true
