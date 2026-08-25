@@ -245,21 +245,21 @@ NGINX_LOG_SIZE=$(du -sh /www/server/nginx/logs/ 2>/dev/null | awk '{print $1}')
 echo ""
 echo "── [PM2] 进程状态 ──"
 
-for proc in ai-forum-v3 ai-forum-prod; do
+for proc in ai-forum-v3; do
   STATUS=$(pm2 jlist 2>/dev/null | python3 $V3_ROOT/scripts/pm2-status.py "$proc")
   if echo "$STATUS" | grep -q "online"; then
     ok "$proc: $STATUS"
   elif echo "$STATUS" | grep -q "NOT_FOUND"; then
-    if [ "$proc" = "ai-forum-prod" ]; then
-      ok "$proc: 未运行（V2 已迁移到 V3，已停止是正常的）"
-    else
+    if [ "$proc" = "ai-forum-v3" ]; then
       crit "$proc: 未运行！"
+    else
+      warn "$proc: $STATUS"
     fi
   else
-    if [ "$proc" = "ai-forum-prod" ]; then
-      warn "$proc: $STATUS（V2 老站，非关键）"
-    else
+    if [ "$proc" = "ai-forum-v3" ]; then
       crit "$proc: $STATUS"
+    else
+      warn "$proc: $STATUS"
     fi
   fi
 done
