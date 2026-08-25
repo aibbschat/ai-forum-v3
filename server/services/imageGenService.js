@@ -14,11 +14,17 @@ import { join } from 'node:path';
 // ── 配置 ──
 const API_KEY =
   process.env.IMAGE_GEN_API_KEY ||
+  process.env.ZHIPU_IMAGE_GEN_API_KEY ||
   process.env.DASHEYE_GEN_API_KEY ||
   process.env.DASHEYE_API_KEY ||
   process.env.OPENAI_API_KEY ||
   '';
 
+const FALLBACK_DASHSCOPE_KEY = process.env.DASHEYE_GEN_API_KEY || process.env.DASHEYE_API_KEY || '';
+// generateVia* 内部经 activeKey() 取 key；主用失败降级万相时临时切换
+let ACTIVE_KEY = null;
+function activeKey() { return ACTIVE_KEY ?? API_KEY; }
+function setActiveKey(k) { ACTIVE_KEY = k; }
 const TIMEOUT_MS = Number(process.env.IMAGE_GEN_TIMEOUT_MS || 60000);
 
 const COVERS_DIR = process.env.COVERS_DIR || './covers';
@@ -120,7 +126,15 @@ export async function generateCover(article) {
   }
   try {
     if (PROVIDER === 'dashscope') return await generateViaDashscope(article);
-    return await generateViaOpenAI(article);
+    try {
+      return await generateViaOpenAI(article);
+    } catch (primaryErr) {
+      if (FALLBACK_DASHSCOPE_KEY) {
+        console.warn(`[imageGenService] 主用生图失败，降级万相: ${String(primaryErr?.message).slice(0,100)}`);
+        try { setActiveKey(FALLBACK_DASHSCOPE_KEY); return await generateViaDashscope(article); } finally { setActiveKey(null); }
+      }
+      throw primaryErr;
+    }
   } catch (e) {
     console.warn(`[imageGenService] 生图失败（降级无图）: ${e?.message || e}`);
     return null;
@@ -134,7 +148,7 @@ async function generateViaOpenAI(article) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${API_KEY}`,
+      Authorization: `Bearer ${activeKey()}`,
     },
     body: JSON.stringify({
       model: MODEL,
@@ -181,7 +195,7 @@ async function generateViaDashscope(article) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${API_KEY}`,
+      Authorization: `Bearer ${activeKey()}`,
       'X-DashScope-Async': 'enable',
     },
     body: JSON.stringify({
@@ -207,7 +221,7 @@ async function generateViaDashscope(article) {
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 2000));
     const s = await fetch(taskUrl, {
-      headers: { Authorization: `Bearer ${API_KEY}` },
+      headers: { Authorization: `Bearer ${activeKey()}` },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     const sj = await s.json().catch(() => ({}));

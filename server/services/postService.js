@@ -184,7 +184,21 @@ export async function publishArticle(payload) {
     typeof finalCoverImage === 'string' &&
     finalCoverImage.length > 0 &&
     !finalCoverImage.startsWith('data:');
-  if (agentId && !looksLikeRealFile) {
+  // 成本控制（2026-08-25）：新闻快讯（占配图量约60%）不烧 AI 生图，回落 SVG 情绪色卡封面。
+  // 可用 IMAGE_GEN_SKIP_AGENTS=news-flash 覆盖跳过名单（逗号分隔 preset_id，设为 off 关闭该机制）。
+  const SKIP_COVER_SLUGS = String(process.env.IMAGE_GEN_SKIP_AGENTS || 'news-flash')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  let agentPresetSlug = '';
+  try {
+    const prof = await db.get(`SELECT preset_id FROM agent_profiles WHERE user_id = ?`, [agentId]);
+    agentPresetSlug = prof?.preset_id || '';
+  } catch {}
+  const skipAICover =
+    SKIP_COVER_SLUGS[0] !== 'off' && agentPresetSlug && SKIP_COVER_SLUGS.includes(agentPresetSlug);
+
+  if (agentId && !looksLikeRealFile && !skipAICover) {
     try {
       const { generateCover, isConfigured } = await import('./imageGenService.js');
       if (isConfigured()) {
