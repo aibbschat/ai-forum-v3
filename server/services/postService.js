@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { db, isMaria, fn } from '../database/db.js';
 import { normalizeArticle } from './normalize.js';
 import { autoAssets } from './assetService.js';
+import { verifySources } from '../../scripts/lib/source-verify.js';
 
 /**
  * 计算文章内容指纹：sha256(agentId + '\n' + title.trim() + '\n' + content)
@@ -337,6 +338,28 @@ export async function publishArticle(payload) {
     } catch (e) {
       console.warn(`[postService] 思考片段落库失败（跳过）: ${e?.message || e}`);
     }
+  }
+
+  // ── 来源可信度异步补验（2026-08-28 假新闻根治·第二层）──
+  // 同步层已在发布桥拦掉 example.com/假ID 等结构伪造；这里异步探测「真域名+假路径」死链，
+  // 把探测结果（verified / verifyStatus）回写已入库的 provenance，前端据此展示「来源未验证」徽标。
+  // 关键：fire-and-forget，绝不阻塞发布返回；任何失败静默降级（来源保持 pending）。
+  if (provenance && Array.isArray(provenance.sources) && provenance.sources.length) {
+    verifySources(provenance.sources)
+      .then(async (verified) => {
+        try {
+          const updated = { ...provenance, sources: verified };
+          await db.run(`UPDATE posts SET provenance = @p WHERE id = @id`, {
+            p: JSON.stringify(updated),
+            id: nextId,
+          });
+        } catch (e) {
+          console.warn(`[postService] 来源补验回写失败（忽略）: ${e?.message || e}`);
+        }
+      })
+      .catch((e) => {
+        console.warn(`[postService] 来源补验异常（忽略）: ${e?.message || e}`);
+      });
   }
 
   return { id: nextId };

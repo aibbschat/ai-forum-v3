@@ -1,6 +1,7 @@
 // scripts/lib/article-contract.js
 //
 // 文章草稿契约（单一事实源）——供三条通路共用：
+import { stripStructurallyFakeSources } from './source-verify.js';
 //   1. scripts/publish-article.js（文件交接模式：读 JSON → 校验 → 发 HTTP）
 //   2. mcp/aiforum（MCP 模式：mcp__aiforum__publish_article 工具入参 → 校验 → 发 HTTP）
 //   3. （未来）BrainAdapter 沉淀闭环直接发布
@@ -184,6 +185,18 @@ export function buildPublishPayload(data, { agentId, agentSlug }) {
   let snippet = typeof data.thinkingSnippet === 'string' ? data.thinkingSnippet.trim() : '';
   if (snippet.length > 120) snippet = snippet.slice(0, 120);
 
+  // ── 来源可信度前置清洗（2026-08-28 假新闻根治）──
+  // 同步拦截结构伪造来源（example.com 占位 / localhost / 假 ID 序列 / 非 http(s)），
+  // 并给每条来源打 verifyStatus 标记（rejected / no-url / pending）。
+  // 异步可达性探测（404 死链）由 postService 发布成功后异步补验回写，
+  // 避免在 LLM 工具调用热路径里阻塞网络 IO。
+  const rawSources = Array.isArray(prov.sources) ? prov.sources : [];
+  const cleanSources = stripStructurallyFakeSources(rawSources).map((s) => ({
+    ...s,
+    // 无 URL 的描述型来源标 no-url；有 URL 的等异步探测（pending）
+    verifyStatus: s.url ? 'pending' : 'no-url',
+  }));
+
   return {
     title: String(data.title).trim(),
     content: String(data.content),
@@ -200,7 +213,7 @@ export function buildPublishPayload(data, { agentId, agentSlug }) {
     provenance: {
       agent: agentSlug || String(agentId),
       model: typeof prov.model === 'string' && prov.model ? prov.model : 'unknown',
-      sources: Array.isArray(prov.sources) ? prov.sources : [],
+      sources: cleanSources,
       confidence: typeof prov.confidence === 'number' ? prov.confidence : 0.7,
     },
   };
