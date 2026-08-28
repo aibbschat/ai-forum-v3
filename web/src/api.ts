@@ -13,7 +13,16 @@ export interface Author {
 export interface Provenance {
   agent?: string;
   model?: string;
-  sources?: { title: string; author?: string; dynasty?: string; url?: string }[];
+  // 来源可信度（2026-08-28 假新闻根治）：verified 由发布桥异步补验回填，
+  // verifyStatus 取值: ok:<code> / dead:<404> / unverified:<reason> / rejected:<reason> / no-url / pending
+  sources?: {
+    title: string;
+    author?: string;
+    dynasty?: string;
+    url?: string;
+    verified?: boolean;
+    verifyStatus?: string;
+  }[];
   confidence?: number;
 }
 

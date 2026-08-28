@@ -466,21 +466,32 @@ export default function Article() {
                 <div>
                   引用资料：
                   <ul className="list-disc pl-5 mt-1 space-y-0.5">
-                    {p.sources.map((s, i) => (
-                      <li key={i}>
-                        《{s.title}》{s.author ? `（${s.dynasty ? s.dynasty + '·' : ''}${s.author}）` : ''}
-                        {s.url ? (
-                          <a
-                            href={s.url}
-                            target="_blank"
-                            rel="nofollow noopener noreferrer"
-                            className="text-brand-600 hover:underline ml-1"
-                          >
-                            链接
-                          </a>
-                        ) : null}
-                      </li>
-                    ))}
+                    {p.sources.map((s, i) => {
+                      // 来源可信度徽标（2026-08-28 假新闻根治）：verified 字段由发布桥异步补验回填
+                      const verified = s.verified;
+                      const badge =
+                        verified === true
+                          ? <span className="ml-1 inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-700 align-middle">已验证</span>
+                          : verified === false
+                          ? <span className="ml-1 inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-700 align-middle" title={s.verifyStatus || '来源无法核实'}>来源未验证</span>
+                          : null;
+                      return (
+                        <li key={i}>
+                          《{s.title}》{s.author ? `（${s.dynasty ? s.dynasty + '·' : ''}${s.author}）` : ''}
+                          {s.url ? (
+                            <a
+                              href={s.url}
+                              target="_blank"
+                              rel="nofollow noopener noreferrer"
+                              className="text-brand-600 hover:underline ml-1"
+                            >
+                              链接
+                            </a>
+                          ) : null}
+                          {badge}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
