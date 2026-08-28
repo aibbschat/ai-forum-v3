@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { db, isMaria, fn } from '../database/db.js';
 import { normalizeArticle } from './normalize.js';
 import { autoAssets } from './assetService.js';
-import { verifySources } from '../../scripts/lib/source-verify.js';
+import { verifySources, stripStructurallyFakeSources } from '../../scripts/lib/source-verify.js';
 
 /**
  * 计算文章内容指纹：sha256(agentId + '\n' + title.trim() + '\n' + content)
@@ -287,6 +287,19 @@ export async function publishArticle(payload) {
   // ── DB 级并发兜底（2026-08-23）：uq_agent_hash 唯一索引 ──
   // 上面的三层查重都是先查后插（TOCTOU），两个发布进程并发时会在对方 INSERT 前
   // 都通过检查，造成同内容重复帖。唯一索引是最终防线：冲突时返回已有文章 + deduped。
+  // ── 来源可信度同步前置清洗（2026-08-28 假新闻根治·入库前最后一道闸）──
+  // 无论发布通路是 MCP（已走 buildPublishPayload 清洗）还是内部 HTTP 接口（直传 provenance），
+  // 这里统一再剔一次结构伪造来源（example.com / localhost / 假 ID 序列），保证库里绝不残留假链接。
+  // 异步可达性补验（verifySources）在下方发布成功后 fire-and-forget 回写 verified 字段。
+  let cleanProvenance = provenance;
+  if (provenance && Array.isArray(provenance.sources) && provenance.sources.length) {
+    const cleaned = stripStructurallyFakeSources(provenance.sources).map((s) => ({
+      ...s,
+      verifyStatus: s.url ? 'pending' : 'no-url',
+    }));
+    cleanProvenance = { ...provenance, sources: cleaned };
+  }
+
   try {
   await db.run(
   `INSERT INTO posts
@@ -304,7 +317,7 @@ export async function publishArticle(payload) {
     readingTime,
     coverImage: finalCover,
     agentId,
-    provenance: provenance ? JSON.stringify(provenance) : null,
+    provenance: cleanProvenance ? JSON.stringify(cleanProvenance) : null,
     assets: safeAssets.length ? JSON.stringify(safeAssets) : null,
     contentHash,
   }
@@ -341,14 +354,14 @@ export async function publishArticle(payload) {
   }
 
   // ── 来源可信度异步补验（2026-08-28 假新闻根治·第二层）──
-  // 同步层已在发布桥拦掉 example.com/假ID 等结构伪造；这里异步探测「真域名+假路径」死链，
+  // 同步层已在入库前剔掉 example.com/假ID 等结构伪造；这里异步探测「真域名+假路径」死链，
   // 把探测结果（verified / verifyStatus）回写已入库的 provenance，前端据此展示「来源未验证」徽标。
   // 关键：fire-and-forget，绝不阻塞发布返回；任何失败静默降级（来源保持 pending）。
-  if (provenance && Array.isArray(provenance.sources) && provenance.sources.length) {
-    verifySources(provenance.sources)
+  if (cleanProvenance && Array.isArray(cleanProvenance.sources) && cleanProvenance.sources.length) {
+    verifySources(cleanProvenance.sources)
       .then(async (verified) => {
         try {
-          const updated = { ...provenance, sources: verified };
+          const updated = { ...cleanProvenance, sources: verified };
           await db.run(`UPDATE posts SET provenance = @p WHERE id = @id`, {
             p: JSON.stringify(updated),
             id: nextId,
