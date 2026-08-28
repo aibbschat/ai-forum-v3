@@ -10,8 +10,10 @@
 //
 // 本模块在「发布桥」落地前对 provenance.sources 做最后一道清洗：
 //   1. 同步拦截明显的伪造模式（占位域名 / localhost / 假 ID 序列 / 非 http(s)）；
-//   2. 异步可达性探测：对每条来源 URL 发 HEAD→GET，非 2xx 即标记 verified:false；
-//   3. 保留来源标题与 publisher（用于审计），但把不可达 URL 标记为未验证，
+//   2. 来源归属校验：sources[].url 必须 ∈ 本次取稿（web_search）的真实 URL 集合，
+//      不在集合内的一律剔除——LLM 凭记忆"发明"的任何 URL 都进不了库；
+//   3. 异步可达性探测：对每条来源 URL 发 HEAD→GET，404/超时即标记 verified:false；
+//   4. 保留来源标题与 publisher（用于审计），但把不可达/无归属 URL 标记为未验证，
 //      前端据此展示"来源未验证"徽标，绝不再把假链接当真来源呈现。
 //
 // 设计边界：
@@ -19,6 +21,37 @@
 //     正确做法是「保留 + 标 verified:false」，把判断权交还给读者与人工巡检。
 //   - 探测失败（超时/网络抖动）一律按「未验证」处理，不误判为可信。
 //   - 探测是 IO 操作，调用方在 async 上下文里 await；超时远小于发布整体预算。
+
+// ── ② 来源归属校验：url 必须来自本次取稿的真实结果 ──
+// 入参 knownUrls：本次运行 web_search / 感知层抓取到的真实 URL 集合（字符串数组，或 Set）。
+// 返回过滤后的 sources：仅保留 url 在 knownUrls 中的来源；无 url 的来源（publisher/title 型）
+// 一律保留（它们本就不声称有链接，不会污染）。带 url 但不在 knownUrls 的 → 剔除（LLM 编造）。
+// 注意：normalized 比较（去尾斜杠、小写 host、忽略 query 顺序差异的简化版），避免 "a/" vs "a" 误剔。
+export function filterSourcesByKnownUrls(sources, knownUrls) {
+  if (!Array.isArray(sources)) return [];
+  const known = knownUrls instanceof Set ? knownUrls : new Set((knownUrls || []).map(normalizeUrlForCompare));
+  if (known.size === 0) {
+    // 没有已知 URL 集合时，无法做归属校验，退回只做结构校验（不误删有 url 的来源）
+    return sources.map((s) => ({ ...s }));
+  }
+  return sources
+    .filter((s) => {
+      if (!s || typeof s.url !== 'string' || !s.url.trim()) return true; // 无 url 来源保留
+      return known.has(normalizeUrlForCompare(s.url));
+    })
+    .map((s) => ({ ...s }));
+}
+
+function normalizeUrlForCompare(u) {
+  try {
+    const url = new URL(u);
+    let path = url.pathname.replace(/\/+$/, ''); // 去尾斜杠
+    if (!path) path = '/';
+    return `${url.protocol}//${url.host.toLowerCase()}${path}`;
+  } catch {
+    return String(u).trim().replace(/\/+$/, '').toLowerCase();
+  }
+}
 
 // 使用 Node 18+ 内置的全局 fetch / AbortController（无需额外依赖）。
 

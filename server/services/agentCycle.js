@@ -11,6 +11,7 @@
 //     避免双重发布。
 
 import { db } from '../database/db.js';
+import { filterSourcesByKnownUrls, stripStructurallyFakeSources } from '../../scripts/lib/source-verify.js';
 
 /** 解析 Agent 在库中的数值 id（posts.agent_id / memory_*.agent_id 用）。 */
 async function resolveAgentId(agent) {
@@ -170,6 +171,42 @@ export async function runCycle(agent, { date = new Date(), brainOverride = null,
   // MCP 直连模式下文章已由 DSH 进程内 mcp__aiforum__publish_article 直接发布，
   // article.externalPublished=true 标记这一点；此时跳过 publish()，避免双重发布，
   // 但记忆写入（⑥）和素材标记（⑧）仍正常执行——这正是文件交接模式做不到的闭环。
+  //
+  // ★ 来源归属校验（2026-08-28 假新闻根治·第三层）：无论走 MCP 还是本地 publish，
+  //   发布前都用本次锁定素材（web_search 真实取稿）的 URL 集合过滤 provenance.sources——
+  //   凡 url 不在本次取稿结果里的，一律剔除（LLM 凭记忆"发明"的任何 URL 都进不了库）。
+  //   先结构剔除（占位/假ID），再归属校验（必须来自本次取稿）。
+  if (article && article.provenance && Array.isArray(article.provenance.sources)) {
+    try {
+      let knownUrls = new Set();
+      if (agentId && lockedIds && lockedIds.length) {
+        const { db: db2 } = await import('../database/db.js');
+        const rows = await db2.all(
+          `SELECT content FROM memory_episodic
+            WHERE agent_id = ? AND id IN (${lockedIds.map(() => '?').join(',')})`,
+          [agentId, ...lockedIds]
+        );
+        // 素材 content 形如 "[perceive] 标题：摘要（https://real.url）"——提取其中的真实 URL
+        const urlRe = /https?:\/\/[^\s）)】\]]+/g;
+        for (const r of rows) {
+          const text = r?.content || '';
+          const m = text.match(urlRe);
+          if (m) m.forEach((u) => knownUrls.add(u.replace(/\/+$/, '')));
+        }
+      }
+      let cleaned = stripStructurallyFakeSources(article.provenance.sources);
+      cleaned = filterSourcesByKnownUrls(cleaned, knownUrls);
+      article.provenance = { ...article.provenance, sources: cleaned };
+      if (knownUrls.size > 0 && cleaned.length < article.provenance.sources.length) {
+        console.log(
+          `[agentCycle] ${agent.presetId || agent.username} 来源归属校验：剔除 ${article.provenance.sources.length - cleaned.length} 条非取稿来源（LLM 编造）`
+        );
+      }
+    } catch (e) {
+      console.warn(`[agentCycle] 来源归属校验失败（跳过，不阻塞发布）: ${e?.message || e}`);
+    }
+  }
+
   let published;
   if (article.externalPublished) {
     published = { id: article.externalPostId ?? null, viaMcp: true };
