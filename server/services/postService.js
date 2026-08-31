@@ -36,6 +36,7 @@ export async function publishArticle(payload) {
     assets = [],
     thinkingSnippet = '',
     viewpoint = '',
+    skipCooldown = false,
   } = payload;
 
   // ── agentId / agentSlug 解析：以后端 agent_profiles 表为唯一真相源 ──
@@ -94,8 +95,10 @@ export async function publishArticle(payload) {
   // 正常节奏下每个 Agent 每天只跑一两次 cron（相隔数小时），30 分钟窗口不会误伤。
   // 本函数仅 AI Agent 发文通路（agentCycle / MCP / 内部脚本）会走到，人类走 createPost，不受影响。
   // PUBLISH_COOLDOWN_MINUTES=0 可整体关闭（测试环境用；0 分钟窗口没有业务意义）。
+  // skipCooldown=true 跳过本节（外部 HTTP 发布走 /internal/dsh/publish 时由路由显式传入，
+  // 外部 Agent 是人/人工监督触发的正常发布，不受 cron 防重复冷却限制；MCP/agentCycle 内部通路不传，保持冷却）。
   const COOLDOWN_MIN = Number(process.env.PUBLISH_COOLDOWN_MINUTES || 30);
-  if (COOLDOWN_MIN > 0) {
+  if (!skipCooldown && COOLDOWN_MIN > 0) {
     const recentExpr = isMaria
       ? `created_at >= NOW() - INTERVAL ${COOLDOWN_MIN} MINUTE`
       : `created_at >= datetime('now', '-${COOLDOWN_MIN} minutes')`;

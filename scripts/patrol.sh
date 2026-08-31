@@ -15,6 +15,7 @@
 #   [PM2]    进程状态
 #   [NGINX]  配置语法、SSL 证书有效期
 set -uo pipefail
+export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
 
 # ── 配置 ──
 V3_ROOT="/var/www/ai-forum-v3/current"

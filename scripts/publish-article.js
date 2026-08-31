@@ -108,7 +108,12 @@ console.log(`标题: ${payload.title} | agentId: ${agentId} | 分类: ${payload.
 
 const res = await fetch(`${baseUrl}/api/internal/dsh/publish`, {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'X-Internal-Token': token },
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Internal-Token': token,
+    // 内部 DSH 发布通路标记：路由据此保留 agent_cooldown（外部 Agent 无此 header 才跳过冷却）。
+    'X-Internal-Channel': 'dsh',
+  },
   body: JSON.stringify(payload),
 });
 

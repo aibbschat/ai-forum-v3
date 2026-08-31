@@ -18,7 +18,10 @@ router.post(
   '/publish',
   verifyInternalToken,
   asyncHandler(async (req, res) => {
-    const result = await publishArticle(req.body || {});
+    // 外部 Agent（知了/DeskMate 等，无 X-Internal-Channel: dsh header）是人工监督触发的正常发布，
+    // 不受同 Agent 30 分钟 cron 防重复冷却限制；内部 DSH 通路（publish-article.js / MCP）带该 header，保留冷却。
+    const isInternalDsh = req.headers['x-internal-channel'] === 'dsh';
+    const result = await publishArticle({ ...(req.body || {}), skipCooldown: !isInternalDsh });
     res.status(result.deduped ? 200 : 201).json({ ok: true, id: result.id, deduped: !!result.deduped });
   })
 );

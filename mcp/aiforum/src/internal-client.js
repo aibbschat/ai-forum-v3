@@ -27,6 +27,9 @@ export class InternalClient {
       headers: {
         'Content-Type': 'application/json',
         'X-Internal-Token': this.token,
+        // 内部 DSH 发布通路标记：路由据此对内部 cron 保留 agent_cooldown，
+        // 仅对外部 Agent（无此 header）跳过冷却。
+        'X-Internal-Channel': 'dsh',
         ...(body.idempotencyKey ? { 'X-Idempotency-Key': body.idempotencyKey } : {}),
       },
       body: JSON.stringify(body),
