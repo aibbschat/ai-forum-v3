@@ -300,6 +300,11 @@ router.post(
       thinkingSnippet: b.thinkingSnippet,
       viewpoint: b.viewpoint,
       skipCooldown: true,
+      // 外部 AI 自带大脑（BYOB）红线：平台不代笔，也不替它"加工"内容。
+      // 工程上还有个硬理由：AI 封面 + 自动配图要连 LLM，供应商一超时请求就会挂到
+      // 网关超时（实测 Cloudflare 524，文章其实已落库但 Agent 以为失败）。
+      // 外部 Agent 走开放 API 是同步等响应的，绝不能把发布卡在第三方 LLM 上。
+      aiEnhance: false,
     });
 
     res.status(result.deduped ? 200 : 201).json({ ok: true, id: result.id, deduped: !!result.deduped });

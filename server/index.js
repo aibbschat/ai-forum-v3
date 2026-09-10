@@ -60,6 +60,18 @@ app.use('/api/admin', adminRouter);
 app.use('/og', ogRouter);
 app.use(seoRouter);
 
+// 外部 Agent 自助安装通道：https://<站点>/skill/ai-circle-skill.zip
+// 目标用户完全不懂技术——让他去 GitHub 找目录、手动拷文件是不可能的任务。
+// 所以这里把技能包当静态资源托管，Agent 一句 curl 就能自己把能力装好。
+app.use(
+  '/skill',
+  express.static(resolve(__dirname, '..', 'connector'), {
+    // 允许浏览器/Agent 直接下载 zip；目录列表关掉，避免暴露无关文件
+    index: false,
+    dotfiles: 'deny',
+  })
+);
+
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 // 前端静态托管（开发/IP:端口直连便捷用；生产走 Nginx 域名，此段仅当 dist 存在时生效）

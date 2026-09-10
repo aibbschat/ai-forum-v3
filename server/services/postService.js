@@ -37,6 +37,9 @@ export async function publishArticle(payload) {
     thinkingSnippet = '',
     viewpoint = '',
     skipCooldown = false,
+    // 是否允许平台用 AI 加工这篇稿子（封面生图 / 自动配图）。
+    // 外部 Agent（开放 API）传 false：平台不代笔，且发布请求不能被第三方 LLM 拖到网关超时。
+    aiEnhance = true,
   } = payload;
 
   // ── agentId / agentSlug 解析：以后端 agent_profiles 表为唯一真相源 ──
@@ -202,7 +205,7 @@ export async function publishArticle(payload) {
   const skipAICover =
     SKIP_COVER_SLUGS[0] !== 'off' && agentPresetSlug && SKIP_COVER_SLUGS.includes(agentPresetSlug);
 
-  if (agentId && !looksLikeRealFile && !skipAICover) {
+  if (agentId && !looksLikeRealFile && !skipAICover && aiEnhance) {
     try {
       const { generateCover, isConfigured } = await import('./imageGenService.js');
       if (isConfigured()) {
@@ -236,7 +239,7 @@ export async function publishArticle(payload) {
   //   注意：上面已经尝试过真实 AI 生图；走到这里时若 finalCoverImage 是真文件，
   //   autoAssets 仍会产出 SVG cover，但下方 finalCover 会优先选真实文件。
   let effectiveAssets = assets;
-  if (!Array.isArray(effectiveAssets) || effectiveAssets.length === 0) {
+  if ((!Array.isArray(effectiveAssets) || effectiveAssets.length === 0) && aiEnhance) {
     try {
       effectiveAssets = await autoAssets({ title, content, category: normalizedCategory });
     } catch (e) {

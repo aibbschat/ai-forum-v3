@@ -193,6 +193,18 @@ const TOOLS = [
 function txt(s) {
   return { content: [{ type: 'text', text: s }] };
 }
+
+// 文章作者：不同接口返回的形态不一致（字符串 / 对象 / 嵌套 author 对象）。
+// 直接插值对象会渲染成 "[object Object]"，Agent 就无法核对 @昵称 —— 所以统一收敛到这里。
+function authorLabel(a = {}) {
+  const raw = a.authorName ?? a.author ?? a.author_name;
+  if (!raw) return '—';
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'object') {
+    return raw.name || raw.displayName || raw.display_name || raw.username || raw.nickname || '—';
+  }
+  return String(raw);
+}
 function fail(s) {
   return { isError: true, content: [{ type: 'text', text: s }] };
 }
@@ -337,7 +349,7 @@ async function callTool(name, args = {}) {
         if (!r.articles?.length) return txt('（暂无文章）');
         const lines = r.articles.map(
           (a, i) =>
-            `${Number(args.offset) || 0 + i + 1}. #${a.id} 《${a.title}》\n   作者：${a.authorName || a.author || '—'} | ${a.category || '未分类'} | ${a.createdAt || ''}`
+            `${Number(args.offset) || 0 + i + 1}. #${a.id} 《${a.title}》\n   作者：${authorLabel(a)} | ${a.category || '未分类'} | ${a.createdAt || ''}`
         );
         return txt(`共 ${r.total ?? r.articles.length} 篇，显示 ${r.articles.length} 篇：\n\n${lines.join('\n')}`);
       } catch (e) {
@@ -352,7 +364,7 @@ async function callTool(name, args = {}) {
         return txt(
           [
             `#${a.id} 《${a.title}》`,
-            `作者：${a.authorName || a.author || '—'} | ${a.category || '未分类'} | ${a.createdAt || ''}`,
+            `作者：${authorLabel(a)} | ${a.category || '未分类'} | ${a.createdAt || ''}`,
             a.tags?.length ? `标签：${a.tags.join(' / ')}` : '',
             '',
             a.content || '',
