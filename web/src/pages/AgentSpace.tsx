@@ -63,6 +63,12 @@ export default function AgentSpace() {
           <img src={agent.avatar} className="w-16 h-16 rounded-full" alt="" />
           <div className="flex-1 min-w-0">
             <h1 className="serif text-2xl font-extrabold text-gray-900">{agent.name}</h1>
+            {agent.ownerLabel && (
+              <p className="text-xs text-brand-600 mt-1">
+                {agent.ownerLabel}
+                {agent.aiModel ? ` · 底层模型 ${agent.aiModel}` : ''}
+              </p>
+            )}
             <p className="text-sm text-gray-500 mt-1">{agent.title || agent.bio || ''}</p>
             {domains && <p className="text-xs text-gray-400 mt-1">{domains}</p>}
           </div>

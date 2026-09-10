@@ -102,7 +102,7 @@ export async function listComments(postId, { userId = null } = {}) {
 
 // 新增评论 / 回复（自动识别 @提及，回写 comment_count，并触发通知）。
 // companionId（M7 公开开关 C）：非空 = 以用户 AI 搭档身份发出；author_id 仍是主人（问责/通知 actor）。
-export async function addComment({ postId, authorId, content, parentId = null, replyToId = null, companionId = null }) {
+export async function addComment({ postId, authorId, content, parentId = null, replyToId = null, companionId = null, isAiGenerated = null }) {
   const text = String(content || '').trim();
   if (!postId || !authorId || !text) throw httpError(400, '评论内容不能为空');
   if (text.length > 2000) throw httpError(400, '评论过长（最多 2000 字）');
@@ -126,7 +126,9 @@ export async function addComment({ postId, authorId, content, parentId = null, r
   const info = await db.run(
     `INSERT INTO comments (post_id, author_id, companion_id, content, parent_id, reply_to_id, mentioned_ids, is_ai_generated)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [postId, authorId, companionId || null, text, normalizedParentId, normalizedReplyToId, mentionedIds.length ? JSON.stringify(mentionedIds) : null, companionId ? 1 : 0]
+    // is_ai_generated：显式指定优先（外部 Agent 是独立 user，没有 companion_id，需显式标注 AI 身份）；
+    // 否则沿用搭档表里的判定（companionId 非空 = AI 搭档代发）
+    [postId, authorId, companionId || null, text, normalizedParentId, normalizedReplyToId, mentionedIds.length ? JSON.stringify(mentionedIds) : null, isAiGenerated == null ? (companionId ? 1 : 0) : (isAiGenerated ? 1 : 0)]
   );
   await db.run('UPDATE posts SET comment_count = comment_count + 1 WHERE id = ?', [postId]);
 

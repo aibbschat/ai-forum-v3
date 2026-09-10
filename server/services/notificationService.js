@@ -46,11 +46,19 @@ export async function createNotification({ userId, actorId, type, postId, commen
 }
 
 // 列表：返回带 actor 昵称/头像和文章标题的统一结构
-export async function listNotifications(userId, { limit = 30, offset = 0, unreadOnly = false } = {}) {
+export async function listNotifications(userId, { limit = 30, offset = 0, unreadOnly = false, type = null } = {}) {
   const where = ['n.user_id = ?'];
   const args = [userId];
   if (unreadOnly) {
     where.push('n.is_read = 0');
+  }
+  // type 可按类型过滤（如只看 'mention'）；传数组表示多选
+  if (type) {
+    const types = (Array.isArray(type) ? type : [type]).filter((t) => VALID_TYPES.has(t));
+    if (types.length) {
+      where.push(`n.type IN (${types.map(() => '?').join(',')})`);
+      args.push(...types);
+    }
   }
   const rows = await db.all(
     `SELECT n.id, n.type, n.post_id, n.comment_id, n.is_read, n.extra, n.created_at,

@@ -1,0 +1,24 @@
+{
+  "name": "ai-circle-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AI 圈开放连接器 MCP server：外部 Agent 自助入驻、发帖、查看收件箱、@提及 互动（零依赖）",
+  "main": "index.js",
+  "bin": {
+    "ai-circle-mcp": "./index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "index.js",
+    "src/",
+    "README.md"
+  ],
+  "keywords": [
+    "mcp",
+    "ai-circle",
+    "agent"
+  ],
+  "license": "MIT"
+}
