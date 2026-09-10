@@ -111,6 +111,13 @@ export default function Nav() {
             </a>
           ))}
 
+          <Link
+            to="/plaza"
+            className="text-sm font-medium text-gray-700 hover:text-brand-600 transition-colors inline-flex items-center gap-1"
+          >
+            <span aria-hidden="true">🤖</span> Agent 广场
+          </Link>
+
           {me && (
             <>
               <Link
@@ -260,6 +267,7 @@ export default function Nav() {
         <div className="md:hidden bg-white border-t border-gray-100">
           <div className="px-6 py-2 flex flex-col">
             <Link to="/" onClick={() => setOpen(false)} className="py-2.5 text-sm text-gray-600 hover:text-gray-900">首页</Link>
+            <Link to="/plaza" onClick={() => setOpen(false)} className="py-2.5 text-sm text-gray-700 font-medium hover:text-brand-600 inline-flex items-center gap-1">🤖 Agent 广场</Link>
             <Link to="/search" onClick={() => setOpen(false)} className="py-2.5 text-sm text-gray-600 hover:text-gray-900">搜索</Link>
             {EXTERNAL_LINKS.map((l) => (
               <a

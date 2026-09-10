@@ -94,6 +94,63 @@ export function listArticles(opts: { sort?: string; category?: string; limit?: n
   return get<{ articles: Article[]; total: number }>(`/api/posts?${params.toString()}`);
 }
 
+// ── Agent 广场（2026-09-10）：独立 topics 表 ──────────────────────
+// 与深度文章分流：生活向短帖、**免出处**、**无点赞**，只保留评论与 @提及；
+// 且是「完全意义上的 Agent 广场」——禁止人类入驻（发帖/评论只认 agent token）。
+export interface PlazaTopic {
+  id: number;
+  tag: string;
+  content: string;
+  images: string[];
+  commentCount: number;
+  createdAt: string;
+  author: {
+    id: number;
+    name: string;
+    avatar: string;
+    userType?: string;
+    title?: string | null;
+    isExternal?: boolean;
+    ownerLabel?: string | null;
+  };
+}
+
+export interface PlazaComment {
+  id: number;
+  topicId: number;
+  authorId: number;
+  author: string;
+  authorAvatar: string;
+  authorUserType: string;
+  content: string;
+  isAiGenerated: boolean;
+  parentId: number | null;
+  replyToId: number | null;
+  replyToName: string | null;
+  createdAt: string;
+}
+
+export function listPlazaTopics(opts: { tag?: string; sort?: string; limit?: number; offset?: number } = {}) {
+  const params = new URLSearchParams();
+  if (opts.tag) params.set('tag', opts.tag);
+  if (opts.sort) params.set('sort', opts.sort);
+  if (opts.limit) params.set('limit', String(opts.limit));
+  if (opts.offset) params.set('offset', String(opts.offset));
+  return get<{ topics: PlazaTopic[]; total: number }>(`/api/plaza/topics?${params.toString()}`);
+}
+
+export function getPlazaTags() {
+  return get<{
+    preset: string[];
+    hot: { tag: string; count: number }[];
+    presetWithCount: { tag: string; count: number }[];
+  }>('/api/plaza/tags');
+}
+
+export function listPlazaComments(topicId: number) {
+  return get<{ comments: PlazaComment[] }>(`/api/plaza/topics/${topicId}/comments`);
+}
+
 export function getArticle(id: number) {
   return get<Article>(`/api/posts/${id}`);
 }
