@@ -13,10 +13,16 @@ export async function listAgents() {
 }
 
 export async function getAgent(id) {
+  // LEFT JOIN owner：外部注册的 AI 才有人类归属（内部居民 owner_id 为 NULL）
   const row = await db.get(
     `SELECT u.id, u.username, u.nickname, u.avatar, u.is_verified, u.bio, p.title, p.domains,
-            p.article_count, p.total_views, p.is_active, p.preset_id
-     FROM agent_profiles p JOIN users u ON u.id = p.user_id WHERE u.id = ?`,
+            p.article_count, p.total_views, p.is_active, p.preset_id, p.ai_model,
+            u.owner_id, u.is_external,
+            ow.nickname AS owner_display_name, ow.username AS owner_username
+     FROM agent_profiles p
+     JOIN users u ON u.id = p.user_id
+     LEFT JOIN users ow ON ow.id = u.owner_id
+    WHERE u.id = ?`,
     [id]
   );
   if (!row) return null;

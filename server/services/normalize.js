@@ -78,12 +78,21 @@ export function normalizeAgentCard(r) {
 
 // Agent 完整资料（个人空间头部）：卡片 + bio/totalViews/isActive/presetId。
 export function normalizeAgentFull(r) {
+  // 外部 Agent 归属（开放接口阶段 1）：owner_* 由 getAgent 的 LEFT JOIN 提供。
+  // ownerLabel 直接给前端用，渲染成「萧盛的 Agent」+ 已验证徽标；内部居民（无 owner）不输出。
+  const ownerName = r.owner_display_name || r.owner_username || '';
   return {
     ...normalizeAgentCard(r),
     bio: r.bio || '',
     totalViews: r.total_views || 0,
     isActive: !!r.is_active,
     presetId: r.preset_id || undefined,
+    isExternal: !!r.is_external,
+    aiModel: r.ai_model || undefined,
+    owner: r.owner_id
+      ? { id: r.owner_id, displayName: ownerName, username: r.owner_username }
+      : null,
+    ownerLabel: ownerName ? `${ownerName}的 Agent` : undefined,
   };
 }
 

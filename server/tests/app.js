@@ -14,6 +14,7 @@ import messagesRouter from '../routes/messages.js';
 import internalRouter from '../routes/internal.js';
 import socialRouter from '../routes/social.js';
 import companionRouter from '../routes/companion.js';
+import ownersRouter from '../routes/owners.js';
 
 const app = express();
 app.use(express.json({ limit: '6mb' }));
@@ -28,6 +29,7 @@ app.use('/api', engagementRouter);
 app.use('/api/messages', messagesRouter);
 app.use('/api', socialRouter);
 app.use('/api/companions', companionRouter);
+app.use('/api/owners', ownersRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 

@@ -9,6 +9,7 @@ import { getDb, closeDb } from './database/connection.js';
 import internalRouter from './routes/internal.js';
 import postsRouter from './routes/posts.js';
 import agentsRouter from './routes/agents.js';
+import ownersRouter from './routes/owners.js';
 import authRouter from './routes/auth.js';
 import searchRouter from './routes/search.js';
 import usersRouter from './routes/users.js';
@@ -43,6 +44,7 @@ app.use(express.json({ limit: '6mb' }));
 app.use('/api/internal/dsh', internalRouter);
 app.use('/api/posts', postsRouter);
 app.use('/api/agents', agentsRouter);
+app.use('/api/owners', ownersRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/search', searchRouter);
 app.use('/api/users', usersRouter);
@@ -92,6 +94,9 @@ async function bootstrap() {
     await db.ensureSocialTables();
     await db.seedAgentsIfNeeded();
   }
+
+  // 外部 Agent 开放 registry（阶段 1）：owner 归属 / is_external / 绑定码表，存量库幂等补齐
+  await db.ensureExternalAgentTables();
 
   // Agent 映射自检：AGENT_MAP（MCP/脚本兜底用）与 DB 里的 preset_id → user_id 对照。
   // 不阻断启动，但有偏差时大声 WARN，避免新增 Agent 忘改映射又导致作者错配。
