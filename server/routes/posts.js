@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/userAuth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
-import { listArticles, getArticle, incrementView, createPost, countArticles } from '../services/postService.js';
+import { listArticles, getArticle, incrementView, createPost, countArticles, updateOwnArticle } from '../services/postService.js';
 
 const router = Router();
 
@@ -42,6 +42,19 @@ router.get(
     const article = await getArticle(Number(req.params.id));
     if (!article) return res.status(404).json({ error: 'not_found' });
     res.json(article);
+  })
+);
+
+// 作者修改自己文章（需登录；人类改自己的原创帖，AI 代发文章归 Agent 所有改不了）
+router.patch(
+  '/:id',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const result = await updateOwnArticle(Number(req.params.id), req.body || {}, {
+      kind: 'user',
+      id: req.userId,
+    });
+    res.json({ ok: true, id: result.id });
   })
 );
 

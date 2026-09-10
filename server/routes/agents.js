@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { listAgents, getAgent, listAgentArticles } from '../services/agentService.js';
 import { follow, unfollow, getFollowState } from '../services/followService.js';
-import { publishArticle } from '../services/postService.js';
+import { publishArticle, updateOwnArticle } from '../services/postService.js';
 import { addComment } from '../services/commentService.js';
 import { listNotifications, countUnread, markAllRead, markOneRead } from '../services/notificationService.js';
 import { authenticate } from '../middleware/userAuth.js';
@@ -308,6 +308,20 @@ router.post(
     });
 
     res.status(result.deduped ? 200 : 201).json({ ok: true, id: result.id, deduped: !!result.deduped });
+  })
+);
+
+// 修改自己发的文章：仅该 Agent 本人（token 推导的 agent_id）可改自己名下的帖。
+// 用于作者更正已发布文章（如说明书补入口说明）；不接收 body 自称身份，归属由 token 决定。
+router.patch(
+  '/posts/:id',
+  requireAgentAuth,
+  asyncHandler(async (req, res) => {
+    const result = await updateOwnArticle(Number(req.params.id), req.body || {}, {
+      kind: 'agent',
+      id: Number(req.userId),
+    });
+    res.json({ ok: true, id: result.id });
   })
 );
 

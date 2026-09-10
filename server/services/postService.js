@@ -490,3 +490,81 @@ export async function getArticle(id) {
 export async function incrementView(id) {
   await db.run(`UPDATE posts SET view_count = view_count + 1 WHERE id = ?`, [id]);
 }
+
+// 作者本人修改自己文章：仅本人可改自己的帖（论坛缺失的基本能力，2026-09-10 补口子）。
+//   - Agent：article.agent_id === requester.id 才可改（作者即该 Agent）
+//   - 真人：article.author_id === requester.id 且 agent_id 为空（原创帖，非 AI 代发）
+// fields: { title?, content?, category?, tags? }（至少传一个；未传的保持原值）
+// 返回 { id }；不存在 404，越权 403，无字段/字段非法 400。
+// 注意：本函数只改作者自述内容，不动 agent_id/author_id/is_ai_generated 等归属字段，避免越权篡改归属。
+export async function updateOwnArticle(id, fields = {}, requester) {
+  const idNum = Number(id);
+  if (!Number.isInteger(idNum) || idNum <= 0) {
+    const e = new Error('invalid_id');
+    e.status = 400;
+    throw e;
+  }
+  const existing = await db.get(
+    `SELECT id, agent_id, author_id, title, content, category, tags FROM posts WHERE id = ?`,
+    [idNum]
+  );
+  if (!existing) {
+    const e = new Error('not_found');
+    e.status = 404;
+    throw e;
+  }
+
+  if (requester.kind === 'agent') {
+    if (existing.agent_id !== requester.id) {
+      const e = new Error('forbidden');
+      e.status = 403;
+      throw e;
+    }
+  } else {
+    // 真人只可改自己的原创帖（agent_id 为空）；AI 代发的文章归 Agent 所有，真人改不了
+    if (existing.author_id !== requester.id || existing.agent_id) {
+      const e = new Error('forbidden');
+      e.status = 403;
+      throw e;
+    }
+  }
+
+  const patch = {};
+  if (fields.title !== undefined) patch.title = String(fields.title).trim();
+  if (fields.content !== undefined) patch.content = String(fields.content);
+  if (fields.category !== undefined) patch.category = String(fields.category).trim();
+  if (fields.tags !== undefined) patch.tags = Array.isArray(fields.tags) ? fields.tags : [];
+
+  if (Object.keys(patch).length === 0) {
+    const e = new Error('no_fields');
+    e.status = 400;
+    throw e;
+  }
+
+  const title = patch.title ?? existing.title;
+  const content = patch.content ?? existing.content;
+  if (!title || !content) {
+    const e = new Error('missing_fields');
+    e.status = 400;
+    throw e;
+  }
+  if (String(title).length > 200) {
+    const e = new Error('title_too_long');
+    e.status = 400;
+    throw e;
+  }
+
+  const tags = patch.tags !== undefined ? patch.tags : existing.tags ? JSON.parse(existing.tags) : [];
+
+  await db.run(
+    `UPDATE posts SET title = @title, content = @content, category = @category, tags = @tags WHERE id = @id`,
+    {
+      title,
+      content,
+      category: patch.category ?? existing.category,
+      tags: JSON.stringify(tags),
+      id: idNum,
+    }
+  );
+  return { id: idNum };
+}
