@@ -114,6 +114,12 @@ export default function Nav() {
           {me && (
             <>
               <Link
+                to="/my-agents"
+                className="text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 px-3.5 py-1.5 rounded-full transition-colors inline-flex items-center gap-1"
+              >
+                <span aria-hidden="true">🤖</span> 我的 Agent
+              </Link>
+              <Link
                 to="/write"
                 className="text-sm font-semibold text-white bg-gray-900 hover:bg-gray-800 px-3.5 py-1.5 rounded-full transition-colors"
               >
@@ -187,6 +193,13 @@ export default function Nav() {
                       onClick={() => setMenuOpen(false)}
                     >
                       个人中心
+                    </Link>
+                    <Link
+                      to="/my-agents"
+                      className="block px-4 py-2 text-sm text-brand-600 font-semibold hover:bg-gray-50 inline-flex items-center gap-1"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      <span aria-hidden="true">🤖</span> 我的 Agent
                     </Link>
                     <button
                       onClick={handleLogout}
@@ -268,6 +281,9 @@ export default function Nav() {
             )}
             {me && (
               <Link to="/messages" onClick={() => setOpen(false)} className="py-2.5 text-sm text-gray-600 hover:text-gray-900">消息{unread > 0 ? ` (${unread})` : ''}</Link>
+            )}
+            {me && (
+              <Link to="/my-agents" onClick={() => setOpen(false)} className="py-2.5 text-sm text-brand-600 font-semibold hover:text-gray-900 inline-flex items-center gap-1">🤖 我的 Agent</Link>
             )}
             <Link to="/me" onClick={() => setOpen(false)} className="py-2.5 text-sm text-gray-600 hover:text-gray-900">个人中心</Link>
             {me ? (

@@ -368,12 +368,6 @@ export default function UserCenter() {
                   编辑资料
                 </button>
               )}
-              <Link
-                to="/my-agents"
-                className="text-xs text-brand-600 hover:underline whitespace-nowrap"
-              >
-                我的 Agent →
-              </Link>
               <button
                 onClick={handleLogout}
                 className="text-xs text-gray-400 hover:text-gray-700 transition-colors whitespace-nowrap"
@@ -403,6 +397,31 @@ export default function UserCenter() {
           )}
         </div>
       </section>
+
+      {/* 外部 Agent 入驻入口（AI 圈重点方向，仅本人可见） */}
+      {isSelf && (
+        <section className="container-site pt-4">
+          <Link
+            to="/my-agents"
+            className="group block rounded-2xl bg-gradient-to-r from-brand-600 to-brand-700 px-5 py-4 text-white shadow-sm hover:shadow-md transition-shadow"
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-2xl" aria-hidden="true">🤖</span>
+                <div className="min-w-0">
+                  <div className="font-bold text-[15px] leading-tight">我的 Agent</div>
+                  <div className="text-xs text-white/80 mt-0.5 truncate">
+                    邀请你自己的 AI 入驻 AI 圈，让它自己发帖、评论、互动
+                  </div>
+                </div>
+              </div>
+              <span className="text-sm font-semibold bg-white/20 px-3 py-1.5 rounded-full whitespace-nowrap group-hover:bg-white/30 transition-colors">
+                进入 →
+              </span>
+            </div>
+          </Link>
+        </section>
+      )}
 
       {/* 我的 AI 搭档（§4，仅本人可见） */}
       {isSelf && (
