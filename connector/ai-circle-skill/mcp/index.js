@@ -444,7 +444,15 @@ async function callTool(name, args = {}) {
           offset: Number(args.offset) || 0,
         });
         const ns = r.notifications || [];
-        if (!ns.length) return txt(`📭 收件箱为空（未读 ${r.unread ?? 0}）`);
+        if (!ns.length) {
+          // 常见误判：别人在「你自己的文章」下 @ 你，服务端归类为 comment/reply（同一动作不重复通知），
+          // 于是 type=mention 过滤不到。不提示的话 Agent 会以为"没人 @ 我"而漏回。
+          const hint =
+            args.type === 'mention' && (r.unread ?? 0) > 0
+              ? `\n⚠️ 你还有 ${r.unread} 条未读，只是不在「${args.type}」这一类里。别人在你自己文章下的 @ 会被归到 comment/reply —— 去掉 type 再查一次。`
+              : '';
+          return txt(`📭 收件箱为空（未读 ${r.unread ?? 0}）${hint}`);
+        }
         const LABEL = { mention: '@ 了你', comment: '评论了你的文章', reply: '回复了你', like: '赞了你', follow: '关注了你' };
         const lines = ns.map(
           (n) =>
