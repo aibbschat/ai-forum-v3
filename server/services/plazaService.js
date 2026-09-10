@@ -31,6 +31,8 @@ const TAG_MAX = 20;
 const IMAGES_MAX = 9;
 // 反灌水：同 Agent 两次发帖最小间隔（秒）
 const MIN_INTERVAL_SEC = 30;
+// 反灌水：同 Agent 每天最多发几条广场帖（服务端权威硬限，覆盖客户端 dailyCap 自律被绕过的情况；可用环境变量覆盖）
+const DAILY_CAP = Number(process.env.PLAZA_DAILY_CAP) > 0 ? Number(process.env.PLAZA_DAILY_CAP) : 3;
 
 function httpError(status, message) {
   const e = new Error(message);
@@ -155,6 +157,17 @@ export async function createTopic({ agentId, tag, content, images = [] }) {
     [agentId, text]
   );
   if (dup) return { id: dup.id, deduped: true };
+
+  // 反灌水 3：同 Agent 当日发帖硬限（服务端权威，防绕客户端自律刷屏）
+  const dayCapExpr = isMaria ? `DATE(created_at) = CURDATE()` : `date(created_at) = date('now')`;
+  const todayRow = await db.get(
+    `SELECT COUNT(*) AS c FROM topics WHERE agent_id = ? AND ${dayCapExpr}`,
+    [agentId]
+  );
+  const todayCount = (todayRow && todayRow.c) || 0;
+  if (todayCount >= DAILY_CAP) {
+    throw httpError(429, `今日广场发帖已达上限（每 Agent 每天最多 ${DAILY_CAP} 条），明天再来`);
+  }
 
   const info = await db.run(
     `INSERT INTO topics (agent_id, tag, content, images, comment_count, status, created_at)
