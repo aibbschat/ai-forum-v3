@@ -182,3 +182,54 @@ test('owner 可列出自己名下的外部 Agent（事后治理入口）', async
   assert.equal(res.body.agents.length, 2, '应列出两个外部 Agent');
   assert.ok(res.body.agents.every((a) => a.aiModel === 'deskMate'));
 });
+
+// ── 时间格式防回归（2026-09-10 生产事故）──
+// 曾把 expires_at 写成 JS 的 toISOString()（'2026-09-10T06:18:23.499Z'）：
+// SQLite 照单全收（本地测试全绿），但 MariaDB 的 DATETIME 直接拒绝 → 线上 500。
+// 修法是让 DB 自己生成时间（fn.nowOffsetMinutes / fn.now）；本测试锁死落库格式，
+// 保证两种方言下都能通过。
+test('绑定码过期时间必须由 SQL 生成：落库值为 YYYY-MM-DD HH:MM:SS，不得出现 ISO 的 T/Z', async () => {
+  const owner = await makeOwner('期限校验主人');
+  await request(app)
+    .post('/api/owners/binding-code')
+    .set('Authorization', `Bearer ${humanToken(owner.id)}`)
+    .expect(201);
+
+  const row = await db.get(
+    `SELECT expires_at FROM owner_binding_codes WHERE owner_user_id = ? ORDER BY id DESC`,
+    [owner.id]
+  );
+  assert.ok(row, '应写入绑定码');
+
+  const raw = String(row.expires_at);
+  assert.ok(
+    !raw.includes('T') && !raw.includes('Z'),
+    `expires_at 不得是 ISO 8601（MariaDB 会拒），实际落库：${raw}`
+  );
+  assert.match(raw, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, `应为 YYYY-MM-DD HH:MM:SS，实际：${raw}`);
+});
+
+test('核销时间同样由 SQL 生成（used_at 不得出现 ISO 的 T/Z）', async () => {
+  const owner = await makeOwner('核销校验主人');
+  const codeRes = await request(app)
+    .post('/api/owners/binding-code')
+    .set('Authorization', `Bearer ${humanToken(owner.id)}`)
+    .expect(201);
+
+  const uniq = crypto.randomBytes(4).toString('hex');
+  await request(app)
+    .post('/api/agents/register')
+    .send({ bindingCode: codeRes.body.code, name: `核销探针${uniq}`, aiModel: 'deskMate' })
+    .expect(201);
+
+  const row = await db.get(
+    `SELECT used_at FROM owner_binding_codes WHERE owner_user_id = ? ORDER BY id DESC`,
+    [owner.id]
+  );
+  const raw = String(row.used_at);
+  assert.ok(raw && raw !== 'null', '应已核销');
+  assert.ok(
+    !raw.includes('T') && !raw.includes('Z'),
+    `used_at 不得是 ISO 8601（MariaDB 会拒），实际落库：${raw}`
+  );
+});

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
-import { db } from '../database/db.js';
+import { db, fn } from '../database/db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 
@@ -28,16 +28,19 @@ router.post(
     if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
 
     const code = crypto.randomBytes(24).toString('hex');
-    const expiresAt = new Date(Date.now() + TTL_MINUTES * 60 * 1000).toISOString();
+    // 过期时间由 SQL 层生成（MariaDB 拒绝 ISO 的 T/Z；详见 fn.nowOffsetMinutes 注释）。
+    // 这里另算一份 JS 时间**仅用于接口展示**倒计时，不作为落库值。
+    const expiresDisplay = new Date(Date.now() + TTL_MINUTES * 60 * 1000).toISOString();
 
     await db.run(
-      `INSERT INTO owner_binding_codes (code, owner_user_id, expires_at) VALUES (?, ?, ?)`,
-      [code, ownerId, expiresAt]
+      `INSERT INTO owner_binding_codes (code, owner_user_id, expires_at)
+       VALUES (?, ?, ${fn.nowOffsetMinutes(TTL_MINUTES)})`,
+      [code, ownerId]
     );
 
     res.status(201).json({
       code,
-      expiresAt,
+      expiresAt: expiresDisplay,
       ttlMinutes: TTL_MINUTES,
       hint: '把 code 交给你的 Agent（建议由 connector skill 自动传递），30 分钟内有效、仅可用一次',
     });

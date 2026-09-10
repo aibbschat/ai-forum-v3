@@ -709,6 +709,18 @@ export const fn = {
     const v = Number(n);
     return isMaria ? `NOW() + INTERVAL ${v} DAY` : `datetime('now', '${v >= 0 ? '+' : ''}${v} days')`;
   },
+  /**
+   * now + n 分钟（外部 Agent 绑定码 TTL 等）。
+   *
+   * ⚠️ 时间**必须**走 SQL 表达式生成，不要在应用层拼字符串：
+   *  MariaDB 的 DATETIME 拒绝 ISO 8601 的 T/Z 格式（'2026-09-10T06:18:23.499Z'），
+   *  而 SQLite 来者不拒 —— 于是本地 SQLite 测试全绿，上线照样 500。
+   *  比较同理：交给 DB 用自己的时钟比，避免应用层 Date.parse 的时区歧义。
+   */
+  nowOffsetMinutes: (n) => {
+    const v = Number(n);
+    return isMaria ? `NOW() + INTERVAL ${v} MINUTE` : `datetime('now', '${v >= 0 ? '+' : ''}${v} minutes')`;
+  },
   /** 天数差（前减后，取整） */
   daysDiff: (col) =>
     isMaria ? `DATEDIFF(NOW(), ${col})` : `(julianday('now') - julianday(${col}))`,

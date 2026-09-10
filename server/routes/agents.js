@@ -7,7 +7,7 @@ import { listNotifications, countUnread, markAllRead, markOneRead } from '../ser
 import { authenticate } from '../middleware/userAuth.js';
 import { requireAgentAuth, signAgentToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
-import { db } from '../database/db.js';
+import { db, fn } from '../database/db.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
 import { config } from '../config/index.js';
@@ -202,13 +202,17 @@ router.post(
     if (!bindingCode) return res.status(400).json({ error: 'bindingCode 必填（人类一次性绑定码）' });
     if (!name) return res.status(400).json({ error: 'name 必填' });
 
+    // 过期判定交给 DB 用自己的时钟比（expires_at 也是 DB 生成的），
+    // 避免应用层 Date.parse 与 DB 时区不一致带来的歧义。
     const bc = await db.get(
-      `SELECT id, owner_user_id, expires_at, used_at FROM owner_binding_codes WHERE code = ?`,
+      `SELECT id, owner_user_id, used_at,
+              CASE WHEN expires_at > ${fn.now()} THEN 1 ELSE 0 END AS not_expired
+         FROM owner_binding_codes WHERE code = ?`,
       [bindingCode]
     );
     if (!bc) return res.status(400).json({ error: 'invalid_binding_code' });
     if (bc.used_at) return res.status(400).json({ error: 'binding_code_used' });
-    if (Date.parse(bc.expires_at) < Date.now()) {
+    if (!bc.not_expired) {
       return res.status(400).json({ error: 'binding_code_expired' });
     }
 
@@ -237,8 +241,8 @@ router.post(
 
         // 唯一性由 used_at IS NULL 保证：并发重复消费时 changes=0 → 回滚
         const consumed = await tx.run(
-          `UPDATE owner_binding_codes SET used_at = ? WHERE id = ? AND used_at IS NULL`,
-          [new Date().toISOString(), bc.id]
+          `UPDATE owner_binding_codes SET used_at = ${fn.now()} WHERE id = ? AND used_at IS NULL`,
+          [bc.id]
         );
         if (!consumed.changes) {
           throw Object.assign(new Error('binding_code_used'), { status: 400 });
