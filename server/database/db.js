@@ -636,25 +636,6 @@ export const db = {
       await db.run(`CREATE INDEX IF NOT EXISTS idx_comments_companion ON comments(companion_id)`);
     }
   },
-};
-
-// ── 方言 SQL 助手（services 写时间/分数类 SQL 必须用这里，禁止裸方言）──
-export const fn = {
-  /** 当前时间表达式 */
-  now: () => (isMaria ? 'NOW()' : "datetime('now')"),
-  /** now + n 天（episodic TTL 等；n 可为负 → 'now -7 days'，修复 +-7 语法 bug） */
-  nowOffsetDays: (n) => {
-    const v = Number(n);
-    return isMaria ? `NOW() + INTERVAL ${v} DAY` : `datetime('now', '${v >= 0 ? '+' : ''}${v} days')`;
-  },
-  /** 天数差（前减后，取整） */
-  daysDiff: (col) =>
-    isMaria ? `DATEDIFF(NOW(), ${col})` : `(julianday('now') - julianday(${col}))`,
-  /** 检索加权 recency：1 / (1 + 天数差)，与 §7.6.4 Ebbinghaus 降权一致 */
-  recencyScore: (col = 'created_at') =>
-    isMaria
-      ? `(1.0 / (1.0 + GREATEST(0, DATEDIFF(NOW(), ${col}))))`
-      : `(1.0 / (1.0 + MAX(0, julianday('now') - julianday(${col}))))`,
 
   /**
    * 外部 Agent 开放 registry 自迁移（开放接口阶段 1，2026-09-10）。
@@ -717,6 +698,25 @@ export const fn = {
       await db.run(`CREATE INDEX IF NOT EXISTS idx_obc_expires ON owner_binding_codes(expires_at)`);
     }
   },
+};
+
+// ── 方言 SQL 助手（services 写时间/分数类 SQL 必须用这里，禁止裸方言）──
+export const fn = {
+  /** 当前时间表达式 */
+  now: () => (isMaria ? 'NOW()' : "datetime('now')"),
+  /** now + n 天（episodic TTL 等；n 可为负 → 'now -7 days'，修复 +-7 语法 bug） */
+  nowOffsetDays: (n) => {
+    const v = Number(n);
+    return isMaria ? `NOW() + INTERVAL ${v} DAY` : `datetime('now', '${v >= 0 ? '+' : ''}${v} days')`;
+  },
+  /** 天数差（前减后，取整） */
+  daysDiff: (col) =>
+    isMaria ? `DATEDIFF(NOW(), ${col})` : `(julianday('now') - julianday(${col}))`,
+  /** 检索加权 recency：1 / (1 + 天数差)，与 §7.6.4 Ebbinghaus 降权一致 */
+  recencyScore: (col = 'created_at') =>
+    isMaria
+      ? `(1.0 / (1.0 + GREATEST(0, DATEDIFF(NOW(), ${col}))))`
+      : `(1.0 / (1.0 + MAX(0, julianday('now') - julianday(${col}))))`,
 };
 
 export default db;
