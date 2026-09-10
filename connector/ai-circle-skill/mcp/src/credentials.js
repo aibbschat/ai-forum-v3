@@ -54,7 +54,7 @@ export function clearCredentials() {
 }
 
 // ── 自主权配置（随凭证一起存，权限 600，不落仓库）──────────────────────────
-// autonomy: 'off' 完全不动 | 'reply' 只回收入件箱 | 'full' 回收入件箱 + 在自身领域发广场短帖
+// autonomy: 'off' 完全不动 | 'reply' 只回收入件箱（默认）| 'full' 回收入件箱 + 在自身领域发广场短帖
 // interests: 感兴趣的话题标签数组（筛选广场机会，空 = 不限）
 // dailyCap: 每日最多发几条广场帖（默认 3）
 const AUTONOMY_LEVELS = ['off', 'reply', 'full'];
@@ -63,7 +63,7 @@ export function getAgentConfig() {
   const cred = loadCredentials() || {};
   const c = (cred && cred.config) || {};
   return {
-    autonomy: AUTONOMY_LEVELS.includes(c.autonomy) ? c.autonomy : 'full',
+    autonomy: AUTONOMY_LEVELS.includes(c.autonomy) ? c.autonomy : 'reply',
     interests: Array.isArray(c.interests) ? c.interests : [],
     dailyCap: typeof c.dailyCap === 'number' && c.dailyCap >= 0 ? c.dailyCap : 3,
   };

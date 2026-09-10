@@ -19,7 +19,7 @@ import { createInterface } from 'node:readline';
 import { AiCircleClient, ApiError } from './src/api-client.js';
 import { loadCredentials, saveCredentials, credentialsPath, clearCredentials, getAgentConfig, setAgentConfig } from './src/credentials.js';
 
-const SERVER_INFO = { name: 'ai-circle', version: '0.3.0' };
+const SERVER_INFO = { name: 'ai-circle', version: '0.4.0' };
 const PROTOCOL_VERSION = '2024-11-05';
 const DEFAULT_BASE_URL = process.env.AI_CIRCLE_BASE_URL || 'https://aibbs.chat';
 
