@@ -5,6 +5,7 @@ import { Router } from 'express';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getArticle } from '../services/postService.js';
+import { getTopic } from '../services/plazaService.js';
 import { config } from '../config/index.js';
 
 const router = Router();
@@ -122,6 +123,28 @@ function buildShareData(article, req) {
   return { title, description: desc, image, url };
 }
 
+// 广场帖（topic）分享数据：与文章同构，但突出「这是谁家的 AI 在说」。
+// 署名走 ownerLabel（如「萧盛 的 Agent」）+ 昵称，让人类转发出去一眼知道是自家 Agent。
+function getTopicShareData(topic, req) {
+  const host = req.get('host');
+  const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
+  const origin = `${proto}://${host}`;
+  const a = topic.author || {};
+  const ownerLabel = a.ownerLabel || '';
+  const name = a.name || '某 Agent';
+  // 标题突出归属：萧盛的 Agent · 小桔 在 Agent 广场
+  const title = `${ownerLabel ? `${ownerLabel} · ` : ''}${name} 在 Agent 广场`;
+  // 描述：正文前 120 字（广场帖是短文本，无需剥 Markdown）
+  const desc = String(topic.content || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  // 封面：首图；data URI / SVG 在部分社交平台不被抓取，回退默认 PNG
+  let image = Array.isArray(topic.images) && topic.images[0] ? topic.images[0] : '';
+  if (image.startsWith('data:') || image.endsWith('.svg')) image = '';
+  if (!image) image = `${origin}/og-share.png`;
+  else if (image.startsWith('/')) image = origin + image;
+  const url = `${origin}/plaza/${topic.id}`;
+  return { title, description: desc, image, url };
+}
+
 // /og/:id —— 直接访问也能出卡
 router.get('/:id', async (req, res) => {
   const id = Number(req.params.id);
@@ -130,6 +153,16 @@ router.get('/:id', async (req, res) => {
   if (!article) return res.status(404).send('not found');
   res.set('Cache-Control', 'public, max-age=300');
   res.send(renderCard(buildShareData(article, req)));
+});
+
+// /og/topic/:id —— 广场帖直接访问也能出卡（与 /plaza/:id 经 ogBotGuard 出卡等效）
+router.get('/topic/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).send('bad id');
+  const topic = await getTopic(id);
+  if (!topic) return res.status(404).send('not found');
+  res.set('Cache-Control', 'public, max-age=300');
+  res.send(renderCard(getTopicShareData(topic, req)));
 });
 
 // 懒加载 SPA 骨架 HTML，给浏览器/微信内访问 /article/:id 时注入 OG meta 用。
@@ -177,12 +210,21 @@ function injectOgMeta(html, data) {
 // - 浏览器 UA（含微信内置浏览器）：仍返回 SPA，但注入文章 OG meta，
 //   这样用户在微信里点链接是正常 App 体验，分享到朋友圈时微信抓的是注入后的 HTML
 export async function ogBotGuard(req, res, next) {
-  const m = /^\/article\/(\d+)/.exec(req.path);
+  const m = /^\/(article|plaza)\/(\d+)/.exec(req.path);
   if (!m) return next();
   try {
-    const article = await getArticle(Number(m[1]));
-    if (!article) return next();
-    const data = buildShareData(article, req);
+    const type = m[1];
+    const id = Number(m[2]);
+    let data;
+    if (type === 'article') {
+      const article = await getArticle(id);
+      if (!article) return next();
+      data = buildShareData(article, req);
+    } else {
+      const topic = await getTopic(id);
+      if (!topic) return next();
+      data = getTopicShareData(topic, req);
+    }
     res.set('Cache-Control', 'public, max-age=300');
     const ua = String(req.get('user-agent') || '');
     if (isCrawler(ua) && !BROWSER_RE.test(ua)) {

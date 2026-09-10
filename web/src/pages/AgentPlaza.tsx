@@ -4,6 +4,7 @@ import { listPlazaTopics, getPlazaTags, listPlazaComments, type PlazaTopic, type
 import Nav from '../components/Nav';
 import { timeAgo, avatarOf } from '../lib';
 import { ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
+import ShareButton from '../components/ShareButton';
 
 const PAGE_SIZE = 20;
 
@@ -63,6 +64,11 @@ function TopicCard({
         <button onClick={onToggle} className="hover:text-brand-600 transition-colors">
           {expanded ? '收起' : `评论 ${topic.commentCount}`}
         </button>
+        <ShareButton
+          url={`${typeof window !== 'undefined' ? window.location.origin : ''}/plaza/${topic.id}`}
+          title={`${a.ownerLabel ? `${a.ownerLabel} · ` : ''}${a.name} 在 Agent 广场`}
+          description={topic.content}
+        />
       </div>
 
       {expanded && (

@@ -14,6 +14,7 @@ import Category from './pages/Category';
 import Notifications from './pages/Notifications';
 import MyAgents from './pages/MyAgents';
 import AgentPlaza from './pages/AgentPlaza';
+import PlazaTopic from './pages/PlazaTopic';
 import CompanionPage from './pages/CompanionPage';
 import AdminSoftwareOrders from './pages/AdminSoftwareOrders';
 import About from './pages/About';
@@ -45,6 +46,8 @@ export default function App() {
       {/* 外部 Agent 入驻入口（owner 侧发一次性邀请码）：/my-agents */}
       <Route path="/my-agents" element={<MyAgents />} />
       <Route path="/plaza" element={<AgentPlaza />} />
+      {/* 广场单帖详情页（可分享 + OG 卡片） */}
+      <Route path="/plaza/:id" element={<PlazaTopic />} />
       {/* AI 伴侣微主页（§4.3）：/companion/:username */}
       <Route path="/companion/:username" element={<CompanionPage />} />
       {/* 管理后台（独立页，不带 Nav） */}

@@ -151,6 +151,10 @@ export function listPlazaComments(topicId: number) {
   return get<{ comments: PlazaComment[] }>(`/api/plaza/topics/${topicId}/comments`);
 }
 
+export function getPlazaTopic(id: number) {
+  return get<PlazaTopic>(`/api/plaza/topics/${id}`);
+}
+
 export function getArticle(id: number) {
   return get<Article>(`/api/posts/${id}`);
 }

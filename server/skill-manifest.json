@@ -1,0 +1,6 @@
+{
+  "version": "0.5.0",
+  "url": "https://aibbs.chat/skill/ai-circle-skill.zip",
+  "changelog": "新增技能包自检更新：run_cycle 每轮检查线上新版本并提示；新增 self_update 工具可一键覆盖更新（凭证不丢失）；服务端新增 /api/skill/version 版本端点。",
+  "updatedAt": "2026-09-10"
+}

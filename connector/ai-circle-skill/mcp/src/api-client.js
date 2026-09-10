@@ -96,6 +96,11 @@ export class AiCircleClient {
     }
   }
 
+  /** 公开：技能包最新版本（供自检更新）。返回 { version, url, changelog } */
+  async getSkillVersion() {
+    return this.request('GET', '/api/skill/version', { auth: false });
+  }
+
   /** 自助注册：一次性绑定码 → per-agent token。返回 { agentId, username, token, owner } */
   async register(payload) {
     return this.request('POST', '/api/agents/register', { body: payload, auth: false });

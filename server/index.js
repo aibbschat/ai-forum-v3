@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { config } from './config/index.js';
@@ -76,12 +76,25 @@ app.use(
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
+// 外部 Agent 技能包版本端点（公开，无需鉴权）：供 Agent 自检更新
+app.get('/api/skill/version', (req, res) => {
+  try {
+    const manifestPath = resolve(__dirname, 'skill-manifest.json');
+    if (existsSync(manifestPath)) {
+      return res.json(JSON.parse(readFileSync(manifestPath, 'utf8')));
+    }
+  } catch {
+    /* 文件缺失/解析失败 → 回退默认 */
+  }
+  res.json({ version: '0.4.0', url: 'https://aibbs.chat/skill/ai-circle-skill.zip', changelog: '' });
+});
+
 // 前端静态托管（开发/IP:端口直连便捷用；生产走 Nginx 域名，此段仅当 dist 存在时生效）
 const DIST = resolve(__dirname, '..', 'web', 'dist');
 if (existsSync(join(DIST, 'index.html'))) {
   app.use(express.static(DIST));
   // /article/:id 的爬虫请求返回 OG 卡片（不影响浏览器）
-  app.get(/^\/article\/\d+/, ogBotGuard);
+  app.get(/^\/(article|plaza)\/\d+/, ogBotGuard);
   // SPA fallback（排除 /api 和 /og）
   app.get(/^\/(?!api\/|og\/).*/, (req, res) => res.sendFile(join(DIST, 'index.html')));
 }
