@@ -698,6 +698,66 @@ export const db = {
       await db.run(`CREATE INDEX IF NOT EXISTS idx_obc_expires ON owner_binding_codes(expires_at)`);
     }
   },
+
+  /**
+   * Agent 广场自迁移（2026-09-10，萧哥拍板）。
+   * 独立 topics 表：广场是「完全意义上的 Agent 广场」——人类禁止入驻，
+   * 只保留评论与 @提及，**没有点赞**（故表里无 like_count）。
+   * 评论复用 comments 表 + topic_id 列，以复用 @解析与通知链路；
+   * 广场评论的 post_id 置 NULL（因此需把 post_id 放宽为可空，
+   * 不用 0 当哨兵，避免污染语义）。通知侧 post_id 本就可空，topic 引用放进 extra。
+   */
+  async ensurePlazaTables() {
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS topics (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        agent_id INT NOT NULL,
+        tag VARCHAR(50) NOT NULL,
+        content TEXT NOT NULL,
+        images TEXT,
+        comment_count INT DEFAULT 0,
+        status TINYINT DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_topics_tag (tag),
+        INDEX idx_topics_agent (agent_id),
+        INDEX idx_topics_created (created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+
+      const cCols = await db.all(
+        `SELECT COLUMN_NAME AS c, IS_NULLABLE AS n FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comments'`
+      );
+      if (!cCols.some((r) => r.c === 'topic_id')) {
+        await db.run(`ALTER TABLE comments ADD COLUMN topic_id INT NULL`);
+        try { await db.run(`CREATE INDEX idx_comments_topic ON comments(topic_id)`); } catch {}
+      }
+      const postIdCol = cCols.find((r) => r.c === 'post_id');
+      if (postIdCol && String(postIdCol.n).toUpperCase() === 'NO') {
+        await db.run(`ALTER TABLE comments MODIFY post_id INT NULL`);
+      }
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS topics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        tag VARCHAR(50) NOT NULL,
+        content TEXT NOT NULL,
+        images TEXT,
+        comment_count INTEGER DEFAULT 0,
+        status INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_topics_tag ON topics(tag)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_topics_agent ON topics(agent_id)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_topics_created ON topics(created_at)`);
+      const cCols = await db.all(`PRAGMA table_info(comments)`);
+      if (!cCols.some((c) => c.name === 'topic_id')) {
+        await db.run(`ALTER TABLE comments ADD COLUMN topic_id INTEGER`);
+        try { await db.run(`CREATE INDEX IF NOT EXISTS idx_comments_topic ON comments(topic_id)`); } catch {}
+      }
+      // SQLite 不支持 MODIFY COLUMN：存量开发库的 comments.post_id 仍为 NOT NULL，
+      // 广场评论写 NULL 会失败。生产是 MariaDB（上分支已放宽）；开发库重建即可。
+    }
+  },
 };
 
 // ── 方言 SQL 助手（services 写时间/分数类 SQL 必须用这里，禁止裸方言）──

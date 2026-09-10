@@ -102,19 +102,34 @@ export async function listComments(postId, { userId = null } = {}) {
 
 // 新增评论 / 回复（自动识别 @提及，回写 comment_count，并触发通知）。
 // companionId（M7 公开开关 C）：非空 = 以用户 AI 搭档身份发出；author_id 仍是主人（问责/通知 actor）。
-export async function addComment({ postId, authorId, content, parentId = null, replyToId = null, companionId = null, isAiGenerated = null }) {
+export async function addComment({ postId, topicId = null, authorId, content, parentId = null, replyToId = null, companionId = null, isAiGenerated = null }) {
   const text = String(content || '').trim();
-  if (!postId || !authorId || !text) throw httpError(400, '评论内容不能为空');
+  if ((!postId && !topicId) || !authorId || !text) throw httpError(400, '评论内容不能为空');
   if (text.length > 2000) throw httpError(400, '评论过长（最多 2000 字）');
 
-  const post = await db.get('SELECT id, author_id, agent_id FROM posts WHERE id = ?', [postId]);
-  if (!post) throw httpError(404, '文章不存在');
+  // 评论目标：文章（post）或 Agent 广场帖（topic）。
+  // 广场评论的 post_id 写 NULL —— 它不属于任何文章，绝不塞 0 这类哨兵值污染语义。
+  let targetAuthorId = null;
+  let targetAgentId = null;
+  if (topicId) {
+    const topic = await db.get('SELECT id, agent_id FROM topics WHERE id = ?', [topicId]);
+    if (!topic) throw httpError(404, '广场帖不存在');
+    targetAuthorId = topic.agent_id;
+    targetAgentId = topic.agent_id;
+  } else {
+    const post = await db.get('SELECT id, author_id, agent_id FROM posts WHERE id = ?', [postId]);
+    if (!post) throw httpError(404, '文章不存在');
+    targetAuthorId = post.author_id;
+    targetAgentId = post.agent_id;
+  }
 
   let normalizedParentId = null;
   let normalizedReplyToId = replyToId ?? null;
   if (parentId) {
-    const parent = await db.get('SELECT id, author_id, post_id FROM comments WHERE id = ?', [parentId]);
-    if (!parent || Number(parent.post_id) !== Number(postId)) throw httpError(400, '回复的评论不存在');
+    const parent = await db.get('SELECT id, author_id, post_id, topic_id FROM comments WHERE id = ?', [parentId]);
+    if (!parent) throw httpError(400, '回复的评论不存在');
+    const parentTarget = topicId ? parent.topic_id : parent.post_id;
+    if (Number(parentTarget) !== Number(topicId || postId)) throw httpError(400, '回复的评论不存在');
     // 不允许跨楼：如果 parent 自己已经是回复，把它的顶层作为本次 parent
     normalizedParentId = parent.id;
     // replyToId 缺省 = 被回复评论的作者
@@ -124,61 +139,66 @@ export async function addComment({ postId, authorId, content, parentId = null, r
   const mentionedIds = await extractMentionedIds(text);
 
   const info = await db.run(
-    `INSERT INTO comments (post_id, author_id, companion_id, content, parent_id, reply_to_id, mentioned_ids, is_ai_generated)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    // is_ai_generated：显式指定优先（外部 Agent 是独立 user，没有 companion_id，需显式标注 AI 身份）；
-    // 否则沿用搭档表里的判定（companionId 非空 = AI 搭档代发）
-    [postId, authorId, companionId || null, text, normalizedParentId, normalizedReplyToId, mentionedIds.length ? JSON.stringify(mentionedIds) : null, isAiGenerated == null ? (companionId ? 1 : 0) : (isAiGenerated ? 1 : 0)]
+    `INSERT INTO comments (post_id, topic_id, author_id, companion_id, content, parent_id, reply_to_id, mentioned_ids, is_ai_generated)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    // is_ai_generated：显式指定优先（外部 Agent 是独立 user，没有 companion_id，需显式标注 AI 身份）
+    [topicId ? null : postId, topicId || null, authorId, companionId || null, text, normalizedParentId, normalizedReplyToId, mentionedIds.length ? JSON.stringify(mentionedIds) : null, isAiGenerated == null ? (companionId ? 1 : 0) : (isAiGenerated ? 1 : 0)]
   );
-  await db.run('UPDATE posts SET comment_count = comment_count + 1 WHERE id = ?', [postId]);
+  if (topicId) {
+    await db.run('UPDATE topics SET comment_count = comment_count + 1 WHERE id = ?', [topicId]);
+  } else {
+    await db.run('UPDATE posts SET comment_count = comment_count + 1 WHERE id = ?', [postId]);
+  }
 
   // ── 通知（fire-and-forget，绝不阻塞评论） ──
   const snippet = text.slice(0, 80);
   const actorId = authorId;
-  // 1) 文章作者收到「评论」/「回复」
   const isReply = !!normalizedParentId;
-  if (post.author_id && post.author_id !== actorId) {
+  const notifyPostId = topicId ? null : postId;
+  const baseExtra = { snippet, ...(topicId ? { topicId } : {}) };
+  // 1) 帖子作者收到「评论」/「回复」
+  if (targetAuthorId && targetAuthorId !== actorId) {
     createNotification({
-      userId: post.author_id,
+      userId: targetAuthorId,
       actorId,
       type: isReply ? 'reply' : 'comment',
-      postId,
+      postId: notifyPostId,
       commentId: info.lastInsertRowid,
-      extra: { snippet },
+      extra: baseExtra,
     });
   }
   // 2) 被精准回复的用户（楼中楼 replyToId）
-  if (normalizedReplyToId && normalizedReplyToId !== actorId && normalizedReplyToId !== post.author_id) {
+  if (normalizedReplyToId && normalizedReplyToId !== actorId && normalizedReplyToId !== targetAuthorId) {
     createNotification({
       userId: normalizedReplyToId,
       actorId,
       type: 'reply',
-      postId,
+      postId: notifyPostId,
       commentId: info.lastInsertRowid,
-      extra: { snippet },
+      extra: baseExtra,
     });
   }
   // 3) @提及的用户（去重）
   for (const uid of mentionedIds) {
-    if (uid !== actorId && uid !== post.author_id && uid !== normalizedReplyToId) {
+    if (uid !== actorId && uid !== targetAuthorId && uid !== normalizedReplyToId) {
       createNotification({
         userId: uid,
         actorId,
         type: 'mention',
-        postId,
+        postId: notifyPostId,
         commentId: info.lastInsertRowid,
-        extra: { snippet },
+        extra: baseExtra,
       });
     }
   }
 
   // ★ 层3 反馈接线（2026-08-15）：读者评论写回被评论 Agent 的记忆（source='feedback'）。
-  if (post.agent_id && typeof post.agent_id === 'number') {
+  if (targetAgentId && typeof targetAgentId === 'number') {
     if (text.length >= 6) {
       try {
         const { writeEpisodic } = await import('./memory/index.js');
         await writeEpisodic({
-          agentId: post.agent_id,
+          agentId: targetAgentId,
           content: `读者反馈：${text.slice(0, 300)}`,
           source: 'feedback',
           importance: 0.7,
@@ -190,7 +210,7 @@ export async function addComment({ postId, authorId, content, parentId = null, r
   }
 
   const row = await db.get(
-    `SELECT c.id, c.post_id, c.author_id, c.companion_id, c.content, c.is_ai_generated, c.created_at,
+    `SELECT c.id, c.post_id, c.topic_id, c.author_id, c.companion_id, c.content, c.is_ai_generated, c.created_at,
             c.parent_id, c.reply_to_id, c.mentioned_ids,
             u.nickname AS author, u.avatar AS author_avatar,
             u.user_type AS author_user_type,
@@ -207,6 +227,7 @@ export async function addComment({ postId, authorId, content, parentId = null, r
   return {
     id: row.id,
     postId: row.post_id,
+    topicId: row.topic_id ?? null,
     authorId: row.author_id,
     author: row.companion_id && row.companion_name ? row.companion_name : row.author,
     authorAvatar: row.companion_id && row.companion_name ? row.companion_avatar : row.author_avatar,

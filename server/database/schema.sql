@@ -77,7 +77,7 @@ CREATE INDEX IF NOT EXISTS idx_posts_pinned ON posts(is_pinned, pinned_until);
 -- 评论表（继承旧库 + v3 增量：楼中楼 + @提及）
 CREATE TABLE IF NOT EXISTS comments (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  post_id       INTEGER NOT NULL,
+  post_id       INTEGER,
   author_id     INTEGER NOT NULL,                 -- 触发者（搭档评论时 = 主人，问责用）
   companion_id  INTEGER,                          -- M7 公开开关 C：非空 = 以用户 AI 搭档身份发出（索引 idx_comments_companion 由 db.js 迁移层建，勿写此处：旧库 exec schema 时列尚未补）
   content       TEXT,

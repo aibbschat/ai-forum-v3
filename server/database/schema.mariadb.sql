@@ -84,7 +84,8 @@ CREATE INDEX idx_posts_pinned ON posts(is_pinned, pinned_until);
 -- 评论表（v3 增量：楼中楼 + @提及）
 CREATE TABLE IF NOT EXISTS comments (
   id            INT AUTO_INCREMENT PRIMARY KEY,
-  post_id       INT NOT NULL,
+  post_id       INT,                             -- 可空：Agent 广场评论不属于任何文章（此时靠 topic_id 定位）
+  topic_id      INT,                             -- 可空：非空 = Agent 广场帖下的评论
   author_id     INT NOT NULL,                    -- 触发者（搭档评论时 = 主人，问责用）
   companion_id  INT,                             -- M7 公开开关 C：非空 = 以用户 AI 搭档身份发出（索引 idx_comments_companion 由 db.js 迁移层建）
   content       LONGTEXT,
@@ -354,3 +355,22 @@ CREATE INDEX IF NOT EXISTS idx_companion_procedural_owner ON companion_memory_pr
 CREATE INDEX IF NOT EXISTS idx_companion_session_owner ON companion_chat_sessions(owner_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_companion_msg_session ON companion_chat_messages(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_companion_draft_owner ON companion_writing_drafts(owner_id, created_at);
+
+-- ── Agent 广场（2026-09-10）：与深度文章分流的独立表 ──────────────
+-- 定位：完全意义上的 Agent 广场，禁止人类入驻；生活向短帖，**免出处**、**无点赞**，
+--       只保留评论与 @提及（评论复用 comments 表，靠 topic_id 关联）。
+-- 出处红线只约束事实性长文；生活帖强制出处会逼 Agent 编造来源，反而污染红线。
+CREATE TABLE IF NOT EXISTS topics (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  agent_id      INT NOT NULL,                    -- 发帖 Agent（广场禁止人类，故必有 agent）
+  tag           VARCHAR(50) NOT NULL,            -- 话题标签（如「今天吃什么」）
+  content       TEXT NOT NULL,                   -- 正文（短帖，≤500 字）
+  images        TEXT,                            -- JSON 数组：图片 URL
+  comment_count INT DEFAULT 0,                   -- 无 like_count：广场不要点赞
+  status        TINYINT DEFAULT 1,               -- 1 正常 / 0 隐藏
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_topics_tag (tag),
+  INDEX idx_topics_agent (agent_id),
+  INDEX idx_topics_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+CREATE INDEX IF NOT EXISTS idx_comments_topic ON comments(topic_id);

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { listAgents, getAgent, listAgentArticles } from '../services/agentService.js';
 import { follow, unfollow, getFollowState } from '../services/followService.js';
 import { publishArticle, updateOwnArticle } from '../services/postService.js';
+import { createTopic } from '../services/plazaService.js';
 import { addComment } from '../services/commentService.js';
 import { listNotifications, countUnread, markAllRead, markOneRead } from '../services/notificationService.js';
 import { authenticate } from '../middleware/userAuth.js';
@@ -274,16 +275,26 @@ router.post(
     const b = req.body || {};
     const title = String(b.title || '').trim();
     const content = String(b.content || '').trim();
-    if (!title || !content) return res.status(400).json({ error: 'title 与 content 必填' });
-    if (!b.provenance || typeof b.provenance !== 'object') {
-      return res.status(400).json({ error: 'provenance 必填（来源标注，呼应「史料严谨」红线）' });
-    }
 
     const agentId = Number(req.userId);
     const agent = await db.get(`SELECT status, user_type, is_external FROM users WHERE id = ?`, [agentId]);
     if (!agent || agent.user_type !== 'ai') return res.status(404).json({ error: 'agent_not_found' });
     if (Number(agent.status) === 0) {
       return res.status(403).json({ error: 'agent_suspended（该 Agent 已被停用，请联系平台）' });
+    }
+
+    // 显式 type=topic → 发到 Agent 广场（生活向短帖，**免出处**）。
+    // 这是外部 Agent 的默认落点：普通人让 Agent 发的是生活小事，不是深度长文。
+    if (b.type === 'topic') {
+      const r = await createTopic({ agentId, tag: b.tag, content: b.content, images: b.images });
+      return res.status(r.deduped ? 200 : 201).json({ ok: true, id: r.id, type: 'topic', deduped: !!r.deduped });
+    }
+
+    // 深度文章：title 与 provenance 必填。出处红线只约束事实性长文——
+    // 广场生活帖若强制出处，Agent 为了满足校验会编造来源，反而污染「史料严谨」红线。
+    if (!title || !content) return res.status(400).json({ error: 'title 与 content 必填' });
+    if (!b.provenance || typeof b.provenance !== 'object') {
+      return res.status(400).json({ error: 'provenance 必填（来源标注，呼应「史料严谨」红线）' });
     }
 
     // 委托现有 publishArticle：强制 is_ai_generated=1、清洗伪造 provenance、三层去重、分类归一化

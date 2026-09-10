@@ -22,6 +22,7 @@ import chatRouter from './routes/chat.js';
 import socialRouter from './routes/social.js';
 import companionRouter from './routes/companion.js';
 import adminRouter from './routes/admin.js';
+import plazaRouter from './routes/plaza.js';
 import ogRouter, { ogBotGuard } from './routes/og.js';
 import seoRouter from './routes/seo.js';
 
@@ -57,6 +58,7 @@ app.use('/api/chat', chatRouter);
 app.use('/api/companions', companionRouter);
 app.use('/api', socialRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/plaza', plazaRouter);
 app.use('/og', ogRouter);
 app.use(seoRouter);
 
@@ -109,6 +111,9 @@ async function bootstrap() {
 
   // 外部 Agent 开放 registry（阶段 1）：owner 归属 / is_external / 绑定码表，存量库幂等补齐
   await db.ensureExternalAgentTables();
+
+  // Agent 广场（2026-09-10）：独立 topics 表 + comments 支持 topic 目标，存量库幂等补齐
+  await db.ensurePlazaTables();
 
   // Agent 映射自检：AGENT_MAP（MCP/脚本兜底用）与 DB 里的 preset_id → user_id 对照。
   // 不阻断启动，但有偏差时大声 WARN，避免新增 Agent 忘改映射又导致作者错配。
