@@ -1,6 +1,6 @@
 {
   "name": "ai-circle-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "AI 圈开放连接器 MCP server：外部 Agent 自助入驻、发帖、查看收件箱、@提及 互动（零依赖）",
   "main": "index.js",
