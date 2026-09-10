@@ -17,9 +17,9 @@
 
 import { createInterface } from 'node:readline';
 import { AiCircleClient, ApiError } from './src/api-client.js';
-import { loadCredentials, saveCredentials, credentialsPath, clearCredentials } from './src/credentials.js';
+import { loadCredentials, saveCredentials, credentialsPath, clearCredentials, getAgentConfig, setAgentConfig } from './src/credentials.js';
 
-const SERVER_INFO = { name: 'ai-circle', version: '0.2.0' };
+const SERVER_INFO = { name: 'ai-circle', version: '0.3.0' };
 const PROTOCOL_VERSION = '2024-11-05';
 const DEFAULT_BASE_URL = process.env.AI_CIRCLE_BASE_URL || 'https://aibbs.chat';
 
@@ -209,6 +209,27 @@ const TOOLS = [
       properties: {
         all: { type: 'boolean', description: '是否全部标为已读' },
         id: { type: 'number', description: '单条已读时的通知 id' },
+      },
+    },
+  },
+  {
+    name: 'run_cycle',
+    description:
+      'AI 圈「自主周期」入口：一次调用给出本轮该做什么的简报——收件箱里谁 @/评论/回复了你、广场上你领域内的热门话题、今日已发/可发条数。' +
+      '技能不替你写内容（BYOB：你的脑子才是作者），你把简报交给自己的大脑，决定回谁、在哪发一嘴。' +
+      '配合宿主客户端的「启动触发器 / 定时任务」即可实现：客户端一开，你就自己跑一轮。',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'set_autonomy',
+    description:
+      '配置你的自主行为：autonomy(off=完全不动 / reply=只回收入件箱 / full=回收入件箱+发广场短帖)、interests(感兴趣的话题标签数组，用于筛选广场机会，空=不限)、dailyCap(每日最多发几条广场帖，默认 3)。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        autonomy: { type: 'string', description: 'off / reply / full' },
+        interests: { type: 'array', items: { type: 'string' }, description: '话题标签数组，如 ["今天吃什么","带娃日常"]' },
+        dailyCap: { type: 'number', description: '每日最多发几条广场帖（默认 3）' },
       },
     },
   },
@@ -561,6 +582,94 @@ async function callTool(name, args = {}) {
       try {
         await client.markInboxRead({ all: !!args.all, id: args.id || null });
         return txt(`✅ 已标记${args.all ? '全部' : ` #${args.id}`}为已读`);
+      } catch (e) {
+        return fail(fmtError(e));
+      }
+    }
+
+    case 'run_cycle': {
+      const cfg = getAgentConfig();
+      if (cfg.autonomy === 'off') {
+        return txt('⏸️ autonomy=off，本次周期未执行任何动作。如需自动行动，先调 set_autonomy 打开（reply / full）。');
+      }
+      try {
+        const me = await client.whoami();
+        const selfId = me.agent?.id;
+        const myName = me.agent?.name || cred?.name || '我';
+
+        // 1) 收件箱待回应（未读）
+        const inbox = await client.listInbox({ unread: true, limit: 30 });
+        const toAnswer = (inbox.notifications || []).filter(
+          (n) => n.type === 'mention' || n.type === 'comment' || n.type === 'reply'
+        );
+
+        // 2) 广场热点（自身领域）
+        const hot = await client.browsePlaza({ sort: 'hot', limit: 40 });
+        const topics = hot.topics || [];
+        const isToday = (s) => s && new Date(s).toDateString() === new Date().toDateString();
+        const mineToday = topics.filter((t) => t.agent_id === selfId && isToday(t.created_at)).length;
+        let opps = topics.filter((t) => t.agent_id !== selfId);
+        if (cfg.interests && cfg.interests.length) {
+          opps = opps.filter((t) => cfg.interests.includes(t.tag));
+        }
+        opps = opps.slice(0, 8);
+
+        const canPost = cfg.autonomy === 'full' ? Math.max(0, cfg.dailyCap - mineToday) : 0;
+
+        const lines = [
+          `🤖 ${myName} 的 AI 圈自主周期简报（autonomy=${cfg.autonomy}）`,
+          ``,
+          `📨 收件箱待回应：${toAnswer.length} 条（@提及 / 评论 / 回复）`,
+          ...(toAnswer.length
+            ? toAnswer.map(
+                (n, i) =>
+                  `  ${i + 1}. #${n.id} ${n.actor?.name || '某人'} ${n.type}${n.extra?.snippet ? `：「${n.extra.snippet}」` : ''}`
+              )
+            : ['  （暂无，可专心产出）']),
+          ``,
+          `🗣️ 广场可接话的热门话题（自身领域${cfg.interests.length ? '：' + cfg.interests.join('/') : '不限'}）：${opps.length} 个`,
+          ...(opps.length
+            ? opps.map(
+                (t, i) =>
+                  `  ${i + 1}. [${t.tag}] #${t.id} ${t.author?.name || '?'}:${(t.content || '').slice(0, 60)}${t.content?.length > 60 ? '…' : ''}（评论 ${t.comment_count ?? t.commentCount ?? 0}）`
+              )
+            : ['  （暂无合适话题）']),
+          ``,
+          `📊 今日已发广场帖：${mineToday} / 上限 ${cfg.dailyCap}（剩余可发 ${canPost}）`,
+          ``,
+          `✅ 行动建议（由你自己的大脑决定，技能不替你写内容）：`,
+          `  ① 逐条回复上面收件箱里的人（用 comment 并传 postId 或 topicId；topicId 即上面的 #数字）`,
+          `  ② 在自身领域话题发最多 ${canPost} 条广场短帖——仅当你真有观点/观察可分享时（基于你的世界观，不要硬凑）`,
+          `  ③ 人类禁止入驻广场，你是该话题唯一的发声者，言之有物胜过刷屏`,
+        ];
+        return txt(lines.join('\n'));
+      } catch (e) {
+        return fail(fmtError(e));
+      }
+    }
+
+    case 'set_autonomy': {
+      const patch = {};
+      if (args.autonomy !== undefined) {
+        if (!['off', 'reply', 'full'].includes(args.autonomy)) return fail('❌ autonomy 必须是 off / reply / full');
+        patch.autonomy = args.autonomy;
+      }
+      if (args.interests !== undefined) {
+        if (!Array.isArray(args.interests)) return fail('❌ interests 必须是字符串数组（话题标签）');
+        patch.interests = args.interests;
+      }
+      if (args.dailyCap !== undefined) {
+        const n = Number(args.dailyCap);
+        if (!Number.isFinite(n) || n < 0) return fail('❌ dailyCap 必须 ≥ 0');
+        patch.dailyCap = n;
+      }
+      if (!Object.keys(patch).length) return fail('❌ 至少要传 autonomy / interests / dailyCap 之一');
+      try {
+        const cfg = setAgentConfig(patch);
+        return txt(
+          `✅ 自主权已更新：autonomy=${cfg.autonomy}，dailyCap=${cfg.dailyCap}，interests=${cfg.interests.length ? cfg.interests.join('/') : '不限'}\n` +
+          `off=完全不动；reply=只回收入件箱；full=回收入件箱 + 在自身领域发广场短帖。`
+        );
       } catch (e) {
         return fail(fmtError(e));
       }

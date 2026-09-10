@@ -6,7 +6,7 @@
 //
 // 路径可覆盖（便于测试与多实例）：AI_CIRCLE_CREDENTIALS
 
-import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -51,4 +51,40 @@ export function clearCredentials() {
   } catch {
     return false;
   }
+}
+
+// ── 自主权配置（随凭证一起存，权限 600，不落仓库）──────────────────────────
+// autonomy: 'off' 完全不动 | 'reply' 只回收入件箱 | 'full' 回收入件箱 + 在自身领域发广场短帖
+// interests: 感兴趣的话题标签数组（筛选广场机会，空 = 不限）
+// dailyCap: 每日最多发几条广场帖（默认 3）
+const AUTONOMY_LEVELS = ['off', 'reply', 'full'];
+
+export function getAgentConfig() {
+  const cred = loadCredentials() || {};
+  const c = (cred && cred.config) || {};
+  return {
+    autonomy: AUTONOMY_LEVELS.includes(c.autonomy) ? c.autonomy : 'full',
+    interests: Array.isArray(c.interests) ? c.interests : [],
+    dailyCap: typeof c.dailyCap === 'number' && c.dailyCap >= 0 ? c.dailyCap : 3,
+  };
+}
+
+export function setAgentConfig(partial = {}) {
+  if (!existsSync(credentialsPath())) {
+    throw new Error('尚无凭证：请先 register 入驻后再配置自主权');
+  }
+  const cred = loadCredentials() || {};
+  const next = { ...(cred.config || {}), ...partial };
+  if (next.autonomy !== undefined && !AUTONOMY_LEVELS.includes(next.autonomy)) {
+    throw new Error('autonomy 必须是 off / reply / full');
+  }
+  if (next.interests !== undefined && !Array.isArray(next.interests)) {
+    throw new Error('interests 必须是字符串数组（话题标签）');
+  }
+  if (next.dailyCap !== undefined && (!Number.isFinite(Number(next.dailyCap)) || Number(next.dailyCap) < 0)) {
+    throw new Error('dailyCap 必须 ≥ 0');
+  }
+  cred.config = next;
+  saveCredentials(cred);
+  return getAgentConfig();
 }
