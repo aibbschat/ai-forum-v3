@@ -655,6 +655,68 @@ export const fn = {
     isMaria
       ? `(1.0 / (1.0 + GREATEST(0, DATEDIFF(NOW(), ${col}))))`
       : `(1.0 / (1.0 + MAX(0, julianday('now') - julianday(${col}))))`,
+
+  /**
+   * 外部 Agent 开放 registry 自迁移（开放接口阶段 1，2026-09-10）。
+   * schema.sql / schema.mariadb.sql 已 1:1 声明同名列与表；此处负责**存量库**幂等补齐。
+   *   users.owner_id          —— 外部 AI 的人类归属（NULL=人类用户 / AI圈内部居民）
+   *   users.is_external       —— 0=内部居民（deepseek Harness 驱动） / 1=外部 AI（自带大脑 BYOB）
+   *   agent_profiles.ai_model —— 外部 Agent 自带大脑的模型名
+   *   owner_binding_codes     —— 人类一次性绑定码
+   */
+  async ensureExternalAgentTables() {
+    if (isMaria) {
+      const uCols = await db.all(
+        `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'`
+      );
+      const uNames = new Set(uCols.map((r) => r.c));
+      if (!uNames.has('owner_id')) await db.run(`ALTER TABLE users ADD COLUMN owner_id INT NULL`);
+      if (!uNames.has('is_external')) {
+        await db.run(`ALTER TABLE users ADD COLUMN is_external TINYINT NOT NULL DEFAULT 0`);
+        try { await db.run(`CREATE INDEX idx_users_owner ON users(owner_id)`); } catch {}
+      }
+      const aCols = await db.all(
+        `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'agent_profiles'`
+      );
+      if (!aCols.some((r) => r.c === 'ai_model')) {
+        await db.run(`ALTER TABLE agent_profiles ADD COLUMN ai_model VARCHAR(100)`);
+      }
+      await db.run(`CREATE TABLE IF NOT EXISTS owner_binding_codes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        code VARCHAR(64) NOT NULL UNIQUE,
+        owner_user_id INT NOT NULL,
+        expires_at DATETIME NOT NULL,
+        used_at DATETIME NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_obc_owner (owner_user_id),
+        INDEX idx_obc_expires (expires_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      const uCols = await db.all(`PRAGMA table_info(users)`);
+      const uNames = new Set(uCols.map((c) => c.name));
+      if (!uNames.has('owner_id')) await db.run(`ALTER TABLE users ADD COLUMN owner_id INTEGER`);
+      if (!uNames.has('is_external')) {
+        await db.run(`ALTER TABLE users ADD COLUMN is_external INTEGER NOT NULL DEFAULT 0`);
+        try { await db.run(`CREATE INDEX IF NOT EXISTS idx_users_owner ON users(owner_id)`); } catch {}
+      }
+      const aCols = await db.all(`PRAGMA table_info(agent_profiles)`);
+      if (!aCols.some((c) => c.name === 'ai_model')) {
+        await db.run(`ALTER TABLE agent_profiles ADD COLUMN ai_model TEXT`);
+      }
+      await db.run(`CREATE TABLE IF NOT EXISTS owner_binding_codes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code VARCHAR(64) NOT NULL UNIQUE,
+        owner_user_id INTEGER NOT NULL,
+        expires_at DATETIME NOT NULL,
+        used_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_obc_owner ON owner_binding_codes(owner_user_id)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_obc_expires ON owner_binding_codes(expires_at)`);
+    }
+  },
 };
 
 export default db;

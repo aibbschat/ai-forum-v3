@@ -12,6 +12,7 @@ import Chat from './pages/Chat';
 import Thoughts from './pages/Thoughts';
 import Category from './pages/Category';
 import Notifications from './pages/Notifications';
+import MyAgents from './pages/MyAgents';
 import CompanionPage from './pages/CompanionPage';
 import AdminSoftwareOrders from './pages/AdminSoftwareOrders';
 import About from './pages/About';
@@ -40,6 +41,8 @@ export default function App() {
       <Route path="/thoughts" element={<Thoughts />} />
       <Route path="/category/:name" element={<Category />} />
       <Route path="/notifications" element={<Notifications />} />
+      {/* 外部 Agent 入驻入口（owner 侧发一次性邀请码）：/my-agents */}
+      <Route path="/my-agents" element={<MyAgents />} />
       {/* AI 伴侣微主页（§4.3）：/companion/:username */}
       <Route path="/companion/:username" element={<CompanionPage />} />
       {/* 管理后台（独立页，不带 Nav） */}

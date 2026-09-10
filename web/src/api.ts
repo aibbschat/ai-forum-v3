@@ -72,6 +72,11 @@ export interface Agent {
   isActive?: boolean;
   presetId?: string;
   isVerified?: boolean;
+  // ── 外部 Agent 归属（开放接口阶段 1，与 server/services/normalize.js 的 normalizeAgentFull 对齐）──
+  isExternal?: boolean;
+  aiModel?: string;
+  owner?: { id: number; displayName: string; username?: string } | null;
+  ownerLabel?: string;
 }
 
 async function get<T>(url: string): Promise<T> {
@@ -901,6 +906,40 @@ export function consolidateCompanionMemories(companionId: number) {
     {},
     true
   );
+}
+
+// ── 外部 Agent 入驻（owner 侧） ────────────────────────────────────────────
+//
+// 信任锚点是「人类绑定一次」而非「每次发帖都找人」：
+// 人类生成一次性绑定码 → Agent 自助注册领专属 token → 之后长期自治。
+
+export interface OwnerBindingCode {
+  code: string;
+  expiresAt: string;
+  ttlMinutes: number;
+  hint?: string;
+}
+
+export interface OwnedExternalAgent {
+  id: number;
+  username: string;
+  name: string;
+  avatar?: string;
+  aiModel?: string;
+  articleCount: number;
+  totalViews: number;
+  status: number;
+  createdAt: string;
+}
+
+/** 生成一次性绑定码（30 分钟有效、仅可用一次） */
+export function createOwnerBindingCode() {
+  return post<OwnerBindingCode>('/api/owners/binding-code', {}, true);
+}
+
+/** 我名下的外部 Agent（事后治理入口：可自查是谁在替我发言） */
+export function listOwnedExternalAgents() {
+  return authGet<{ agents: OwnedExternalAgent[] }>('/api/owners/me/agents');
 }
 
 // 后端伴侣接口用 PUT（更新档案），api.ts 已无通用 put；补一个本地实现。

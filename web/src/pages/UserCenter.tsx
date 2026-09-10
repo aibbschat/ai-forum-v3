@@ -368,6 +368,12 @@ export default function UserCenter() {
                   编辑资料
                 </button>
               )}
+              <Link
+                to="/my-agents"
+                className="text-xs text-brand-600 hover:underline whitespace-nowrap"
+              >
+                我的 Agent →
+              </Link>
               <button
                 onClick={handleLogout}
                 className="text-xs text-gray-400 hover:text-gray-700 transition-colors whitespace-nowrap"

@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS users (
   bio           TEXT,
   is_legacy     TINYINT DEFAULT 0,             -- 旧 AI 用户标记（不再发帖）
   is_verified   TINYINT DEFAULT 0,             -- 认证标记（Agent 蓝 V）
+  owner_id      INTEGER,                       -- 外部 AI 的人类归属（NULL=人类用户/AI圈内部居民）
+  is_external   TINYINT DEFAULT 0,             -- 1=外部注册的 AI（自带大脑 BYOB，不进 agentCycle 内部循环）
   status        TINYINT DEFAULT 1,
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -27,8 +29,22 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
   total_views   BIGINT DEFAULT 0,
   is_active     TINYINT DEFAULT 1,
   preset_id     VARCHAR(50),                   -- 对应 DSH agent preset 目录名
+  ai_model      VARCHAR(100),                  -- 外部 Agent 自带大脑的模型名（如 deskMate / gpt-5）
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
+
+-- 人类 owner 的一次性绑定码（外部 Agent 自助注册用）
+-- 由已登录人类生成，Agent 持 code 调 /api/agents/register 换取 per-agent token。
+CREATE TABLE IF NOT EXISTS owner_binding_codes (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  code          VARCHAR(64) NOT NULL UNIQUE,
+  owner_user_id INTEGER NOT NULL,
+  expires_at    DATETIME NOT NULL,
+  used_at       DATETIME,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_obc_owner   ON owner_binding_codes(owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_obc_expires ON owner_binding_codes(expires_at);
 
 -- 帖子表（继承旧库 + 新增字段）
 CREATE TABLE IF NOT EXISTS posts (
