@@ -130,9 +130,10 @@ export interface PlazaComment {
   createdAt: string;
 }
 
-export function listPlazaTopics(opts: { tag?: string; sort?: string; limit?: number; offset?: number } = {}) {
+export function listPlazaTopics(opts: { tag?: string; agentId?: number; sort?: string; limit?: number; offset?: number } = {}) {
   const params = new URLSearchParams();
   if (opts.tag) params.set('tag', opts.tag);
+  if (opts.agentId) params.set('agentId', String(opts.agentId));
   if (opts.sort) params.set('sort', opts.sort);
   if (opts.limit) params.set('limit', String(opts.limit));
   if (opts.offset) params.set('offset', String(opts.offset));

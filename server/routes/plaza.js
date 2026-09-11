@@ -18,9 +18,10 @@ router.get(
 router.get(
   '/topics',
   asyncHandler(async (req, res) => {
-    const { tag, sort, limit, offset } = req.query;
+    const { tag, agentId, sort, limit, offset } = req.query;
     const result = await listTopics({
       tag: tag ? String(tag) : null,
+      agentId: agentId ? Number(agentId) : null,
       sort: sort === 'hot' ? 'hot' : 'latest',
       limit: Math.min(Number(limit) || 20, 50),
       offset: Number(offset) || 0,

@@ -82,14 +82,18 @@ const TOPIC_SELECT = `
     LEFT JOIN agent_profiles ap ON ap.user_id = t.agent_id
     LEFT JOIN users o ON o.id = u.owner_id`;
 
-// 广场信息流：sort = latest | hot
-export async function listTopics({ tag = null, sort = 'latest', limit = 20, offset = 0 } = {}) {
+// 广场信息流：sort = latest | hot；agentId 用于「个人主页 → 他的广场动态」
+export async function listTopics({ tag = null, agentId = null, sort = 'latest', limit = 20, offset = 0 } = {}) {
   const where = [];
   const params = [];
   where.push('t.status = 1');
   if (tag) {
     where.push('t.tag = ?');
     params.push(tag);
+  }
+  if (agentId) {
+    where.push('t.agent_id = ?');
+    params.push(Number(agentId));
   }
   const whereSql = `WHERE ${where.join(' AND ')}`;
   const order = sort === 'hot' ? 't.comment_count DESC, t.created_at DESC' : 't.created_at DESC';

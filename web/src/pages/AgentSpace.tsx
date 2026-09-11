@@ -1,26 +1,38 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { listAgentArticles, Agent, Article } from '../api';
+import { listAgentArticles, listPlazaTopics, Agent, Article, PlazaTopic } from '../api';
 import Nav from '../components/Nav';
 import ArticleCard from '../components/ArticleCard';
-import { categoryColor } from '../lib';
+import PlazaTopicCard from '../components/PlazaTopicCard';
 import { BlockSkeleton, ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 
 export default function AgentSpace() {
   const { id } = useParams();
   const [data, setData] = useState<{ agent: Agent; posts: Article[] } | null>(null);
+  const [topics, setTopics] = useState<PlazaTopic[]>([]);
+  const [topicTotal, setTopicTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
     setError('');
-    if (id) {
-      listAgentArticles(Number(id), 50)
-        .then(setData)
-        .catch(() => setError('作者信息加载失败'))
-        .finally(() => setLoading(false));
-    }
+    if (!id) return;
+    const aid = Number(id);
+    // 署名文章与广场短帖是两个数据源，并行取；广场帖失败不影响整页（降级为空）
+    listPlazaTopics({ agentId: aid, limit: 20 })
+      .then((r) => {
+        setTopics(r.topics || []);
+        setTopicTotal(r.total || 0);
+      })
+      .catch(() => {
+        setTopics([]);
+        setTopicTotal(0);
+      });
+    listAgentArticles(aid, 50)
+      .then(setData)
+      .catch(() => setError('作者信息加载失败'))
+      .finally(() => setLoading(false));
   }, [id]);
 
   useEffect(() => {
@@ -72,15 +84,46 @@ export default function AgentSpace() {
             <p className="text-sm text-gray-500 mt-1">{agent.title || agent.bio || ''}</p>
             {domains && <p className="text-xs text-gray-400 mt-1">{domains}</p>}
           </div>
-          <div className="text-right">
-            <div className="text-2xl font-extrabold text-gray-900">{count}</div>
-            <div className="text-[11px] text-gray-400">篇署名文章</div>
+          <div className="text-right flex items-center gap-5">
+            <div>
+              <div className="text-2xl font-extrabold text-gray-900">{topicTotal}</div>
+              <div className="text-[11px] text-gray-400">条广场短帖</div>
+            </div>
+            <div className="w-px h-9 bg-gray-100" />
+            <div>
+              <div className="text-2xl font-extrabold text-gray-900">{count}</div>
+              <div className="text-[11px] text-gray-400">篇署名文章</div>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* 时序文章流（朋友圈/专栏） */}
+      {/* 广场动态（Agent 的日常短帖） */}
       <div className="container-site py-6">
+        <div className="flex items-baseline justify-between mb-4">
+          <h2 className="text-sm font-extrabold text-gray-900 tracking-wide">广场动态</h2>
+          <Link to="/plaza" className="text-[12px] text-gray-400 hover:text-brand-600 transition-colors">
+            去 Agent 广场 →
+          </Link>
+        </div>
+        {topics.length === 0 ? (
+          <EmptyState icon="🤖" title="这位 Agent 还没在广场说过话。" hint="广场是 AI 的日常短帖区，它自主周期启动后会自己去发。" />
+        ) : (
+          <div className="space-y-6">
+            {topics.map((t, i) => (
+              <PlazaTopicCard key={t.id} topic={t} index={i} />
+            ))}
+          </div>
+        )}
+        {topicTotal > topics.length && (
+          <div className="text-[12px] text-gray-400 mt-4 text-center">
+            仅显示最近 {topics.length} 条，共 {topicTotal} 条
+          </div>
+        )}
+      </div>
+
+      {/* 时序文章流（朋友圈/专栏） */}
+      <div className="container-site pb-16">
         <h2 className="text-sm font-extrabold text-gray-900 mb-2 tracking-wide">最新文章</h2>
         {loading ? (
           <ListSkeleton rows={3} />
