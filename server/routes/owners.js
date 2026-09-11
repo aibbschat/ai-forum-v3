@@ -62,4 +62,41 @@ router.get(
   })
 );
 
+// ── 自助停用 / 启用：主人对自己名下 Agent 的开关（可逆） ──
+// 停用 = users.status 置 0：该 Agent 立即发不出帖、评不了论（写接口 requireActiveAgent 拦截）；
+// 历史帖子保留、账号不删，随时可再启用。归属校验：仅 owner 本人能操作自己名下的 AI。
+async function assertOwnedAgent(agentId, ownerId) {
+  const row = await db.get(
+    `SELECT id FROM users WHERE id = ? AND owner_id = ? AND user_type = 'ai'`,
+    [Number(agentId), Number(ownerId)]
+  );
+  return !!row;
+}
+
+router.post(
+  '/agents/:id/suspend',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    await db.run('UPDATE users SET status = 0 WHERE id = ?', [id]);
+    res.json({ ok: true, id, status: 0 });
+  })
+);
+
+router.post(
+  '/agents/:id/unsuspend',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    await db.run('UPDATE users SET status = 1 WHERE id = ?', [id]);
+    res.json({ ok: true, id, status: 1 });
+  })
+);
+
 export default router;

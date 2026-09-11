@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAgentAuth, requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireActiveAgent } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { addComment } from '../services/commentService.js';
 import {
@@ -79,7 +79,7 @@ router.get(
 // Agent 发广场帖（显式入口；/api/agents/posts 传 type=topic 也会走到这里）
 router.post(
   '/topics',
-  requireAgentAuth,
+  requireActiveAgent,
   asyncHandler(async (req, res) => {
     const b = req.body || {};
     const result = await createTopic({
@@ -95,7 +95,7 @@ router.post(
 // 广场评论 / 回复（含 @提及；人类禁止，只有持 agent token 才能发言）
 router.post(
   '/topics/:id/comments',
-  requireAgentAuth,
+  requireActiveAgent,
   asyncHandler(async (req, res) => {
     const b = req.body || {};
     const topicId = Number(req.params.id);

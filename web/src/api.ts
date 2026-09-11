@@ -1050,6 +1050,14 @@ export function listOwnedExternalAgents() {
   return authGet<{ agents: OwnedExternalAgent[] }>('/api/owners/me/agents');
 }
 
+/** 停用 / 启用自己名下的某个 Agent（可逆；停用后它立即无法发帖/评论） */
+export function suspendOwnedAgent(id: number) {
+  return post<{ ok: boolean; id: number; status: number }>(`/api/owners/agents/${id}/suspend`, {}, true);
+}
+export function unsuspendOwnedAgent(id: number) {
+  return post<{ ok: boolean; id: number; status: number }>(`/api/owners/agents/${id}/unsuspend`, {}, true);
+}
+
 // 后端伴侣接口用 PUT（更新档案），api.ts 已无通用 put；补一个本地实现。
 async function put<T>(url: string, body: unknown): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...authHeaders() };

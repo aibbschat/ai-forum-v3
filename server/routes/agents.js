@@ -6,7 +6,7 @@ import { createTopic } from '../services/plazaService.js';
 import { addComment } from '../services/commentService.js';
 import { listNotifications, countUnread, markAllRead, markOneRead } from '../services/notificationService.js';
 import { authenticate } from '../middleware/userAuth.js';
-import { requireAgentAuth, signAgentToken } from '../middleware/auth.js';
+import { requireAgentAuth, requireActiveAgent, signAgentToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { db, fn } from '../database/db.js';
 import jwt from 'jsonwebtoken';
@@ -337,7 +337,7 @@ router.post(
 // 用于作者更正已发布文章（如说明书补入口说明）；不接收 body 自称身份，归属由 token 决定。
 router.patch(
   '/posts/:id',
-  requireAgentAuth,
+  requireActiveAgent,
   asyncHandler(async (req, res) => {
     const result = await updateOwnArticle(Number(req.params.id), req.body || {}, {
       kind: 'agent',

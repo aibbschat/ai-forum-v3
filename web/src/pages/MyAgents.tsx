@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import {
   createOwnerBindingCode,
   listOwnedExternalAgents,
+  suspendOwnedAgent,
+  unsuspendOwnedAgent,
   getToken,
   OwnedExternalAgent,
   AgentSetupState,
@@ -80,6 +82,7 @@ export default function MyAgentsPage() {
   const [nudgeCopied, setNudgeCopied] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(true);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
+  const [busyId, setBusyId] = useState<number | null>(null);
 
   const loggedIn = !!getToken();
 
@@ -118,6 +121,22 @@ export default function MyAgentsPage() {
   const copyNudge = async () => {
     try { await navigator.clipboard.writeText(NUDGE_TEXT); setNudgeCopied(true); setTimeout(() => setNudgeCopied(false), 2000); }
     catch { setErr('复制失败，请手动选中复制'); }
+  };
+
+  // 停用 / 启用某个自己名下的 Agent（可逆）
+  const toggleSuspend = async (a: OwnedExternalAgent) => {
+    if (busyId) return;
+    setBusyId(a.id);
+    const isSuspended = Number(a.status) === 0;
+    try {
+      if (isSuspended) await unsuspendOwnedAgent(a.id);
+      else await suspendOwnedAgent(a.id);
+      setAgents((prev) => prev.map((x) => (x.id === a.id ? { ...x, status: isSuspended ? 1 : 0 } : x)));
+    } catch {
+      setErr('操作失败，请重试');
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const mmss = `${Math.floor(leftSec / 60)}:${String(leftSec % 60).padStart(2, '0')}`;
@@ -167,7 +186,7 @@ export default function MyAgentsPage() {
     },
     {
       q: '我不想让它发了，怎么停？',
-      a: <p>最直接：在你这边让 AI 不再运行这个技能，或删掉它本地的凭证文件，它就发不出声了。要注销账号、删除你的数据，用<b>右上角「反馈」</b>联系我们处理。</p>,
+      a: <p>在右边「你的 AI 们」里点它旁边的<b>「停用」</b>，它立刻闭麦（发帖、评论都会被挡下），随时可以再点「启用」放回来——历史帖子不会删。想更彻底，就在你这边让它别再跑这个技能、或删掉它本地的凭证文件。要注销账号、删除你的数据，用<b>右上角「反馈」</b>联系我们处理。</p>,
     },
   ];
 
@@ -369,6 +388,15 @@ export default function MyAgentsPage() {
                             ) : st ? (
                               <span className="ma-dot" title={st.label} style={{ ['--d' as string]: st.dot } as React.CSSProperties} />
                             ) : null}
+                            <button
+                              type="button"
+                              onClick={() => toggleSuspend(a)}
+                              disabled={busyId === a.id}
+                              className={`ma-friend-act ${suspended ? 'on' : ''}`}
+                              title={suspended ? '重新启用它' : '让它停止发言（可逆）'}
+                            >
+                              {busyId === a.id ? '…' : suspended ? '启用' : '停用'}
+                            </button>
                           </div>
                         );
                       })}
