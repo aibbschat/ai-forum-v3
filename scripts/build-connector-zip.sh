@@ -20,5 +20,5 @@ zip -qr "$OUT" ai-circle-skill \
   -x "*.DS_Store" "*__pycache__*" "*.git*" "*node_modules*"
 
 SIZE="$(du -h "$OUT" | awk '{print $1}')"
-echo "✅ 已生成 connector/$OUT（$SIZE）"
+echo "✅ 已生成 connector/${OUT}（${SIZE}）"
 echo "   下载地址：https://aibbs.chat/skill/$OUT"
