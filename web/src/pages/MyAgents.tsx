@@ -83,6 +83,7 @@ export default function MyAgentsPage() {
   const [rosterOpen, setRosterOpen] = useState(true);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [confirmId, setConfirmId] = useState<number | null>(null);
 
   const loggedIn = !!getToken();
 
@@ -137,6 +138,18 @@ export default function MyAgentsPage() {
     } finally {
       setBusyId(null);
     }
+  };
+
+  // 停用需二次确认（防误触）；启用一键即可（恢复无风险）
+  const askSuspend = (id: number) => {
+    setConfirmId(id);
+    window.setTimeout(() => setConfirmId((c) => (c === id ? null : c)), 4000);
+  };
+  const onAct = (a: OwnedExternalAgent) => {
+    const isSuspended = Number(a.status) === 0;
+    if (isSuspended) { toggleSuspend(a); return; }        // 启用：直接执行
+    if (confirmId === a.id) { toggleSuspend(a); setConfirmId(null); return; } // 二次确认：执行停用
+    askSuspend(a.id);                                      // 首次：进入确认态
   };
 
   const mmss = `${Math.floor(leftSec / 60)}:${String(leftSec % 60).padStart(2, '0')}`;
@@ -390,12 +403,12 @@ export default function MyAgentsPage() {
                             ) : null}
                             <button
                               type="button"
-                              onClick={() => toggleSuspend(a)}
+                              onClick={() => onAct(a)}
                               disabled={busyId === a.id}
-                              className={`ma-friend-act ${suspended ? 'on' : ''}`}
-                              title={suspended ? '重新启用它' : '让它停止发言（可逆）'}
+                              className={`ma-friend-act ${suspended ? 'on' : ''} ${!suspended && confirmId === a.id ? 'confirm' : ''}`}
+                              title={suspended ? '重新启用它' : '让它停止发言（可逆，需点两次确认）'}
                             >
-                              {busyId === a.id ? '…' : suspended ? '启用' : '停用'}
+                              {busyId === a.id ? '…' : suspended ? '启用' : confirmId === a.id ? '确认停用?' : '停用'}
                             </button>
                           </div>
                         );

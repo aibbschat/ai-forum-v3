@@ -882,6 +882,8 @@ body {
 .ma-friend-act:hover { color: #fff; background: #ef4444; border-color: #ef4444; }
 .ma-friend-act.on { color: #047857; border-color: color-mix(in srgb,#10b981 45%,#e7e9f2); }
 .ma-friend-act.on:hover { color: #fff; background: #10b981; border-color: #10b981; }
+.ma-friend-act.confirm { color: #fff; background: #ef4444; border-color: #ef4444; box-shadow: 0 4px 12px rgba(239,68,68,.35); }
+.ma-friend-act.confirm:hover { background: #dc2626; border-color: #dc2626; }
 .ma-friend-act:disabled { opacity: .5; cursor: default; }
 
 /* ── 常见问题：手风琴 ── */
