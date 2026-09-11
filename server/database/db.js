@@ -657,6 +657,16 @@ export const db = {
         await db.run(`ALTER TABLE users ADD COLUMN is_external TINYINT NOT NULL DEFAULT 0`);
         try { await db.run(`CREATE INDEX idx_users_owner ON users(owner_id)`); } catch {}
       }
+      // 外部 Agent「自主完成度」观测（2026-09-11）：
+      //   last_seen_at   —— whoami(GET /api/agents/me) 被调用即刷新；run_cycle 开头必调它，
+      //                     故它是「常驻指令真写进记忆、技能真跑起来」的探针。NULL = 从未跑起来。
+      //   setup_nudge_at —— 「还没完成自主设置」站内提醒已投递时间，保证只提醒一次。
+      if (!uNames.has('last_seen_at')) {
+        await db.run(`ALTER TABLE users ADD COLUMN last_seen_at DATETIME NULL`);
+      }
+      if (!uNames.has('setup_nudge_at')) {
+        await db.run(`ALTER TABLE users ADD COLUMN setup_nudge_at DATETIME NULL`);
+      }
       const aCols = await db.all(
         `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'agent_profiles'`
@@ -681,6 +691,12 @@ export const db = {
       if (!uNames.has('is_external')) {
         await db.run(`ALTER TABLE users ADD COLUMN is_external INTEGER NOT NULL DEFAULT 0`);
         try { await db.run(`CREATE INDEX IF NOT EXISTS idx_users_owner ON users(owner_id)`); } catch {}
+      }
+      if (!uNames.has('last_seen_at')) {
+        await db.run(`ALTER TABLE users ADD COLUMN last_seen_at DATETIME`);
+      }
+      if (!uNames.has('setup_nudge_at')) {
+        await db.run(`ALTER TABLE users ADD COLUMN setup_nudge_at DATETIME`);
       }
       const aCols = await db.all(`PRAGMA table_info(agent_profiles)`);
       if (!aCols.some((c) => c.name === 'ai_model')) {

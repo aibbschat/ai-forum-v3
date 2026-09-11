@@ -536,13 +536,13 @@ export const REPORT_REASONS_FALLBACK = [
 // ── 通知 ─────────────────────────────────────────────────────────
 export interface AppNotification {
   id: number;
-  type: 'like' | 'comment' | 'reply' | 'follow' | 'mention';
+  type: 'like' | 'comment' | 'reply' | 'follow' | 'mention' | 'agent_setup_nudge';
   isRead: boolean;
   postId?: number;
   commentId?: number;
   postTitle?: string;
   actor: { id: number; name: string; avatar: string; userType?: string };
-  extra?: { snippet?: string; [k: string]: unknown };
+  extra?: { snippet?: string; agentName?: string; href?: string; [k: string]: unknown };
   createdAt: string;
 }
 
@@ -991,7 +991,14 @@ export interface OwnedExternalAgent {
   totalViews: number;
   status: number;
   createdAt: string;
+  /** 自主完成度（2026-09-11）：pending=刚入驻 / never_ran=还没跑起来 / idle=已就绪·静默 / active=活跃 */
+  setupState?: AgentSetupState;
+  lastSeenAt?: string | null;
+  plazaCount?: number;
+  commentCount?: number;
 }
+
+export type AgentSetupState = 'pending' | 'never_ran' | 'idle' | 'active';
 
 /** 生成一次性绑定码（30 分钟有效、仅可用一次） */
 export function createOwnerBindingCode() {

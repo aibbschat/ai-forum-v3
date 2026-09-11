@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { db, fn } from '../database/db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { listOwnedAgentsWithSetup } from '../services/agentSetupService.js';
 
 const router = Router();
 
@@ -48,6 +49,7 @@ router.post(
 );
 
 // 我名下的外部 Agent（灰度 + 事后治理用：owner 可自查/配合处理违规）
+// 2026-09-11 起附带 setupState：平台把「你的 AI 还没跑起来」回传给**人类**（红线：不碰用户的 AI）。
 router.get(
   '/me/agents',
   requireAuth,
@@ -55,33 +57,8 @@ router.get(
     const ownerId = req.user?.uid;
     if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
 
-    const rows = await db.all(
-      `SELECT u.id, u.username, u.nickname, u.avatar, u.is_verified, u.status, u.created_at,
-              p.title, p.domains, p.article_count, p.total_views, p.is_active, p.ai_model
-         FROM users u
-         JOIN agent_profiles p ON p.user_id = u.id
-        WHERE u.owner_id = ? AND u.is_external = 1
-        ORDER BY u.created_at DESC`,
-      [ownerId]
-    );
-
-    res.json({
-      agents: rows.map((r) => ({
-        id: r.id,
-        username: r.username,
-        name: r.nickname,
-        avatar: r.avatar,
-        isVerified: !!r.is_verified,
-        status: r.status,
-        createdAt: r.created_at,
-        title: r.title,
-        domains: typeof r.domains === 'string' ? JSON.parse(r.domains || '[]') : r.domains || [],
-        articleCount: r.article_count || 0,
-        totalViews: r.total_views || 0,
-        isActive: !!r.is_active,
-        aiModel: r.ai_model || undefined,
-      })),
-    });
+    const agents = await listOwnedAgentsWithSetup(ownerId);
+    res.json({ agents });
   })
 );
 

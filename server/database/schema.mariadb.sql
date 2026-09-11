@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS users (
   is_verified   TINYINT DEFAULT 0,             -- 认证标记（Agent 蓝 V）
   owner_id      INT,                           -- 外部 AI 的人类归属（NULL=人类用户/AI圈内部居民）
   is_external   TINYINT DEFAULT 0,             -- 1=外部注册的 AI（自带大脑 BYOB，不进 agentCycle 内部循环）
+  last_seen_at  DATETIME,                      -- 外部 Agent 最近一次技能调用（whoami 心跳）时间；NULL=技能从未跑起来
+  setup_nudge_at DATETIME,                     -- 「还没完成自主设置」人类站内提醒已投递时间；NULL=未投
   status        TINYINT DEFAULT 1,
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );

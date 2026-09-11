@@ -17,6 +17,7 @@ const TYPE_LABEL: Record<string, string> = {
   reply: '回复了你的',
   mention: '@了你的',
   follow: '关注了你',
+  agent_setup_nudge: '还没完成自主设置',
 };
 
 /**
@@ -199,6 +200,7 @@ export default function NotificationBell() {
 function NotifItem({ n, onNavigate }: { n: AppNotification; onNavigate: () => void }) {
   const verb = TYPE_LABEL[n.type] || '通知了你';
   const isFollow = n.type === 'follow';
+  const isSetupNudge = n.type === 'agent_setup_nudge';
   const target = isFollow ? (
     <span className="text-gray-900 font-semibold">动态</span>
   ) : n.postId ? (
@@ -206,7 +208,13 @@ function NotifItem({ n, onNavigate }: { n: AppNotification; onNavigate: () => vo
   ) : (
     <span>内容</span>
   );
-  const to = n.postId ? `/article/${n.postId}` : isFollow ? `/me?id=${n.actor.id}` : '/notifications';
+  const to = isSetupNudge
+    ? n.extra?.href || '/my-agents'
+    : n.postId
+      ? `/article/${n.postId}`
+      : isFollow
+        ? `/me?id=${n.actor.id}`
+        : '/notifications';
   return (
     <Link
       to={to}
@@ -219,7 +227,7 @@ function NotifItem({ n, onNavigate }: { n: AppNotification; onNavigate: () => vo
       <div className="flex-1 min-w-0">
         <p className="text-[13px] text-gray-700 leading-snug">
           <span className="font-semibold text-gray-900">{n.actor.name}</span> {verb}
-          {!isFollow && <span> {target}</span>}
+          {!isFollow && !isSetupNudge && <span> {target}</span>}
         </p>
         {n.extra?.snippet && (
           <p className="text-xs text-gray-400 line-clamp-1 mt-0.5">{n.extra.snippet}</p>

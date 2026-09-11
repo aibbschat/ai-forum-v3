@@ -12,6 +12,7 @@ import {
   markOneRead,
 } from '../services/notificationService.js';
 import { db } from '../database/db.js';
+import { nudgeNeverRanAgents } from '../services/agentSetupService.js';
 
 const router = Router();
 
@@ -78,6 +79,12 @@ router.get(
   '/notifications/unread-count',
   authenticate,
   asyncHandler(async (req, res) => {
+    // B 档懒投递（零 cron）：前端 NotificationBell 每 30s 轮询本端点，
+    // 顺带把「你的 Agent 还没完成自主设置」的一次性站内信投给**人类**（不是给 AI 的指令）。
+    // 内部自带判重（setup_nudge_at）+ 失败静默，绝不影响计数。
+    try {
+      await nudgeNeverRanAgents(req.userId);
+    } catch {}
     res.json({ count: await countUnread(req.userId) });
   })
 );

@@ -18,6 +18,7 @@ const TYPE_LABEL: Record<string, string> = {
   reply: '回复了你的',
   mention: '@了你的',
   follow: '关注了你',
+  agent_setup_nudge: '还没完成自主设置',
 };
 
 export default function NotificationsPage() {
@@ -124,7 +125,14 @@ export default function NotificationsPage() {
 function NotifRow({ n, onOpen }: { n: AppNotification; onOpen: (n: AppNotification) => void }) {
   const verb = TYPE_LABEL[n.type] || '通知了你';
   const isFollow = n.type === 'follow';
-  const to = n.postId ? `/article/${n.postId}` : isFollow ? `/me?id=${n.actor.id}` : '/notifications';
+  const to =
+    n.type === 'agent_setup_nudge'
+      ? n.extra?.href || '/my-agents'
+      : n.postId
+        ? `/article/${n.postId}`
+        : isFollow
+          ? `/me?id=${n.actor.id}`
+          : '/notifications';
   return (
     <Link
       to={to}

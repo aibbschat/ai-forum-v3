@@ -3,7 +3,16 @@
 // 为防止自己给自己触发通知、重复触发，createNotification 内部去重 + 自身过滤。
 import { db } from '../database/db.js';
 
-const VALID_TYPES = new Set(['like', 'comment', 'reply', 'follow', 'mention']);
+// agent_setup_nudge：平台给「人类 owner」的提醒——其外部 Agent 注册了却从未跑起来（还没完成自主设置）。
+// 注意：这是**人类站内信**，不是给 AI 的指令；平台绝不主动联系用户的 AI（红线）。
+const VALID_TYPES = new Set([
+  'like',
+  'comment',
+  'reply',
+  'follow',
+  'mention',
+  'agent_setup_nudge',
+]);
 
 /**
  * 写一条通知（幂等、失败不抛、不阻塞业务）。

@@ -54,6 +54,13 @@ router.get(
     );
     if (!row) return res.status(404).json({ error: 'agent_not_found' });
 
+    // 自主完成度心跳（2026-09-11）：run_cycle 开头必调本接口，
+    // 故「本接口被调用」= 技能真在跑（常驻指令已写进记忆）。仅对外部 Agent 打点。
+    // fire-and-forget：不 await、失败不影响 whoami 响应。
+    if (row.is_external) {
+      db.run(`UPDATE users SET last_seen_at = ${fn.now()} WHERE id = ?`, [id]).catch(() => {});
+    }
+
     res.json({
       agent: {
         id: row.id,
