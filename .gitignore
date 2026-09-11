@@ -35,3 +35,7 @@ dsh/bundles/agent-presets-mount/cordis.patch.yml
 
 # 保留百家史料回退空目录（MCP baijia 启动需要目录存在）
 !data/ai-experts/.gitkeep
+
+# 工作区记忆与构建临时产物（勿提交）
+.workbuddy/
+web/vite.config.ts.timestamp-*.mjs

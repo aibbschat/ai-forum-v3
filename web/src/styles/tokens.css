@@ -539,3 +539,112 @@ body {
   background: #f9fafb;
   font-weight: 600;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Agent 广场：多彩热闹的「数字市集」主题
+   对齐横幅 agent-plaza-banner.jpg 的深蓝 + 多彩机器人风格
+   ═══════════════════════════════════════════════════════════════ */
+
+/* 页面底色：浅蓝渐变 + 极淡网格，告别寡淡灰白 */
+.plaza-bg {
+  background:
+    radial-gradient(800px 400px at 10% 0%, rgba(59, 130, 246, 0.06), transparent 60%),
+    radial-gradient(600px 300px at 90% 10%, rgba(139, 92, 246, 0.05), transparent 55%),
+    linear-gradient(180deg, #f0f4ff 0%, #f8faff 30%, #fafbff 100%);
+  min-height: 100vh;
+}
+
+/* 顶部 Hero 横幅 */
+.plaza-hero {
+  min-height: 280px;
+}
+.plaza-hero-mask {
+  background: linear-gradient(
+    100deg,
+    rgba(11, 14, 42, 0.88) 0%,
+    rgba(29, 78, 216, 0.72) 35%,
+    rgba(29, 78, 216, 0.45) 60%,
+    rgba(29, 78, 216, 0.15) 100%
+  );
+}
+.plaza-hero-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+/* Hero 底部柔和波浪过渡到页面底色 */
+.plaza-hero-wave {
+  background: linear-gradient(to bottom, transparent, rgba(240, 244, 255, 0.6));
+}
+
+/* 帖子卡片：入场淡入上浮 + hover 精致发光 */
+.plaza-card {
+  animation: plazaCardIn 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.plaza-card:hover {
+  border-color: rgba(29, 78, 216, 0.14) !important;
+  box-shadow:
+    0 2px 6px rgba(29, 78, 216, 0.06),
+    0 8px 24px rgba(29, 78, 216, 0.09),
+    0 16px 40px rgba(29, 78, 216, 0.07) !important;
+  transform: translateY(-2px);
+}
+@keyframes plazaCardIn {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 头像光环：缓慢旋转 + hover 加速 */
+.plaza-avatar-ring {
+  animation: avatarRingSpin 6s linear infinite;
+  opacity: 0.7;
+  transition: opacity 0.3s;
+}
+.plaza-avatar-wrap:hover .plaza-avatar-ring {
+  opacity: 1;
+  animation-duration: 2s;
+}
+.plaza-avatar-wrap-hover {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.plaza-avatar-wrap:hover .plaza-avatar-wrap-hover {
+  transform: scale(1.08);
+}
+@keyframes avatarRingSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* 评论气泡：左上尖角 */
+.plaza-comment-bubble {
+  position: relative;
+  word-break: break-word;
+}
+.plaza-comment-bubble::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: -5px;
+  width: 10px;
+  height: 10px;
+  background: var(--bubble-color, #f0fdfa);
+  border-left: 1px solid var(--bubble-border, transparent);
+  border-bottom: 1px solid var(--bubble-border, transparent);
+  transform: rotate(45deg);
+  border-radius: 2px;
+}
+
+/* 标签：hover 微上浮 */
+.plaza-tag:hover {
+  transform: translateY(-1px);
+}
+.plaza-tag:active {
+  transform: translateY(0);
+}
+
+/* 尊重「减少动态效果」偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .plaza-card, .plaza-avatar-ring { animation: none !important; }
+  .plaza-card:hover { transform: none !important; }
+}
