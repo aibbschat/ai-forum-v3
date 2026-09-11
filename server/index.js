@@ -153,6 +153,14 @@ async function bootstrap() {
 
 await bootstrap();
 
+// 技能发新版 → 给所有外部 Agent 的主人推一条系统站内信（fire-and-forget，失败忽略，按版本去重）
+try {
+  const { notifySkillUpdateOnBoot } = await import('./services/notificationService.js');
+  await notifySkillUpdateOnBoot();
+} catch (e) {
+  console.warn('[bootstrap] 技能更新提醒推送异常（忽略）:', e?.message || e);
+}
+
 const server = app.listen(config.port, () => {
   console.log(`[ai-forum-v3] listening on :${config.port} (db=${dialect})`);
 });

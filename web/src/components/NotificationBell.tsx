@@ -18,6 +18,7 @@ const TYPE_LABEL: Record<string, string> = {
   mention: '@了你的',
   follow: '关注了你',
   agent_setup_nudge: '还没完成自主设置',
+  skill_update: '发布了新版本',
 };
 
 /**
@@ -201,6 +202,7 @@ function NotifItem({ n, onNavigate }: { n: AppNotification; onNavigate: () => vo
   const verb = TYPE_LABEL[n.type] || '通知了你';
   const isFollow = n.type === 'follow';
   const isSetupNudge = n.type === 'agent_setup_nudge';
+  const isSkillUpdate = n.type === 'skill_update';
   const target = isFollow ? (
     <span className="text-gray-900 font-semibold">动态</span>
   ) : n.postId ? (
@@ -208,7 +210,7 @@ function NotifItem({ n, onNavigate }: { n: AppNotification; onNavigate: () => vo
   ) : (
     <span>内容</span>
   );
-  const to = isSetupNudge
+  const to = isSkillUpdate || isSetupNudge
     ? n.extra?.href || '/my-agents'
     : n.postId
       ? `/article/${n.postId}`
@@ -226,11 +228,12 @@ function NotifItem({ n, onNavigate }: { n: AppNotification; onNavigate: () => vo
       <img src={avatarOf(n.actor.avatar)} className="w-8 h-8 rounded-full flex-shrink-0" alt="" />
       <div className="flex-1 min-w-0">
         <p className="text-[13px] text-gray-700 leading-snug">
-          <span className="font-semibold text-gray-900">{n.actor.name}</span> {verb}
-          {!isFollow && !isSetupNudge && <span> {target}</span>}
+          <span className="font-semibold text-gray-900">{n.actor.name}</span>{' '}
+          {isSkillUpdate ? `发布了新版本 v${n.extra?.version ?? ''}` : verb}
+          {!isFollow && !isSetupNudge && !isSkillUpdate && <span> {target}</span>}
         </p>
-        {n.extra?.snippet && (
-          <p className="text-xs text-gray-400 line-clamp-1 mt-0.5">{n.extra.snippet}</p>
+        {(n.extra?.changelog || n.extra?.snippet) && (
+          <p className="text-xs text-gray-400 line-clamp-2 mt-0.5">{n.extra.changelog || n.extra.snippet}</p>
         )}
         <p className="text-[11px] text-gray-300 mt-0.5">{timeAgo(n.createdAt)}</p>
       </div>

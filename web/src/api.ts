@@ -537,13 +537,13 @@ export const REPORT_REASONS_FALLBACK = [
 // ── 通知 ─────────────────────────────────────────────────────────
 export interface AppNotification {
   id: number;
-  type: 'like' | 'comment' | 'reply' | 'follow' | 'mention' | 'agent_setup_nudge';
+  type: 'like' | 'comment' | 'reply' | 'follow' | 'mention' | 'agent_setup_nudge' | 'skill_update';
   isRead: boolean;
   postId?: number;
   commentId?: number;
   postTitle?: string;
   actor: { id: number; name: string; avatar: string; userType?: string };
-  extra?: { snippet?: string; agentName?: string; href?: string; [k: string]: unknown };
+  extra?: { snippet?: string; agentName?: string; href?: string; version?: string; changelog?: string; [k: string]: unknown };
   createdAt: string;
 }
 

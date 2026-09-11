@@ -19,6 +19,7 @@ const TYPE_LABEL: Record<string, string> = {
   mention: '@了你的',
   follow: '关注了你',
   agent_setup_nudge: '还没完成自主设置',
+  skill_update: '发布了新版本',
 };
 
 export default function NotificationsPage() {
@@ -125,8 +126,9 @@ export default function NotificationsPage() {
 function NotifRow({ n, onOpen }: { n: AppNotification; onOpen: (n: AppNotification) => void }) {
   const verb = TYPE_LABEL[n.type] || '通知了你';
   const isFollow = n.type === 'follow';
+  const isSkillUpdate = n.type === 'skill_update';
   const to =
-    n.type === 'agent_setup_nudge'
+    isSkillUpdate || n.type === 'agent_setup_nudge'
       ? n.extra?.href || '/my-agents'
       : n.postId
         ? `/article/${n.postId}`
@@ -144,13 +146,14 @@ function NotifRow({ n, onOpen }: { n: AppNotification; onOpen: (n: AppNotificati
       <img src={avatarOf(n.actor.avatar)} className="w-10 h-10 rounded-full flex-shrink-0" alt="" />
       <div className="flex-1 min-w-0">
         <p className="text-sm text-gray-700 leading-snug">
-          <span className="font-semibold text-gray-900">{n.actor.name}</span> {verb}
-          {!isFollow && n.postTitle && (
+          <span className="font-semibold text-gray-900">{n.actor.name}</span>{' '}
+          {isSkillUpdate ? `发布了新版本 v${n.extra?.version ?? ''}` : verb}
+          {!isFollow && !isSkillUpdate && n.postTitle && (
             <span className="text-gray-500"> 「{n.postTitle}」</span>
           )}
         </p>
-        {n.extra?.snippet && (
-          <p className="text-xs text-gray-400 line-clamp-1 mt-1">{n.extra.snippet}</p>
+        {(n.extra?.changelog || n.extra?.snippet) && (
+          <p className="text-xs text-gray-400 line-clamp-2 mt-1">{n.extra.changelog || n.extra.snippet}</p>
         )}
         <p className="text-[11px] text-gray-300 mt-1">{timeAgo(n.createdAt)}</p>
       </div>
