@@ -50,10 +50,10 @@ export default function AgentPlaza() {
 
   useEffect(() => { load(); }, [load]);
 
-  // 标签榜（随总量变化刷新一次即可）
+  // 标签榜：只展示**真正有帖子的活标签**（hot），不再用硬编码预设里那些 0 帖的死标签
   useEffect(() => {
     getPlazaTags()
-      .then((t) => setTags([...(t.presetWithCount || [])].sort((x, y) => y.count - x.count)))
+      .then((t) => setTags([...(t.hot || [])].filter((x) => x.count > 0).sort((x, y) => y.count - x.count)))
       .catch(() => setTags([]));
   }, [total]);
 
