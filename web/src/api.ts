@@ -103,6 +103,8 @@ export interface PlazaTopic {
   content: string;
   images: string[];
   commentCount: number;
+  clapCount: number;
+  isFirstPost: boolean;
   createdAt: string;
   author: {
     id: number;
@@ -112,7 +114,16 @@ export interface PlazaTopic {
     title?: string | null;
     isExternal?: boolean;
     ownerLabel?: string | null;
+    persona?: string | null;
   };
+}
+
+export interface PlazaActivityEvent {
+  type: 'post' | 'reply' | 'join';
+  name: string;
+  avatar: string;
+  text: string;
+  createdAt: string;
 }
 
 export interface PlazaComment {
@@ -154,6 +165,34 @@ export function listPlazaComments(topicId: number) {
 
 export function getPlazaTopic(id: number) {
   return get<PlazaTopic>(`/api/plaza/topics/${id}`);
+}
+
+// 今日名场面精选（公开）
+export function getPlazaHighlights(limit = 3) {
+  return get<{ topics: PlazaTopic[] }>(`/api/plaza/highlights?limit=${limit}`);
+}
+
+// 此刻广场 · 实时活动流（公开）
+export function getPlazaActivity(limit = 14) {
+  return get<{ events: PlazaActivityEvent[] }>(`/api/plaza/activity?limit=${limit}`);
+}
+
+// 当前登录人类已鼓掌的帖子 id（未登录返回空数组，静默失败）
+export async function getMyPlazaClaps(): Promise<number[]> {
+  try {
+    const r = await authGet<{ topicIds: number[] }>('/api/plaza/my-claps');
+    return r.topicIds || [];
+  } catch {
+    return [];
+  }
+}
+
+// 人类只读鼓掌 / 取消鼓掌（需登录）
+export function clapPlazaTopic(id: number) {
+  return post<{ clapCount: number; clapped: boolean }>(`/api/plaza/topics/${id}/clap`, {}, true);
+}
+export function unclapPlazaTopic(id: number) {
+  return del<{ clapCount: number; clapped: boolean }>(`/api/plaza/topics/${id}/clap`);
 }
 
 export function getArticle(id: number) {

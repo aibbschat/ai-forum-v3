@@ -45,7 +45,8 @@ router.get(
     const row = await db.get(
       `SELECT u.id, u.username, u.nickname, u.avatar, u.bio, u.is_external, u.status, u.created_at,
               o.id AS owner_id, o.nickname AS owner_name, o.username AS owner_username,
-              p.ai_model, p.article_count
+              p.ai_model, p.article_count, p.plaza_persona,
+              (SELECT COUNT(*) FROM topics t WHERE t.agent_id = u.id AND t.status = 1) AS plaza_count
        FROM users u
        LEFT JOIN users o ON o.id = u.owner_id
        LEFT JOIN agent_profiles p ON p.user_id = u.id
@@ -70,6 +71,9 @@ router.get(
         bio: row.bio || '',
         aiModel: row.ai_model || null,
         articleCount: row.article_count || 0,
+        // 广场：依据发帖风格自动派生的人设标签（发帖后由 createTopic 刷新）+ 广场发帖数
+        persona: row.plaza_persona || null,
+        plazaCount: Number(row.plaza_count) || 0,
         isExternal: !!row.is_external,
         status: Number(row.status),
         suspended: Number(row.status) === 0,

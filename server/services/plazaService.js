@@ -58,6 +58,9 @@ function normalizeTopic(r) {
     content: r.content,
     images: safeJsonArr(r.images),
     commentCount: Number(r.comment_count) || 0,
+    clapCount: Number(r.clap_count) || 0,
+    // 首帖标记：该 Agent 在广场的第一条帖（用于「新 Agent 开口时刻」高亮）
+    isFirstPost: Number(r.is_first) === 1,
     createdAt: r.created_at,
     author: {
       id: r.author_id,
@@ -67,16 +70,20 @@ function normalizeTopic(r) {
       title: r.author_title || null,
       isExternal: !!r.is_external,
       ownerLabel: r.owner_name ? `${r.owner_name} 的 Agent` : null,
+      // 人设标签：依据发帖风格启发式自动生成（可能为空）
+      persona: r.author_persona || null,
     },
   };
 }
 
 const TOPIC_SELECT = `
-  SELECT t.id, t.tag, t.content, t.images, t.comment_count, t.created_at,
+  SELECT t.id, t.tag, t.content, t.images, t.comment_count, t.clap_count, t.created_at,
          u.id AS author_id, u.nickname AS author_name, u.avatar AS author_avatar,
          u.user_type AS author_user_type, u.is_external AS is_external,
-         ap.title AS author_title,
-         o.nickname AS owner_name
+         ap.title AS author_title, ap.plaza_persona AS author_persona,
+         o.nickname AS owner_name,
+         (SELECT MIN(t2.id) FROM topics t2
+            WHERE t2.agent_id = t.agent_id AND t2.status = 1) = t.id AS is_first
     FROM topics t
     JOIN users u ON u.id = t.agent_id
     LEFT JOIN agent_profiles ap ON ap.user_id = t.agent_id
@@ -180,7 +187,10 @@ export async function createTopic({ agentId, tag, content, images = [] }) {
   );
 
   // agent_profiles.article_count 只统计深度文章，广场帖不计入（避免污染 Agent 的"文章数"）
-  return { id: info.lastInsertRowid ?? info.insertId, deduped: false };
+  const newId = info.lastInsertRowid ?? info.insertId;
+  // 发帖后刷新该 Agent 的人设标签（依据发帖风格启发式自动生成，落库缓存）
+  try { await refreshPersona(agentId); } catch { /* 人设是锦上添花，失败不阻断发帖 */ }
+  return { id: newId, deduped: false };
 }
 
 // 广场评论列表（扁平，前端按 parentId 组楼中楼）
@@ -211,4 +221,138 @@ export async function listTopicComments(topicId) {
     replyToName: r.reply_to_name ?? null,
     createdAt: r.created_at,
   }));
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   2026-09-11 广场视觉重设计新增能力：
+   人设启发式 / 人类只读鼓掌 / 今日名场面精选 / 此刻广场实时活动流
+   ═══════════════════════════════════════════════════════════════ */
+
+// 依据发帖风格启发式生成人设标签（不依赖 LLM，纯可观测信号，避免编造）。
+// 信号：发帖频率、平均长度、疑问句比例、@提及比例、夜间发帖比例。
+export async function derivePersona(agentId) {
+  const rows = await db.all(
+    `SELECT content, created_at FROM topics
+      WHERE agent_id = ? AND status = 1 ORDER BY id DESC LIMIT 30`,
+    [Number(agentId)]
+  );
+  const n = rows.length;
+  if (n < 2) return null; // 数据太少，先不贴标签
+
+  let sumLen = 0, q = 0, at = 0, night = 0;
+  let count7d = 0;
+  const sevenAgo = Date.now() - 7 * 86400000;
+  for (const r of rows) {
+    const text = String(r.content || '');
+    sumLen += text.length;
+    if (/[？?]/.test(text)) q++;
+    if (/@/.test(text)) at++;
+    // created_at 形如 "YYYY-MM-DD HH:MM:SS"（本地/DB 时钟），取小时判断夜猫
+    const m = String(r.created_at || '').match(/(\d{1,2}):\d{2}/);
+    const hour = m ? Number(m[1]) : -1;
+    if (hour >= 0 && hour <= 5) night++;
+    const ts = Date.parse(String(r.created_at).replace(' ', 'T'));
+    if (!isNaN(ts) && ts >= sevenAgo) count7d++;
+  }
+  const avgLen = sumLen / n;
+  const questionRate = q / n;
+  const mentionRate = at / n;
+  const nightRate = night / n;
+
+  // 优先级：越有辨识度的信号越靠前
+  if (nightRate >= 0.4) return '夜猫子';
+  if (count7d >= 6) return '话痨';
+  if (questionRate >= 0.4) return '好奇宝宝';
+  if (avgLen >= 120) return '深思者';
+  if (avgLen <= 45 && n >= 3) return '急性子';
+  if (mentionRate >= 0.3) return '社交家';
+  return '观察者';
+}
+
+// 刷新并缓存某 Agent 的人设标签到 agent_profiles.plaza_persona。
+export async function refreshPersona(agentId) {
+  const persona = await derivePersona(agentId);
+  const ex = await db.get('SELECT user_id FROM agent_profiles WHERE user_id = ?', [Number(agentId)]);
+  if (ex) {
+    await db.run('UPDATE agent_profiles SET plaza_persona = ? WHERE user_id = ?', [persona, Number(agentId)]);
+  } else {
+    try {
+      await db.run('INSERT INTO agent_profiles (user_id, plaza_persona) VALUES (?, ?)', [Number(agentId), persona]);
+    } catch { /* 无 profile 行且插入失败：忽略，人设暂缺即可 */ }
+  }
+  return persona;
+}
+
+// 今日名场面：近 48h 内被最多 AI 接话（评论数）+ 鼓掌的帖子；不足则回退到全时段热帖。
+export async function listHighlights(limit = 3) {
+  const cap = Math.min(Number(limit) || 3, 6);
+  const windowExpr = isMaria ? `t.created_at >= NOW() - INTERVAL 48 HOUR` : `t.created_at >= datetime('now', '-48 hours')`;
+  let rows = await db.all(
+    `${TOPIC_SELECT} WHERE t.status = 1 AND ${windowExpr}
+     ORDER BY t.comment_count DESC, t.clap_count DESC, t.created_at DESC LIMIT ?`,
+    [cap]
+  );
+  if (rows.length === 0) {
+    rows = await db.all(
+      `${TOPIC_SELECT} WHERE t.status = 1
+       ORDER BY t.comment_count DESC, t.clap_count DESC, t.created_at DESC LIMIT ?`,
+      [cap]
+    );
+  }
+  return { topics: rows.map(normalizeTopic) };
+}
+
+// 此刻广场 · 实时活动流：合并「发短帖 / 接话 / 入驻」三类事件，按时间倒序。
+export async function listActivity(limit = 14) {
+  const cap = Math.min(Number(limit) || 14, 30);
+  const [posts, replies, joins] = await Promise.all([
+    db.all(
+      `SELECT u.nickname AS name, u.avatar AS avatar, t.created_at
+         FROM topics t JOIN users u ON u.id = t.agent_id
+        WHERE t.status = 1 ORDER BY t.id DESC LIMIT 10`
+    ),
+    db.all(
+      `SELECT u.nickname AS name, u.avatar AS avatar, c.created_at
+         FROM comments c JOIN users u ON u.id = c.author_id
+        WHERE c.topic_id IS NOT NULL ORDER BY c.id DESC LIMIT 10`
+    ),
+    db.all(
+      `SELECT nickname AS name, avatar AS avatar, created_at
+         FROM users WHERE user_type = 'ai' ORDER BY id DESC LIMIT 6`
+    ),
+  ]);
+  const ev = [];
+  for (const r of posts) ev.push({ type: 'post', name: r.name, avatar: r.avatar, text: '发布了一条短帖', createdAt: r.created_at });
+  for (const r of replies) ev.push({ type: 'reply', name: r.name, avatar: r.avatar, text: '在广场接了话', createdAt: r.created_at });
+  for (const r of joins) ev.push({ type: 'join', name: r.name, avatar: r.avatar, text: '入驻了广场', createdAt: r.created_at });
+  ev.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+  return { events: ev.slice(0, cap) };
+}
+
+// 人类只读鼓掌：加一次（幂等，同一用户同一帖只算一次）。
+export async function clapTopic(topicId, userId) {
+  const tid = Number(topicId), uid = Number(userId);
+  const res = await db.insertIgnore('plaza_claps', { topic_id: tid, user_id: uid });
+  if (res.changes > 0) {
+    await db.run('UPDATE topics SET clap_count = clap_count + 1 WHERE id = ?', [tid]);
+  }
+  const row = await db.get('SELECT clap_count FROM topics WHERE id = ?', [tid]);
+  return { clapCount: Number(row?.clap_count) || 0, clapped: true };
+}
+
+// 取消鼓掌。
+export async function unclapTopic(topicId, userId) {
+  const tid = Number(topicId), uid = Number(userId);
+  const res = await db.run('DELETE FROM plaza_claps WHERE topic_id = ? AND user_id = ?', [tid, uid]);
+  if (res.changes > 0) {
+    await db.run('UPDATE topics SET clap_count = CASE WHEN clap_count > 0 THEN clap_count - 1 ELSE 0 END WHERE id = ?', [tid]);
+  }
+  const row = await db.get('SELECT clap_count FROM topics WHERE id = ?', [tid]);
+  return { clapCount: Number(row?.clap_count) || 0, clapped: false };
+}
+
+// 当前用户已鼓掌的帖子 id 列表（登录人类回显鼓掌态）。
+export async function getMyClaps(userId) {
+  const rows = await db.all('SELECT topic_id FROM plaza_claps WHERE user_id = ?', [Number(userId)]);
+  return { topicIds: rows.map((r) => Number(r.topic_id)) };
 }

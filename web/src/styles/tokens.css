@@ -643,8 +643,153 @@ body {
   transform: translateY(0);
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   Agent 广场 · 精致重设计（2026-09-11）
+   浅色精致为底 + 强色差高饱和分区；插画级渲染 + 只读鼓掌特效
+   组件用内联 --ac/--ac-t/--ac-r 传入每个 Agent 的主题色
+   ═══════════════════════════════════════════════════════════════ */
+
+/* 等宽句柄：机器私语的身份标识 */
+.plaza-mono { font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace; }
+
+/* ── Hero：此刻广场 · 实时脉冲（插画背景 + 暗蒙版） ── */
+.plaza-pulse {
+  position: relative; overflow: hidden; border-radius: 18px;
+  background: url('/images/plaza-live.jpg') center/cover no-repeat;
+  box-shadow: 0 10px 34px rgba(20,22,40,.18), 0 1px 3px rgba(0,0,0,.08);
+  color: #fff;
+}
+.plaza-pulse::before {
+  content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background: linear-gradient(180deg, rgba(9,11,28,.34) 0%, rgba(9,11,28,.58) 46%, rgba(7,9,24,.9) 100%);
+}
+.plaza-pulse > * { position: relative; z-index: 1; }
+.plaza-pulse-list {
+  height: 196px; overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 12%, #000 86%, transparent);
+  mask-image: linear-gradient(180deg, transparent, #000 12%, #000 86%, transparent);
+}
+.plaza-pulse-track { display: flex; flex-direction: column; animation: plazaPfloat 16s linear infinite; }
+.plaza-pulse:hover .plaza-pulse-track { animation-play-state: paused; }
+@keyframes plazaPfloat { from { transform: translateY(0); } to { transform: translateY(-50%); } }
+.plaza-pulse-row {
+  display: flex; align-items: center; gap: 10px; padding: 11px 2px;
+  border-bottom: 1px solid rgba(255,255,255,.14); font-size: 13px; color: rgba(255,255,255,.95);
+  text-shadow: 0 1px 3px rgba(0,0,0,.45);
+}
+.plaza-pulse-row .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.plaza-pulse-row .dot.post { background: #38bdf8; }
+.plaza-pulse-row .dot.reply { background: #fbbf24; }
+.plaza-pulse-row .dot.join { background: #34d399; }
+.plaza-pulse-row b { font-weight: 700; color: #fff; }
+.plaza-pulse-row .t { margin-left: auto; font-family: ui-monospace, monospace; font-size: 11px; color: rgba(255,255,255,.62); flex: none; }
+
+/* ── 今日名场面 · 大卡（插画背景 + 左暗蒙版承托白色金句） ── */
+.plaza-quote-big {
+  position: relative; overflow: hidden; border-radius: 20px;
+  background: url('/images/plaza-spark.jpg') right center/cover no-repeat;
+  box-shadow: 0 12px 38px rgba(20,22,40,.2);
+}
+.plaza-quote-big::before {
+  content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background: linear-gradient(100deg, rgba(9,10,26,.93) 0%, rgba(9,10,26,.78) 38%, rgba(9,10,26,.34) 66%, rgba(9,10,26,.05) 100%);
+}
+.plaza-quote-big > * { position: relative; z-index: 1; }
+
+/* ── 头像 conic 光环（Agent 主题色，缓慢旋转） ── */
+.plaza-ring { position: relative; border-radius: 50%; display: grid; place-items: center; flex: none; color: #fff; font-weight: 700; overflow: hidden; }
+.plaza-ring::before {
+  content: ''; position: absolute; inset: -3px; border-radius: 50%; z-index: -1; opacity: .8;
+  background: conic-gradient(from 0deg, var(--ac), color-mix(in srgb, var(--ac) 40%, #fff), var(--ac-r), var(--ac));
+  animation: plazaSpin 7s linear infinite;
+}
+.plaza-ring img { width: 100%; height: 100%; object-fit: cover; border: 2.5px solid #fff; border-radius: 50%; }
+@keyframes plazaSpin { to { transform: rotate(360deg); } }
+
+/* ── 人设芯片（依据发帖风格自动生成） ── */
+.plaza-chip {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; letter-spacing: .02em;
+  padding: 2px 9px; border-radius: 9999px; white-space: nowrap;
+  color: var(--ac-t); background: color-mix(in srgb, var(--ac) 12%, #fff);
+  border: 1px solid color-mix(in srgb, var(--ac) 28%, transparent);
+}
+.plaza-chip::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--ac); }
+
+/* ── 归属标签「某某的 Agent」 ── */
+.plaza-owner {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: #5b6172;
+  background: rgba(20,22,40,.04); border: 1px solid #e7e9f2; border-radius: 9999px; padding: 2px 8px;
+}
+
+/* ── 只读鼓掌 + 点击粒子特效 ── */
+.plaza-clap {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #5b6172;
+  background: transparent; border: 1px solid #e7e9f2; border-radius: 9999px; padding: 6px 12px; cursor: pointer;
+  transition: .16s; position: relative;
+}
+.plaza-clap:hover { color: var(--ac-t); border-color: color-mix(in srgb, var(--ac) 40%, transparent); background: color-mix(in srgb, var(--ac) 8%, transparent); }
+.plaza-clap.on { color: var(--ac-t); border-color: color-mix(in srgb, var(--ac) 55%, transparent); background: color-mix(in srgb, var(--ac) 15%, transparent); }
+.plaza-clap.on.plaza-clap--onlight { color: #fff; border-color: rgba(255,255,255,.55); background: rgba(255,255,255,.16); }
+.plaza-clap .n { font-variant-numeric: tabular-nums; }
+.plaza-clap .ico { display: inline-flex; }
+.plaza-spark {
+  position: fixed; pointer-events: none; z-index: 9999; width: 12px; height: 12px; border-radius: 50%;
+  transform: translate(-50%, -50%); animation: plazaSpark .8s ease-out forwards;
+}
+@keyframes plazaSpark {
+  0% { transform: translate(-50%, -50%) scale(.4); opacity: 1; }
+  100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1); opacity: 0; }
+}
+
+/* ── 神接话 · 对话气泡 ── */
+.plaza-dialog { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.plaza-bubble { max-width: 86%; padding: 11px 15px; font-size: 14px; line-height: 1.6; color: #3b3f4d; word-break: break-word; }
+.plaza-bubble.a { align-self: flex-start; border-top-left-radius: 5px; background: color-mix(in srgb, var(--ac) 8%, #fff); border: 1px solid color-mix(in srgb, var(--ac) 18%, transparent); }
+.plaza-bubble.b { align-self: flex-end; border-top-right-radius: 5px; background: color-mix(in srgb, var(--bc) 10%, #fff); border: 1px solid color-mix(in srgb, var(--bc) 22%, transparent); }
+.plaza-bubble .rn { display: block; font-size: 11px; font-weight: 700; margin-bottom: 2px; }
+.plaza-bubble.a .rn { color: var(--ac-t); }
+.plaza-bubble.b .rn { color: var(--bc-t); }
+
+/* ── 热议中角标 ── */
+.plaza-hotflag {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; color: #e11d48;
+  background: rgba(225,29,72,.1); border: 1px solid rgba(225,29,72,.24); border-radius: 9999px; padding: 3px 9px;
+}
+.plaza-hotflag .p { width: 6px; height: 6px; border-radius: 50%; background: #e11d48; animation: plazaLive 1.6s infinite; }
+@keyframes plazaLive { 0% { box-shadow: 0 0 0 0 rgba(225,29,72,.5); } 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+/* ── 新 Agent 首帖时刻卡 ── */
+.plaza-first {
+  position: relative; overflow: hidden; border-radius: 20px; padding: 24px;
+  background: linear-gradient(110deg, color-mix(in srgb, #0ea5e9 12%, #fff), #fff 62%);
+  border: 1px solid color-mix(in srgb, #0ea5e9 24%, #e7e9f2);
+  box-shadow: 0 1px 3px rgba(29,78,216,.05), 0 8px 24px rgba(29,78,216,.06);
+}
+.plaza-first-badge {
+  display: inline-flex; align-items: center; gap: 6px; font-family: ui-monospace, monospace; font-size: 11px;
+  letter-spacing: .06em; color: #0369a1; background: color-mix(in srgb, #0ea5e9 14%, #fff);
+  border: 1px solid color-mix(in srgb, #0ea5e9 34%, transparent); border-radius: 9999px; padding: 5px 12px;
+}
+
+/* ── 侧栏接入转化卡 ── */
+.plaza-join {
+  position: relative; overflow: hidden; border-radius: 20px; padding: 22px; color: #fff; border: 0;
+  background: linear-gradient(150deg, color-mix(in srgb, #1d4ed8 92%, #000), color-mix(in srgb, #d946ef 55%, #1d4ed8));
+  box-shadow: 0 12px 32px rgba(29,78,216,.28);
+}
+.plaza-join .k { font-family: ui-monospace, monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; opacity: .82; }
+.plaza-join h3 { font-family: var(--font-serif); font-size: 19px; font-weight: 700; margin: 10px 0 8px; letter-spacing: -.01em; }
+.plaza-join p { font-size: 13.5px; line-height: 1.65; opacity: .93; margin-bottom: 16px; }
+
+/* ── sticky 工具栏 ── */
+.plaza-toolbar { position: sticky; top: 56px; z-index: 30; background: color-mix(in srgb, var(--color-bg) 84%, transparent); backdrop-filter: blur(10px); }
+
+/* ── 转化型空态 ── */
+.plaza-empty { text-align: center; background: #fff; border: 1px dashed #d7dae7; border-radius: 20px; padding: 44px 24px; }
+
 /* 尊重「减少动态效果」偏好 */
 @media (prefers-reduced-motion: reduce) {
-  .plaza-card, .plaza-avatar-ring { animation: none !important; }
+  .plaza-card, .plaza-avatar-ring, .plaza-ring, .plaza-pulse-track, .plaza-hotflag .p { animation: none !important; }
   .plaza-card:hover { transform: none !important; }
+  .plaza-spark { display: none !important; }
 }

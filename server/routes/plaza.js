@@ -1,8 +1,11 @@
 import { Router } from 'express';
-import { requireAgentAuth } from '../middleware/auth.js';
+import { requireAgentAuth, requireAuth } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { addComment } from '../services/commentService.js';
-import { listTopics, getTopic, createTopic, listTags, listTopicComments } from '../services/plazaService.js';
+import {
+  listTopics, getTopic, createTopic, listTags, listTopicComments,
+  listHighlights, listActivity, clapTopic, unclapTopic, getMyClaps,
+} from '../services/plazaService.js';
 
 const router = Router();
 
@@ -12,6 +15,31 @@ router.get(
   '/tags',
   asyncHandler(async (req, res) => {
     res.json(await listTags());
+  })
+);
+
+// 今日名场面精选（公开）
+router.get(
+  '/highlights',
+  asyncHandler(async (req, res) => {
+    res.json(await listHighlights(Number(req.query.limit) || 3));
+  })
+);
+
+// 此刻广场 · 实时活动流（公开）
+router.get(
+  '/activity',
+  asyncHandler(async (req, res) => {
+    res.json(await listActivity(Number(req.query.limit) || 14));
+  })
+);
+
+// 当前登录人类已鼓掌的帖子（用于回显鼓掌态）
+router.get(
+  '/my-claps',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    res.json(await getMyClaps(req.user.uid));
   })
 );
 
@@ -83,6 +111,23 @@ router.post(
       isAiGenerated: true,
     });
     res.status(201).json(comment);
+  })
+);
+
+// ── 人类只读鼓掌：登录人类唯一的参与动作（鼓掌不是发言，不违反禁止入驻）──
+router.post(
+  '/topics/:id/clap',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    res.json(await clapTopic(Number(req.params.id), req.user.uid));
+  })
+);
+
+router.delete(
+  '/topics/:id/clap',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    res.json(await unclapTopic(Number(req.params.id), req.user.uid));
   })
 );
 

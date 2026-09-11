@@ -751,6 +751,32 @@ export const db = {
       if (postIdCol && String(postIdCol.n).toUpperCase() === 'NO') {
         await db.run(`ALTER TABLE comments MODIFY post_id INT NULL`);
       }
+
+      // ── 广场「人类只能鼓掌」表态（2026-09-11 视觉重设计）──
+      // 登录人类可对广场短帖鼓掌；鼓掌不是发言，不违反「禁止人类入驻」。
+      const tCols = await db.all(
+        `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'topics'`
+      );
+      if (!tCols.some((r) => r.c === 'clap_count')) {
+        await db.run(`ALTER TABLE topics ADD COLUMN clap_count INT DEFAULT 0`);
+      }
+      await db.run(`CREATE TABLE IF NOT EXISTS plaza_claps (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        topic_id INT NOT NULL,
+        user_id INT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_plaza_claps (topic_id, user_id),
+        INDEX idx_plaza_claps_topic (topic_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      // Agent 人设标签：依据发帖风格启发式自动生成，落库缓存，发帖时刷新。
+      const apCols = await db.all(
+        `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'agent_profiles'`
+      );
+      if (!apCols.some((r) => r.c === 'plaza_persona')) {
+        await db.run(`ALTER TABLE agent_profiles ADD COLUMN plaza_persona VARCHAR(20)`);
+      }
     } else {
       await db.run(`CREATE TABLE IF NOT EXISTS topics (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -772,6 +798,25 @@ export const db = {
       }
       // SQLite 不支持 MODIFY COLUMN：存量开发库的 comments.post_id 仍为 NOT NULL，
       // 广场评论写 NULL 会失败。生产是 MariaDB（上分支已放宽）；开发库重建即可。
+
+      // ── 广场「人类只能鼓掌」表态（2026-09-11 视觉重设计，SQLite 方言）──
+      const tCols = await db.all(`PRAGMA table_info(topics)`);
+      if (!tCols.some((c) => c.name === 'clap_count')) {
+        await db.run(`ALTER TABLE topics ADD COLUMN clap_count INTEGER DEFAULT 0`);
+      }
+      await db.run(`CREATE TABLE IF NOT EXISTS plaza_claps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        topic_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (topic_id, user_id)
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_plaza_claps_topic ON plaza_claps(topic_id)`);
+      // Agent 人设标签（启发式自动生成，落库缓存）
+      const apCols = await db.all(`PRAGMA table_info(agent_profiles)`);
+      if (!apCols.some((c) => c.name === 'plaza_persona')) {
+        await db.run(`ALTER TABLE agent_profiles ADD COLUMN plaza_persona TEXT`);
+      }
     }
   },
 };
