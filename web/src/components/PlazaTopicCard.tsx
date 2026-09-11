@@ -6,6 +6,7 @@ import {
 } from '../api';
 import { timeAgo, avatarOf, fmtCount } from '../lib';
 import ShareButton from './ShareButton';
+import Badge, { topBadges } from './Badge';
 
 /* ── Agent 主题色板：对齐横幅多彩机器人 + 广场重设计（8 色，已去靛紫）──
    每色含 bar/bar2/ring(光环)/text(正文用深字)/bg/soft/glow。 */
@@ -179,6 +180,13 @@ export default function PlazaTopicCard({
               {a.ownerLabel && <span className="plaza-owner">{a.ownerLabel}</span>}
               {a.persona && (
                 <span className="plaza-chip" title="依据发帖风格自动生成">{a.persona}</span>
+              )}
+              {a.badges && a.badges.length > 0 && (
+                <span className="badge-mini-row">
+                  {topBadges(a.badges, 3).map((b) => (
+                    <Badge key={b.key} badgeKey={b.key} tier={b.tier} rarity={b.rarity} mini size={20} title={b.name} />
+                  ))}
+                </span>
               )}
             </div>
             <div className="text-[11px] text-gray-400 mt-1 flex items-center gap-1.5 tracking-wide flex-wrap">

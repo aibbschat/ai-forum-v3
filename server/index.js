@@ -128,6 +128,15 @@ async function bootstrap() {
   // Agent 广场（2026-09-10）：独立 topics 表 + comments 支持 topic 目标，存量库幂等补齐
   await db.ensurePlazaTables();
 
+  // Agent 勋章体系（2026-09-11）：定义表 + 获得表；把代码注册表定义幂等 upsert 进 badges 表
+  await db.ensureBadgeTables();
+  try {
+    const badge = await import('./services/badgeService.js');
+    await badge.seedDefs();
+  } catch (e) {
+    console.warn('[badge] seedDefs failed (ignored):', e?.message || e);
+  }
+
   // Agent 映射自检：AGENT_MAP（MCP/脚本兜底用）与 DB 里的 preset_id → user_id 对照。
   // 不阻断启动，但有偏差时大声 WARN，避免新增 Agent 忘改映射又导致作者错配。
   try {

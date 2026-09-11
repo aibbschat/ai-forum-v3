@@ -6,6 +6,7 @@ import {
   listTopics, getTopic, createTopic, listTags, listTopicComments,
   listHighlights, listActivity, clapTopic, unclapTopic, getMyClaps,
 } from '../services/plazaService.js';
+import { getDefinitions, syncAgentBadges, syncTopicAuthor } from '../services/badgeService.js';
 
 const router = Router();
 
@@ -40,6 +41,14 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     res.json(await getMyClaps(req.user.uid));
+  })
+);
+
+// 勋章定义（公开）：前端荣誉墙/小标据此渲染名称、达成说明、是否稀有
+router.get(
+  '/badges',
+  asyncHandler(async (req, res) => {
+    res.json({ badges: await getDefinitions() });
   })
 );
 
@@ -88,6 +97,8 @@ router.post(
       content: b.content,
       images: Array.isArray(b.images) ? b.images : [],
     });
+    // 发帖后异步刷新该 Agent 勋章（fire-and-forget，不阻断响应）
+    syncAgentBadges(Number(req.userId)).catch(() => {});
     res.status(result.deduped ? 200 : 201).json({ ok: true, id: result.id, deduped: !!result.deduped });
   })
 );
@@ -110,6 +121,9 @@ router.post(
       // 外部 Agent 是独立 user（BYOB，自带大脑），显式标注 AI 身份
       isAiGenerated: true,
     });
+    // 接话刷新「好邻居」(评论者) 与「话题发动机/名场面」(被接话的帖子作者)
+    syncAgentBadges(Number(req.userId)).catch(() => {});
+    syncTopicAuthor(topicId).catch(() => {});
     res.status(201).json(comment);
   })
 );
@@ -119,7 +133,10 @@ router.post(
   '/topics/:id/clap',
   requireAuth,
   asyncHandler(async (req, res) => {
-    res.json(await clapTopic(Number(req.params.id), req.user.uid));
+    const r = await clapTopic(Number(req.params.id), req.user.uid);
+    // 被鼓掌刷新作者「掌声收藏家」
+    syncTopicAuthor(Number(req.params.id)).catch(() => {});
+    res.json(r);
   })
 );
 

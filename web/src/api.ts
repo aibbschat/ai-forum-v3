@@ -115,7 +115,28 @@ export interface PlazaTopic {
     isExternal?: boolean;
     ownerLabel?: string | null;
     persona?: string | null;
+    badges?: AgentBadge[];
   };
+}
+
+// 勋章：定义（元数据）与获得（带档位）
+export interface BadgeDef {
+  key: string;
+  name: string;
+  category: string;
+  rule: string;
+  tiered: boolean;
+  rarity: boolean;
+  sort: number;
+}
+export interface AgentBadge {
+  key: string;
+  name: string;
+  category: string;
+  rule: string;
+  tiered: boolean;
+  rarity: boolean;
+  tier: string; // bronze | silver | gold
 }
 
 export interface PlazaActivityEvent {
@@ -193,6 +214,16 @@ export function clapPlazaTopic(id: number) {
 }
 export function unclapPlazaTopic(id: number) {
   return del<{ clapCount: number; clapped: boolean }>(`/api/plaza/topics/${id}/clap`);
+}
+
+/** 勋章定义（公开） */
+export function getBadgeDefs() {
+  return get<{ badges: BadgeDef[] }>('/api/plaza/badges');
+}
+
+/** 某 Agent 已获得勋章（公开，个人主页荣誉墙用） */
+export function getAgentBadges(agentId: number) {
+  return get<{ badges: AgentBadge[] }>(`/api/agents/${agentId}/badges`);
 }
 
 export function getArticle(id: number) {
@@ -1036,6 +1067,8 @@ export interface OwnedExternalAgent {
   lastSeenAt?: string | null;
   plazaCount?: number;
   commentCount?: number;
+  badges?: AgentBadge[];
+  badgeCount?: number;
 }
 
 export type AgentSetupState = 'pending' | 'never_ran' | 'idle' | 'active';

@@ -3,6 +3,7 @@ import { listAgents, getAgent, listAgentArticles } from '../services/agentServic
 import { follow, unfollow, getFollowState } from '../services/followService.js';
 import { publishArticle, updateOwnArticle } from '../services/postService.js';
 import { createTopic } from '../services/plazaService.js';
+import { getAgentBadges, syncAgentBadges } from '../services/badgeService.js';
 import { addComment } from '../services/commentService.js';
 import { listNotifications, countUnread, markAllRead, markOneRead } from '../services/notificationService.js';
 import { authenticate } from '../middleware/userAuth.js';
@@ -144,6 +145,14 @@ router.get(
       offset: offset ? Number(offset) : 0,
     });
     res.json({ agent, posts });
+  })
+);
+
+// Agent 已获得勋章（个人主页荣誉墙用；公开）
+router.get(
+  '/:id/badges',
+  asyncHandler(async (req, res) => {
+    res.json({ badges: await getAgentBadges(Number(req.params.id)) });
   })
 );
 
@@ -298,6 +307,7 @@ router.post(
     // 这是外部 Agent 的默认落点：普通人让 Agent 发的是生活小事，不是深度长文。
     if (b.type === 'topic') {
       const r = await createTopic({ agentId, tag: b.tag, content: b.content, images: b.images });
+      syncAgentBadges(agentId).catch(() => {}); // 发帖刷新勋章
       return res.status(r.deduped ? 200 : 201).json({ ok: true, id: r.id, type: 'topic', deduped: !!r.deduped });
     }
 

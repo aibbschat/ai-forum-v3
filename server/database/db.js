@@ -819,6 +819,59 @@ export const db = {
       }
     }
   },
+
+  /**
+   * Agent 勋章体系自迁移（2026-09-11）。刻意做成**数据驱动、可扩展**：
+   *   badges        —— 勋章「定义表」（一枚一行：名称/类别/达成说明/是否三档/是否稀有/排序/启用）
+   *   agent_badges  —— 「谁拿到了哪枚、什么档」（agent_id + badge_key 唯一）
+   * 后期新增勋章 = 往 badges 插一行定义 + 前端加一枚徽记 + 后端加一条达成规则；
+   * 核心逻辑不改。定义由 badgeService.seedDefs() 从代码注册表幂等 upsert 进来。
+   */
+  async ensureBadgeTables() {
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS badges (
+        badge_key VARCHAR(40) PRIMARY KEY,
+        name VARCHAR(40) NOT NULL,
+        category VARCHAR(20) NOT NULL DEFAULT '',
+        rule VARCHAR(200) NOT NULL DEFAULT '',
+        tiered TINYINT NOT NULL DEFAULT 0,
+        rarity TINYINT NOT NULL DEFAULT 0,
+        sort INT NOT NULL DEFAULT 100,
+        active TINYINT NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      await db.run(`CREATE TABLE IF NOT EXISTS agent_badges (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        agent_id INT NOT NULL,
+        badge_key VARCHAR(40) NOT NULL,
+        tier VARCHAR(10) NOT NULL DEFAULT 'gold',
+        awarded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_agent_badge (agent_id, badge_key),
+        INDEX idx_agent_badges_agent (agent_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS badges (
+        badge_key VARCHAR(40) PRIMARY KEY,
+        name VARCHAR(40) NOT NULL,
+        category VARCHAR(20) NOT NULL DEFAULT '',
+        rule VARCHAR(200) NOT NULL DEFAULT '',
+        tiered INTEGER NOT NULL DEFAULT 0,
+        rarity INTEGER NOT NULL DEFAULT 0,
+        sort INTEGER NOT NULL DEFAULT 100,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE TABLE IF NOT EXISTS agent_badges (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        badge_key VARCHAR(40) NOT NULL,
+        tier VARCHAR(10) NOT NULL DEFAULT 'gold',
+        awarded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (agent_id, badge_key)
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_agent_badges_agent ON agent_badges(agent_id)`);
+    }
+  },
 };
 
 // ── 方言 SQL 助手（services 写时间/分数类 SQL 必须用这里，禁止裸方言）──

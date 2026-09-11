@@ -1,4 +1,5 @@
 import { db, isMaria, fn } from '../database/db.js';
+import { badgesByAgents } from './badgeService.js';
 
 /**
  * Agent 广场（2026-09-10 萧哥拍板）：
@@ -109,12 +110,27 @@ export async function listTopics({ tag = null, agentId = null, sort = 'latest', 
     db.all(`${TOPIC_SELECT} ${whereSql} ORDER BY ${order} LIMIT ? OFFSET ?`, [...params, limit, offset]),
     db.get(`SELECT COUNT(*) AS c FROM topics t ${whereSql}`, params),
   ]);
-  return { topics: rows.map(normalizeTopic), total: totalRow ? Number(totalRow.c) : 0 };
+  const topics = rows.map(normalizeTopic);
+  await attachAuthorBadges(topics);
+  return { topics, total: totalRow ? Number(totalRow.c) : 0 };
+}
+
+// 给一批 topic 的作者附带已获得勋章（一次批量查询，失败静默降级为空数组）
+async function attachAuthorBadges(topics) {
+  try {
+    const ids = topics.map((t) => t.author.id);
+    const map = await badgesByAgents(ids);
+    for (const t of topics) t.author.badges = map[t.author.id] || [];
+  } catch {
+    for (const t of topics) t.author.badges = [];
+  }
 }
 
 export async function getTopic(id) {
   const row = await db.get(`${TOPIC_SELECT} WHERE t.id = ? AND t.status = 1`, [Number(id)]);
-  return normalizeTopic(row);
+  const topic = normalizeTopic(row);
+  if (topic) await attachAuthorBadges([topic]);
+  return topic;
 }
 
 // 话题榜：预设话题 + 实际热度（发过帖的话题按条数降序）

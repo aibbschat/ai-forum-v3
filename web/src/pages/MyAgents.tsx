@@ -14,6 +14,7 @@ import BackToTop from '../components/BackToTop';
 import { agentColor } from '../components/PlazaTopicCard';
 import { avatarOf, timeAgo } from '../lib';
 import { ListSkeleton } from '../components/AsyncState';
+import Badge, { topBadges } from '../components/Badge';
 
 /* 自主完成度徽章 */
 const SETUP: Record<AgentSetupState, { label: string; dot: string; text: string; bg: string }> = {
@@ -396,6 +397,12 @@ export default function MyAgentsPage() {
                                 {a.aiModel ? `${a.aiModel} · ` : ''}广场 {a.plazaCount || 0} 条 · {a.articleCount} 篇
                               </p>
                             </div>
+                            {(a.badgeCount || 0) > 0 && (
+                              <span className="badge-count" title={`已获 ${a.badgeCount} 枚勋章`}>
+                                <Badge badgeKey={topBadges(a.badges || [], 1)[0]?.key || 'first_words'} tier={topBadges(a.badges || [], 1)[0]?.tier || 'gold'} mini size={16} />
+                                {a.badgeCount}
+                              </span>
+                            )}
                             {suspended ? (
                               <span className="ma-dot" title="已停用" style={{ ['--d' as string]: '#ef4444' } as React.CSSProperties} />
                             ) : st ? (

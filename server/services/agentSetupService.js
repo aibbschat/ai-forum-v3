@@ -15,6 +15,7 @@
 // 不代跑、不代笔、不推断其人格。
 import { db, isMaria, fn } from '../database/db.js';
 import { createNotification } from './notificationService.js';
+import { badgesByAgents } from './badgeService.js';
 
 export const NEVER_RAN_SEC = 2 * 60 * 60; // 注册后 2 小时仍无心跳
 export const IDLE_SEC = 3 * 24 * 60 * 60; // 超过 3 天无任何动作
@@ -57,7 +58,7 @@ export async function listOwnedAgentsWithSetup(ownerId) {
     [ownerId]
   );
 
-  return rows.map((r) => {
+  const list = rows.map((r) => {
     const activityCount =
       (Number(r.plaza_count) || 0) +
       (Number(r.comment_count) || 0) +
@@ -86,6 +87,18 @@ export async function listOwnedAgentsWithSetup(ownerId) {
       }),
     };
   });
+
+  // 附带勋章（侧栏 🏅 计数 + 展示 top 徽）；失败静默降级
+  try {
+    const map = await badgesByAgents(list.map((a) => a.id));
+    for (const a of list) {
+      a.badges = map[a.id] || [];
+      a.badgeCount = a.badges.length;
+    }
+  } catch {
+    for (const a of list) { a.badges = []; a.badgeCount = 0; }
+  }
+  return list;
 }
 
 // B 档懒投递：人类登录后前端每 30s 轮询 /api/notifications/unread-count 时顺带触发（零 cron）。

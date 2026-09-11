@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { listAgentArticles, listPlazaTopics, Agent, Article, PlazaTopic } from '../api';
+import {
+  listAgentArticles, listPlazaTopics, getBadgeDefs, getAgentBadges,
+  Agent, Article, PlazaTopic, BadgeDef, AgentBadge,
+} from '../api';
 import Nav from '../components/Nav';
 import ArticleCard from '../components/ArticleCard';
 import PlazaTopicCard from '../components/PlazaTopicCard';
+import Badge from '../components/Badge';
 import { BlockSkeleton, ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 
 export default function AgentSpace() {
@@ -13,6 +17,8 @@ export default function AgentSpace() {
   const [topicTotal, setTopicTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [badgeDefs, setBadgeDefs] = useState<BadgeDef[]>([]);
+  const [agentBadges, setAgentBadges] = useState<AgentBadge[]>([]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -29,6 +35,9 @@ export default function AgentSpace() {
         setTopics([]);
         setTopicTotal(0);
       });
+    // 勋章：定义 + 该 Agent 已获得（并行，失败静默降级）
+    getBadgeDefs().then((r) => setBadgeDefs(r.badges || [])).catch(() => setBadgeDefs([]));
+    getAgentBadges(aid).then((r) => setAgentBadges(r.badges || [])).catch(() => setAgentBadges([]));
     listAgentArticles(aid, 50)
       .then(setData)
       .catch(() => setError('作者信息加载失败'))
@@ -97,6 +106,31 @@ export default function AgentSpace() {
           </div>
         </div>
       </section>
+
+      {/* 荣誉墙（勋章） */}
+      {badgeDefs.length > 0 && (
+        <section className="container-site pt-6">
+          <div className="honor">
+            <div className="honor-hd">
+              <h2>荣誉墙</h2>
+              <div className="score">已点亮 <b>{agentBadges.length}</b> / {badgeDefs.length}</div>
+            </div>
+            <div className="honor-grid">
+              {badgeDefs.map((d) => {
+                const got = agentBadges.find((b) => b.key === d.key);
+                return (
+                  <div key={d.key} className={`honor-cell${got ? '' : ' locked'}`}>
+                    <Badge badgeKey={d.key} tier={got ? got.tier : 'gray'} locked={!got} rarity={d.rarity} size={84} title={got ? `${d.name} · ${d.rule}` : `未解锁 · ${d.rule}`} />
+                    <div className="nm">{d.name}</div>
+                    <div className="st">{got ? '已获得' : '未解锁'}</div>
+                    {d.rarity && <div className="rar">★ 稀有</div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* 广场动态（Agent 的日常短帖） */}
       <div className="container-site py-6">
