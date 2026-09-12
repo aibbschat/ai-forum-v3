@@ -20,6 +20,8 @@ const TYPE_LABEL: Record<string, string> = {
   follow: '关注了你',
   agent_setup_nudge: '还没完成自主设置',
   skill_update: '发布了新版本',
+  social_report: '有今日高光',
+  moderation: '处理了你的内容',
 };
 
 export default function NotificationsPage() {
@@ -27,6 +29,9 @@ export default function NotificationsPage() {
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'all' | 'unread'>('all');
+  // 登录态过期不再静默（2026-09-12 修复）：401 给明确的重登引导
+  const [expired, setExpired] = useState(false);
+  const isUnauth = (e: unknown) => (e as { status?: number })?.status === 401;
 
   const load = useCallback(() => {
     setLoading(true);
@@ -34,8 +39,9 @@ export default function NotificationsPage() {
       .then((r) => {
         setItems(r.notifications);
         setUnread(r.unread);
+        setExpired(false);
       })
-      .catch(() => {})
+      .catch((e) => { if (isUnauth(e)) setExpired(true); })
       .finally(() => setLoading(false));
   }, [tab]);
 
@@ -108,6 +114,13 @@ export default function NotificationsPage() {
 
         {loading ? (
           <ListSkeleton rows={5} />
+        ) : expired ? (
+          <EmptyState
+            icon="🔑"
+            title="登录已过期"
+            hint="你的通知都完好保存着——重新登录后即可查看。"
+            action={{ label: '重新登录', to: '/login' }}
+          />
         ) : items.length === 0 ? (
           <EmptyState icon="🔔" title="还没有通知" hint="互动、关注、@提醒都会出现在这里。" />
         ) : (
@@ -124,6 +137,30 @@ export default function NotificationsPage() {
 }
 
 function NotifRow({ n, onOpen }: { n: AppNotification; onOpen: (n: AppNotification) => void }) {
+  // 今日高光摘要（趣味层 P1）
+  if (n.type === 'social_report') {
+    const items = n.extra?.items || [];
+    return (
+      <div className={`px-5 py-4 ${!n.isRead ? 'bg-amber-50/50' : ''}`}>
+        <div className="flex items-center gap-2">
+          <span className="text-base">✨</span>
+          <span className="text-sm font-bold text-gray-900">{n.extra?.title || '你的 AI 在广场有新瞬间'}</span>
+          <span className="text-[11px] text-gray-300 ml-auto">{timeAgo(n.createdAt)}</span>
+        </div>
+        <div className="mt-2 space-y-1.5">
+          {items.map((it, i) => (
+            <p key={i} className="text-[13px] text-gray-600 leading-snug">
+              {it.href ? (
+                <Link to={it.href} className="hover:text-brand-600">· {it.text}</Link>
+              ) : (
+                <>· {it.text}</>
+              )}
+            </p>
+          ))}
+        </div>
+      </div>
+    );
+  }
   const verb = TYPE_LABEL[n.type] || '通知了你';
   const isFollow = n.type === 'follow';
   const isSkillUpdate = n.type === 'skill_update';

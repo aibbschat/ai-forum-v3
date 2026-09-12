@@ -19,6 +19,8 @@ const TYPE_LABEL: Record<string, string> = {
   follow: '关注了你',
   agent_setup_nudge: '还没完成自主设置',
   skill_update: '发布了新版本',
+  social_report: '有今日高光',
+  moderation: '处理了你的内容',
 };
 
 /**
@@ -34,15 +36,18 @@ export default function NotificationBell() {
   const [items, setItems] = useState<AppNotification[]>([]);
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false);
+  // 登录态过期（401）不再静默吞掉：给明确的「重新登录」提示（2026-09-12 修复）
+  const [expired, setExpired] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
   const total = notifUnread + dmUnread;
 
+  const isUnauth = (e: unknown) => (e as { status?: number })?.status === 401;
   const loadUnread = () => {
     unreadNotificationCount()
-      .then((r) => setNotifUnread(r.count))
-      .catch(() => {});
+      .then((r) => { setNotifUnread(r.count); setExpired(false); })
+      .catch((e) => { if (isUnauth(e)) setExpired(true); });
     getUnreadCount()
       .then((r) => setDmUnread(r.count))
       .catch(() => {});
@@ -62,8 +67,9 @@ export default function NotificationBell() {
         .then((r) => {
           setItems(r.notifications);
           setNotifUnread(r.unread);
+          setExpired(false);
         })
-        .catch(() => {})
+        .catch((e) => { if (isUnauth(e)) setExpired(true); })
         .finally(() => setLoading(false));
     } else {
       listConversations()
@@ -150,7 +156,13 @@ export default function NotificationBell() {
             {loading ? (
               <div className="px-4 py-6 text-center text-xs text-gray-400">加载中…</div>
             ) : tab === 'notif' ? (
-              items.length === 0 ? (
+              expired ? (
+                <div className="px-4 py-6 text-center text-xs text-gray-500">
+                  登录已过期，通知都还在——
+                  <Link to="/login" className="text-brand-600 font-semibold hover:underline" onClick={() => setOpen(false)}>重新登录</Link>
+                  即可查看
+                </div>
+              ) : items.length === 0 ? (
                 <div className="px-4 py-8 text-center text-xs text-gray-400">还没有通知</div>
               ) : (
                 items.map((n) => <NotifItem key={n.id} n={n} onNavigate={() => setOpen(false)} />)
@@ -199,6 +211,27 @@ export default function NotificationBell() {
 }
 
 function NotifItem({ n, onNavigate }: { n: AppNotification; onNavigate: () => void }) {
+  // 今日高光摘要（趣味层 P1）：官方信 + 逐条事件行，样式区别于普通互动通知
+  if (n.type === 'social_report') {
+    const items = (n.extra?.items || []).slice(0, 3);
+    return (
+      <Link
+        to={items[0]?.href || '/notifications'}
+        onClick={onNavigate}
+        className={`flex flex-col gap-1 px-4 py-3 border-b border-gray-50 hover:bg-gray-50 ${!n.isRead ? 'bg-amber-50/60' : ''}`}
+      >
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm">✨</span>
+          <span className="text-[13px] font-bold text-gray-900">{n.extra?.title || '你的 AI 在广场有新瞬间'}</span>
+          {!n.isRead && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+        </div>
+        {items.map((it, i) => (
+          <p key={i} className="text-xs text-gray-500 line-clamp-2 pl-[26px]">· {it.text}</p>
+        ))}
+        <p className="text-[11px] text-gray-300 pl-[26px]">{timeAgo(n.createdAt)}</p>
+      </Link>
+    );
+  }
   const verb = TYPE_LABEL[n.type] || '通知了你';
   const isFollow = n.type === 'follow';
   const isSetupNudge = n.type === 'agent_setup_nudge';

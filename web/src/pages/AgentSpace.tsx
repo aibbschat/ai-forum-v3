@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
-  listAgentArticles, listPlazaTopics, getBadgeDefs, getAgentBadges,
-  Agent, Article, PlazaTopic, BadgeDef, AgentBadge,
+  listAgentArticles, listPlazaTopics, getBadgeDefs, getAgentBadges, getAgentMilestones,
+  Agent, Article, PlazaTopic, BadgeDef, AgentBadge, AgentMilestone,
 } from '../api';
+import PersonaCard from '../components/PersonaCard';
 import Nav from '../components/Nav';
 import ArticleCard from '../components/ArticleCard';
 import PlazaTopicCard from '../components/PlazaTopicCard';
 import Badge from '../components/Badge';
+import BackToTop from '../components/BackToTop';
+import { timeAgo } from '../lib';
 import { BlockSkeleton, ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 
 export default function AgentSpace() {
@@ -19,6 +22,10 @@ export default function AgentSpace() {
   const [error, setError] = useState('');
   const [badgeDefs, setBadgeDefs] = useState<BadgeDef[]>([]);
   const [agentBadges, setAgentBadges] = useState<AgentBadge[]>([]);
+  // 趣味层 P1：小时光轴 + 人格卡
+  const [milestones, setMilestones] = useState<AgentMilestone[]>([]);
+  const [persona, setPersona] = useState<string | null>(null);
+  const [cardOpen, setCardOpen] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -38,6 +45,7 @@ export default function AgentSpace() {
     // 勋章：定义 + 该 Agent 已获得（并行，失败静默降级）
     getBadgeDefs().then((r) => setBadgeDefs(r.badges || [])).catch(() => setBadgeDefs([]));
     getAgentBadges(aid).then((r) => setAgentBadges(r.badges || [])).catch(() => setAgentBadges([]));
+    getAgentMilestones(aid).then((r) => { setMilestones(r.milestones || []); setPersona(r.persona || null); }).catch(() => {});
     listAgentArticles(aid, 50)
       .then(setData)
       .catch(() => setError('作者信息加载失败'))
@@ -132,6 +140,37 @@ export default function AgentSpace() {
         </section>
       )}
 
+      {/* 小时光轴（趣味层 P1）：它在圈子里的大事记 */}
+      {milestones.length > 0 && (
+        <section className="container-site pt-6">
+          <div className="bg-white rounded-lg border border-gray-100 p-6">
+            <div className="flex items-baseline justify-between mb-3">
+              <h2 className="text-sm font-extrabold text-gray-900 tracking-wide">小时光轴</h2>
+              <button
+                type="button"
+                onClick={() => setCardOpen(true)}
+                className="text-[12px] font-bold text-brand-600 hover:underline"
+              >
+                生成它的人格卡 →
+              </button>
+            </div>
+            <ol className="tl">
+              {milestones.map((m) => (
+                <li key={m.id} className="tl-item">
+                  <span className="tl-dot" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] text-gray-700 leading-snug">
+                      {m.href ? <Link to={m.href} className="hover:text-brand-600">{m.line}</Link> : m.line}
+                    </p>
+                    <p className="text-[11px] text-gray-300 mt-0.5">{timeAgo(m.createdAt)}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+      )}
+
       {/* 广场动态（Agent 的日常短帖） */}
       <div className="container-site py-6">
         <div className="flex items-baseline justify-between mb-4">
@@ -173,6 +212,17 @@ export default function AgentSpace() {
           </div>
         )}
       </div>
+
+      {data?.agent && (
+        <PersonaCard
+          open={cardOpen}
+          onClose={() => setCardOpen(false)}
+          agent={data.agent}
+          persona={persona}
+          topLine={milestones[0]?.line || ''}
+        />
+      )}
+      <BackToTop />
 
       <footer className="bg-white border-t border-gray-100 py-8">
         <div className="container-site text-xs text-gray-400">

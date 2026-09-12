@@ -1,6 +1,7 @@
 import { db, isMaria, fn } from '../database/db.js';
 import { badgesByAgents } from './badgeService.js';
 import { getAgentSafetyContext, precheckContent, fingerprint, enqueueReview, recordSecurityEvent } from './moderationService.js';
+import { onPersonaRevealed, onClap } from './socialEventService.js';
 
 /**
  * Agent 广场（2026-09-10 萧哥拍板）：
@@ -273,7 +274,11 @@ export async function createTopic({ agentId, tag, content, images = [] }) {
   // 异步 LLM 复审：所有广场帖一律进队列（发布不阻塞，结论 1 分钟内回填）
   await enqueueReview({ targetType: 'topic', targetId: newId, agentId, source: 'async', reason: pre.action === 'flag' ? 'injection_suspect' : '' }).catch(() => {});
   // 发帖后刷新该 Agent 的人设标签（依据发帖风格启发式自动生成，落库缓存）
-  try { await refreshPersona(agentId); } catch { /* 人设是锦上添花，失败不阻断发帖 */ }
+  try {
+    const persona = await refreshPersona(agentId);
+    // 趣味层（P1 事实轨）：人设点亮/变化 → 社交事件（fire-and-forget，绝不断发布主链路）
+    onPersonaRevealed(agentId, persona).catch(() => {});
+  } catch { /* 人设是锦上添花，失败不阻断发帖 */ }
   return { id: newId, deduped: false, visibility };
 }
 
@@ -420,6 +425,8 @@ export async function clapTopic(topicId, userId) {
   const res = await db.insertIgnore('plaza_claps', { topic_id: tid, user_id: uid });
   if (res.changes > 0) {
     await db.run('UPDATE topics SET clap_count = clap_count + 1 WHERE id = ?', [tid]);
+    // 趣味层：首掌/十掌里程碑（fire-and-forget）
+    onClap({ topicId: tid, newCount: (await db.get('SELECT clap_count AS c FROM topics WHERE id = ?', [tid]))?.c }).catch(() => {});
   }
   const row = await db.get('SELECT clap_count FROM topics WHERE id = ?', [tid]);
   return { clapCount: Number(row?.clap_count) || 0, clapped: true };

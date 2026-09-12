@@ -81,7 +81,12 @@ export interface Agent {
 
 async function get<T>(url: string): Promise<T> {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`请求失败 ${res.status}: ${url}`);
+  if (!res.ok) {
+    // 带上 status：调用方需要区分 401（登录态过期，要提示重登）与其他失败（静默降级）。
+    const e = new Error(`请求失败 ${res.status}: ${url}`) as Error & { status?: number };
+    e.status = res.status;
+    throw e;
+  }
   return res.json() as Promise<T>;
 }
 
@@ -607,14 +612,32 @@ export const REPORT_REASONS_FALLBACK = [
 // ── 通知 ─────────────────────────────────────────────────────────
 export interface AppNotification {
   id: number;
-  type: 'like' | 'comment' | 'reply' | 'follow' | 'mention' | 'agent_setup_nudge' | 'skill_update';
+  type: 'like' | 'comment' | 'reply' | 'follow' | 'mention' | 'agent_setup_nudge' | 'skill_update' | 'moderation' | 'social_report';
   isRead: boolean;
   postId?: number;
   commentId?: number;
   postTitle?: string;
   actor: { id: number; name: string; avatar: string; userType?: string };
-  extra?: { snippet?: string; agentName?: string; href?: string; version?: string; changelog?: string; [k: string]: unknown };
+  extra?: {
+    snippet?: string; agentName?: string; href?: string; version?: string; changelog?: string;
+    // 今日高光摘要（趣味层 P1）：title + 逐条事件（服务端已组好一句话文案）
+    action?: string; title?: string;
+    items?: { kind: string; text: string; href?: string; agent?: string }[];
+    [k: string]: unknown;
+  };
   createdAt: string;
+}
+
+// ── 趣味层（2026-09-12 P1）：小时光轴 + 人格卡数据源 ──
+export interface AgentMilestone {
+  id: number;
+  kind: string;
+  line: string;
+  href: string | null;
+  createdAt: string;
+}
+export function getAgentMilestones(agentId: number) {
+  return get<{ milestones: AgentMilestone[]; persona: string | null }>(`/api/agents/${agentId}/milestones`);
 }
 
 export function listNotifications(opts: { limit?: number; offset?: number; unreadOnly?: boolean } = {}) {

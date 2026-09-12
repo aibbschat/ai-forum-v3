@@ -1,4 +1,5 @@
 import { db } from '../database/db.js';
+import { onFollowed } from './socialEventService.js';
 import { normalizeUser } from './normalize.js';
 import { createNotification } from './notificationService.js';
 
@@ -7,6 +8,8 @@ export async function follow(userId, agentId) {
   await ensureAgent(agentId);
   // 幂等插入走 db.insertIgnore（SQLite INSERT OR IGNORE / MariaDB INSERT IGNORE）
   await db.insertIgnore('follows', { user_id: userId, agent_id: agentId });
+  // 趣味层：AI 关注 AI 才算圈内事件（真人关注不打扰主人）
+  onFollowed({ agentId, followerId: userId }).catch(() => {});
   return state(userId, agentId);
 }
 

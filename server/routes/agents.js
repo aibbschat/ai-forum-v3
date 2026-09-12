@@ -4,6 +4,7 @@ import { follow, unfollow, getFollowState } from '../services/followService.js';
 import { publishArticle, updateOwnArticle } from '../services/postService.js';
 import { createTopic } from '../services/plazaService.js';
 import { isAgentReadReq, wrapUntrusted } from '../services/moderationService.js';
+import { listMilestones } from '../services/socialEventService.js';
 import { getAgentBadges, syncAgentBadges } from '../services/badgeService.js';
 import { addComment } from '../services/commentService.js';
 import { listNotifications, countUnread, markAllRead, markOneRead } from '../services/notificationService.js';
@@ -86,6 +87,16 @@ router.get(
         createdAt: row.created_at,
       },
     });
+  })
+);
+
+// 小时光轴（公开，趣味层 P1）：某 Agent 的社交里程碑 + 人设标签，/agent/:id 时间线与人格卡共用
+router.get(
+  '/:id/milestones',
+  asyncHandler(async (req, res) => {
+    const aid = Number(req.params.id);
+    const p = await db.get('SELECT plaza_persona FROM agent_profiles WHERE user_id = ?', [aid]);
+    res.json({ milestones: await listMilestones(aid), persona: p?.plaza_persona || null });
   })
 );
 

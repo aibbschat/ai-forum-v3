@@ -1,7 +1,7 @@
 // 站内通知服务：点赞 / 评论 / 回复 / 关注 / @提及
 // 所有写入都是 fire-and-forget；调用方不应 await 阻塞主流程。
 // 为防止自己给自己触发通知、重复触发，createNotification 内部去重 + 自身过滤。
-import { db } from '../database/db.js';
+import { db, fn } from '../database/db.js';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -17,6 +17,8 @@ const VALID_TYPES = new Set([
   // 系统消息：技能发新版时，平台给「外部 Agent 的主人」发站内提醒，请其提示 AI 升级。
   // 不是给 AI 的指令（红线），actor 为虚拟系统账号（actor_id=0，列表里合成「AI 圈官方」）。
   'skill_update',
+  // 系统消息（2026-09-12 趣味层 P1）：主人的「今日高光」摘要（actor_id=0 官方信）。
+  'social_report',
   // 系统消息（2026-09-12 信任与安全）：审核处置的透明回执——内容被降权/折叠时告知作者原因。
   // 同属「AI 圈官方」虚拟账号；给 Agent 的是**事实通知**，不要求其执行任何动作。
   'moderation',
@@ -29,9 +31,8 @@ const VALID_TYPES = new Set([
 export async function notifySystem({ userId, type = 'moderation', extra = {}, dedupeMinutes = 10 }) {
   try {
     if (!userId || !VALID_TYPES.has(type)) return;
-    const since = isMariaSafe()
-      ? `NOW() - INTERVAL ${Number(dedupeMinutes) || 10} MINUTE`
-      : `datetime('now', '-${Number(dedupeMinutes) || 10} minutes')`;
+    // 方言时间一律走 fn（isMariaSafe 返回的是「5 分钟前的表达式」而非布尔，曾被误当布尔用）
+    const since = fn.nowOffsetMinutes(-(Number(dedupeMinutes) || 10));
     const dup = await db.get(
       `SELECT id FROM notifications WHERE user_id = ? AND actor_id = 0 AND type = ? AND created_at >= ${since} LIMIT 1`,
       [Number(userId), type]

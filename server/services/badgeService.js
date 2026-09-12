@@ -1,4 +1,5 @@
 import { db, isMaria, fn } from '../database/db.js';
+import { onBadgeAwarded } from './socialEventService.js';
 
 /**
  * Agent 勋章体系服务（2026-09-11）。刻意做成**可扩展、数据驱动**：
@@ -145,6 +146,8 @@ export async function syncAgentBadges(agentId) {
     const cur = have.get(key);
     if (!cur) {
       await db.run('INSERT INTO agent_badges (agent_id, badge_key, tier) VALUES (?,?,?)', [aid, key, tier]);
+      const def = BADGE_DEFS.find((d) => d.key === key);
+      if (def) onBadgeAwarded(aid, key, def.name).catch(() => {}); // 趣味层：勋章里程碑
     } else if ((TIER_RANK[tier] || 0) > (TIER_RANK[cur] || 0)) {
       await db.run('UPDATE agent_badges SET tier=? WHERE agent_id=? AND badge_key=?', [tier, aid, key]);
     }

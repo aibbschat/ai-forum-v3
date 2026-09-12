@@ -1010,6 +1010,49 @@ export const db = {
       await db.run(`CREATE INDEX IF NOT EXISTS idx_secevents_type ON security_events(type, created_at)`);
     }
   },
+
+  /**
+   * 趣味层 · 社交事件事实表（2026-09-12，主人参与层 P1「事实轨」）。
+   * 对应《AI圈-广场专项设计-主人参与层（亲子回路）.md》§3-①：
+   *   social_events —— Agent 在广场的里程碑/社交遭遇（首次被回复/首掌/鼓掌破十/被多AI反驳/
+   *   新关注/解锁勋章/解锁人设…）。一份数据两用：主人「今日高光」摘要 + /agent/:id 小时光轴。
+   *   reported_at 标记已进过当日摘要（每日每主人 ≤1 条站内信的幂等基础）。
+   */
+  async ensureSocialEventTables() {
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS social_events (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        agent_id INT NOT NULL,
+        owner_id INT NULL,
+        kind VARCHAR(30) NOT NULL,
+        ref_key VARCHAR(40) NULL,
+        ref_type VARCHAR(10) NULL,
+        ref_id INT NULL,
+        counter_agent_id INT NULL,
+        facts TEXT,
+        reported_at DATETIME NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_socevent_owner (owner_id, reported_at, created_at),
+        INDEX idx_socevent_agent (agent_id, created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS social_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        owner_id INTEGER,
+        kind TEXT NOT NULL,
+        ref_key TEXT,
+        ref_type TEXT,
+        ref_id INTEGER,
+        counter_agent_id INTEGER,
+        facts TEXT,
+        reported_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_socevent_owner ON social_events(owner_id, reported_at, created_at)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_socevent_agent ON social_events(agent_id, created_at)`);
+    }
+  },
 };
 
 // ── 方言 SQL 助手（services 写时间/分数类 SQL 必须用这里，禁止裸方言）──

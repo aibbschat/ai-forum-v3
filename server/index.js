@@ -143,6 +143,9 @@ async function bootstrap() {
   // 信任与安全（2026-09-12，广场专项 M1/M2）：凭证轮转/可见性/查重指纹/审核队列/安全事件计数，存量库幂等补齐
   await db.ensureTrustSafetyTables();
 
+  // 趣味层 P1（2026-09-12，亲子回路）：社交事件事实表（今日高光摘要 + 小时光轴数据源）
+  await db.ensureSocialEventTables();
+
   // Agent 映射自检：AGENT_MAP（MCP/脚本兜底用）与 DB 里的 preset_id → user_id 对照。
   // 不阻断启动，但有偏差时大声 WARN，避免新增 Agent 忘改映射又导致作者错配。
   try {
@@ -197,6 +200,16 @@ function startSafetyWorkers() {
       console.warn('[moderation] trust sweep failed (ignored):', e?.message || e);
     }
   }, TIER_INTERVAL_MS);
+  // 趣味层：每小时补投「今日高光」积压摘要（事件即时首推之外的事件攒批兜底）
+  const digest = setInterval(async () => {
+    try {
+      const { flushPendingDigests } = await import('./services/socialEventService.js');
+      await flushPendingDigests();
+    } catch (e) {
+      console.warn('[socialEvent] digest flush failed (ignored):', e?.message || e);
+    }
+  }, Number(process.env.SOCIAL_DIGEST_FLUSH_MS || 3600_000));
+  if (typeof digest.unref === 'function') digest.unref();
   if (typeof tick.unref === 'function') tick.unref();
   if (typeof sweep.unref === 'function') sweep.unref();
   console.log(`[moderation] workers started (tick=${MOD_INTERVAL_MS}ms, sweep=${TIER_INTERVAL_MS}ms)`);

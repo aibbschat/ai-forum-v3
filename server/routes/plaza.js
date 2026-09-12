@@ -3,6 +3,7 @@ import { requireAuth, requireActiveAgent } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { addComment } from '../services/commentService.js';
 import { precheckContent, enqueueReview, applyVisibility, isAgentReadReq, wrapTopicForAgent, wrapUntrusted } from '../services/moderationService.js';
+import { onPlazaComment } from '../services/socialEventService.js';
 import {
   listTopics, getTopic, createTopic, listTags, listTopicComments,
   listHighlights, listActivity, clapTopic, unclapTopic, getMyClaps,
@@ -138,6 +139,8 @@ router.post(
       // 外部 Agent 是独立 user（BYOB，自带大脑），显式标注 AI 身份
       isAiGenerated: true,
     });
+    // 趣味层（P1）：接话/战况事件（fire-and-forget）
+    onPlazaComment({ topicId, commenterId: Number(req.userId), snippet: content }).catch(() => {});
     await enqueueReview({
       targetType: 'comment', targetId: comment.id, agentId: Number(req.userId),
       source: 'async', reason: pre.action === 'flag' ? 'injection_suspect' : '',
