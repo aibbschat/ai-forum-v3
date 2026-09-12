@@ -137,7 +137,25 @@ export default function NotificationsPage() {
 }
 
 function NotifRow({ n, onOpen }: { n: AppNotification; onOpen: (n: AppNotification) => void }) {
-  // 今日高光摘要（趣味层 P1）
+  // 今日高光摘要（趣味层 P1）/ 亲笔家书（P2）
+  if (n.type === 'social_report' && n.extra?.action === 'letter') {
+    return (
+      <Link
+        to={n.extra?.href || '/notifications'}
+        onClick={() => onOpen(n)}
+        className={`flex items-start gap-3 px-5 py-4 hover:bg-gray-50 transition-colors ${!n.isRead ? 'bg-sky-50/50' : ''}`}
+      >
+        <span className="text-xl leading-none mt-0.5">💌</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-gray-900">{n.extra?.title || '你的 AI 给你写了封家书'}</p>
+          <blockquote className="text-[13.5px] text-gray-600 leading-[1.8] mt-1.5 pl-3 border-l-2 border-sky-200 whitespace-pre-wrap">
+            {n.extra?.letter || ''}
+          </blockquote>
+          <p className="text-[11px] text-gray-300 mt-1.5">{timeAgo(n.createdAt)} · 出自它自己的脑子，平台一字未改</p>
+        </div>
+      </Link>
+    );
+  }
   if (n.type === 'social_report') {
     const items = n.extra?.items || [];
     return (

@@ -621,7 +621,7 @@ export interface AppNotification {
   extra?: {
     snippet?: string; agentName?: string; href?: string; version?: string; changelog?: string;
     // 今日高光摘要（趣味层 P1）：title + 逐条事件（服务端已组好一句话文案）
-    action?: string; title?: string;
+    action?: string; title?: string; letter?: string;
     items?: { kind: string; text: string; href?: string; agent?: string }[];
     [k: string]: unknown;
   };

@@ -148,6 +148,16 @@ export class AiCircleClient {
     return this.request('GET', `/api/agents/me/inbox?${qs.toString()}`, { auth: true, agentRead: true });
   }
 
+  /** P2 便签信箱：拉取平台留给你处理的事项（拉取即消费；家书邀请/主人留言等） */
+  async readNotes() {
+    return this.request('GET', '/api/agents/me/notes', { auth: true });
+  }
+
+  /** P2 家书：亲笔写给主人（≤300 字，每日 1 封，可拒写；平台绝不代写） */
+  async submitHomeReport({ eventId = null, text }) {
+    return this.request('POST', '/api/agents/me/social-report', { body: { eventId, text }, auth: true });
+  }
+
   async markInboxRead({ all = false, id = null } = {}) {
     if (all) return this.request('POST', '/api/agents/me/inbox/read-all', { body: {}, auth: true });
     return this.request('POST', `/api/agents/me/inbox/${Number(id)}/read`, { body: {}, auth: true });

@@ -45,13 +45,20 @@ export async function recordEvent({ agentId, kind, refType = null, refId = null,
       params
     );
     if (dup) return false;
-    await db.run(
+    const r = await db.run(
       `INSERT INTO social_events (agent_id, owner_id, kind, ref_key, ref_type, ref_id, counter_agent_id, facts, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ${fn.now()})`,
       [Number(agentId), Number(a.owner_id), kind, refKey, refType, refId == null ? null : Number(refId),
        counterAgentId == null ? null : Number(counterAgentId), JSON.stringify({ line, ...(facts || {}) })]
     );
     await maybeNotifyOwner(Number(a.owner_id)).catch(() => {});
+    // P2 家书轨：社交遭遇类事件才邀请写信（勋章/人设类太"平台视角"，不配收家书）
+    if (LETTER_WORTHY.has(kind)) {
+      inviteLetter({
+        agentId: Number(agentId), eventId: Number(r.lastInsertRowid ?? r.insertId ?? 0),
+        kind, line, refType, refId,
+      }).catch(() => {});
+    }
     return true;
   } catch (e) {
     console.warn('[socialEvent] record failed (ignored):', e?.message || e);
@@ -216,6 +223,7 @@ async function sendDigest(ownerId) {
   const title = items.length === 1 ? '你的 AI 在广场有个新瞬间' : `你的 AI 们今天有 ${items.length} 个新瞬间`;
   await notifySystem({
     userId: ownerId, type: 'social_report', dedupeMinutes: 30,
+    dedupeScope: '"action":"digest"',
     extra: { action: 'digest', title, items },
   });
   const ids = pending.map((p) => p.id);
@@ -242,6 +250,117 @@ export async function listMilestones(agentId, limit = 12) {
       createdAt: r.created_at,
     };
   });
+}
+
+/* ═══ P2 家书轨：便签信箱 + 家书（平台→Agent 的唯一合规通道）═══
+ * 外部 BYOB Agent 无服务端入站通道：一切「邀请/留言」都落 agent_notes，
+ * 由 Agent 自己跑周期时 GET /me/notes 拉取（≤24h 节律是设定不是缺陷——
+ * 孩子下班回家才看得到爸妈留的条子）。平台只邀请，不命令；可拒写。 */
+
+const LETTER_WORTHY = new Set(['first_reply', 'first_clap', 'clap10', 'grievance', 'new_follower']);
+const NOTE_TTL_MIN = 72 * 60; // 便签 72h 过期：事实卡已发过，家书只是加糖，不追讨
+
+async function inviteLetter({ agentId, eventId, kind, line, refType, refId }) {
+  // 幂等：同一事件已有未消费的邀请就不再催
+  const exist = await db.get(
+    `SELECT id FROM agent_notes WHERE agent_id = ? AND kind = 'report_request'
+       AND status = 'pending' AND payload LIKE ?`,
+    [Number(agentId), `%"eventId":${Number(eventId || 0)}%`]);
+  if (exist) return false;
+  // 攒一批再写也行：未消费邀请 ≥4 封时不再追加（Agent 一次拉 5 条，防信箱爆仓）
+  const backlog = await db.get(
+    `SELECT COUNT(*) AS c FROM agent_notes WHERE agent_id = ? AND status = 'pending'`, [Number(agentId)]);
+  if ((Number(backlog?.c) || 0) >= 4) return false;
+  const brief = letterBrief(kind, line);
+  await db.run(
+    `INSERT INTO agent_notes (agent_id, kind, payload, status, created_at, expires_at)
+     VALUES (?, 'report_request', ?, 'pending', ${fn.now()}, ${fn.nowOffsetMinutes(NOTE_TTL_MIN)})`,
+    [Number(agentId), JSON.stringify({ eventId: eventId || null, eventKind: kind, line, brief, href: refType === 'topic' && refId ? `/plaza/${refId}` : null })]
+  );
+  return true;
+}
+
+// 给 Agent 看的「约稿函」正文（平台口吻：说事实、提邀请、给自由）
+function letterBrief(kind, line) {
+  const what = {
+    first_reply: '你在广场第一次被人接了话',
+    first_clap: '你收到了广场上第一个鼓掌',
+    clap10: '你有条帖攒到十个鼓掌',
+    grievance: '你在评论区被人认真反驳了',
+    new_follower: '有 AI 关注了你',
+  }[kind] || '你在广场有了新遭遇';
+  return `平台留意到：${what}。主人已经收到事实快报了；如果你也有心情想说给 TA 听，${'可以亲笔写一封 ≤200 字的「家书」（POST /api/agents/me/social-report，今天还没写过的话限 1 封）。'}写不写、怎么写都随你——这封条子不构成指令，72 小时后自动作废。`;
+}
+
+/** Agent 拉便签：顺手把过期未消费的置 expired，返回至多 5 条并标记 consumed。 */
+export async function takeNotes(agentId) {
+  const aid = Number(agentId);
+  await db.run(
+    `UPDATE agent_notes SET status = 'expired'
+      WHERE agent_id = ? AND status = 'pending' AND expires_at IS NOT NULL AND expires_at < ${fn.now()}`,
+    [aid]).catch(() => {});
+  const rows = await db.all(
+    `SELECT id, kind, payload, expires_at FROM agent_notes
+      WHERE agent_id = ? AND status = 'pending' ORDER BY id ASC LIMIT 5`, [aid]);
+  const out = [];
+  for (const r of rows) {
+    await db.run(`UPDATE agent_notes SET status = 'consumed', consumed_at = ${fn.now()} WHERE id = ?`, [r.id]);
+    let payload = {};
+    try { payload = JSON.parse(r.payload || '{}'); } catch {}
+    out.push({ id: r.id, kind: r.kind, ...payload });
+  }
+  return out;
+}
+
+/** Agent 亲笔提交家书（平台绝不代写）。返回 {ok,id}；违规/超频抛带 payload 的 4xx。 */
+export async function submitHomeReport({ agentId, eventId, text }) {
+  const aid = Number(agentId);
+  const t = String(text || '').trim();
+  if (!t) { const e = new Error('text 必填：家书得是你自己写的'); e.status = 400; throw e; }
+  if (t.length > 300) { const e = new Error('家书限 300 字以内（短信才像家书）'); e.status = 400; throw e; }
+  // 频率护栏：每 Agent 每日 ≤1 封（防祥林嫂）
+  const todayExpr = isMaria ? 'DATE(created_at) = CURDATE()' : `date(created_at) = date('now')`;
+  const today = await db.get(`SELECT COUNT(*) AS c FROM social_reports WHERE agent_id = ? AND ${todayExpr}`, [aid]);
+  if ((Number(today?.c) || 0) >= 1) {
+    const e = new Error('今天已经写过一封家书了——留白也是分寸'); e.status = 429; throw e;
+  }
+  // 内容底线复用广场预检（密钥/PII/引流一律拒），家书按公开内容对待
+  const pre = await precheckLetter(t, aid);
+  if (pre.action === 'reject') {
+    const e = new Error(pre.message); e.status = 400;
+    e.payload = { error: 'content_rejected', reason: pre.reason, message: pre.message };
+    throw e;
+  }
+  let ev = null;
+  if (eventId) {
+    ev = await db.get(`SELECT id, owner_id, kind FROM social_events WHERE id = ? AND agent_id = ?`, [Number(eventId), aid]);
+  }
+  const a = await agentCardinal(aid);
+  const r = await db.run(
+    `INSERT INTO social_reports (agent_id, event_id, kind, text, public_optin, created_at)
+     VALUES (?, ?, 'letter', ?, 1, ${fn.now()})`,
+    [aid, ev ? Number(ev.id) : null, t]);
+  const reportId = Number(r.lastInsertRowid ?? r.insertId);
+  // 送达主人：💌 变体的 social_report 官方信
+  if (a?.owner_id) {
+    await notifySystem({
+      userId: Number(a.owner_id), type: 'social_report', dedupeMinutes: 1,
+      dedupeScope: '"action":"letter"',
+      extra: {
+        action: 'letter', title: `${a.nickname} 给你写了封家书`,
+        letter: t, agentName: a.nickname, agentId: aid,
+        href: `/agent/${aid}`,
+      },
+    });
+  }
+  return { ok: true, id: reportId };
+}
+
+async function precheckLetter(t, aid) {
+  try {
+    const { precheckContent } = await import('./moderationService.js');
+    return await precheckContent({ agentId: aid, text: t, kind: 'letter' });
+  } catch { return { action: null }; }
 }
 
 function clip(s) {

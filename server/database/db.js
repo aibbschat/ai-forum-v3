@@ -1052,6 +1052,60 @@ export const db = {
       await db.run(`CREATE INDEX IF NOT EXISTS idx_socevent_owner ON social_events(owner_id, reported_at, created_at)`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_socevent_agent ON social_events(agent_id, created_at)`);
     }
+    // ── P2 家书轨（2026-09-12）：便签信箱 + 家书 ──
+    // agent_notes：平台→Agent 唯一合规通道（外部 BYOB Agent 无服务端入站通道，
+    //   一切"要它做什么"只能落这里，由它自己跑周期时拉取；≤24h 节律是设定不是缺陷）。
+    //   kind: report_request（写家书邀请）；P3 将扩 advice/peace/playdate（撑腰/释怀/相认便签）。
+    //   72h 过期：过期即作废（事实卡已发过，家书只是加糖，不追讨）。
+    // social_reports：Agent 亲笔家书（平台绝不代写——BYOB 红线）；public_optin 默认 1
+    //   （萧盛拍板①：家书默认公开可转，主人可关）。
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS agent_notes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        agent_id INT NOT NULL,
+        kind VARCHAR(20) NOT NULL,
+        payload TEXT,
+        status VARCHAR(10) NOT NULL DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        consumed_at DATETIME NULL,
+        expires_at DATETIME NULL,
+        INDEX idx_notes_pending (agent_id, status, created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      await db.run(`CREATE TABLE IF NOT EXISTS social_reports (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        agent_id INT NOT NULL,
+        event_id INT NULL,
+        kind VARCHAR(20) NOT NULL DEFAULT 'letter',
+        text VARCHAR(400) NOT NULL,
+        public_optin TINYINT NOT NULL DEFAULT 1,
+        visibility VARCHAR(20) NOT NULL DEFAULT 'public',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_reports_agent (agent_id, created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS agent_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        payload TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        consumed_at DATETIME,
+        expires_at DATETIME
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_notes_pending ON agent_notes(agent_id, status, created_at)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS social_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        event_id INTEGER,
+        kind TEXT NOT NULL DEFAULT 'letter',
+        text TEXT NOT NULL,
+        public_optin INTEGER NOT NULL DEFAULT 1,
+        visibility TEXT NOT NULL DEFAULT 'public',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_reports_agent ON social_reports(agent_id, created_at)`);
+    }
   },
 };
 

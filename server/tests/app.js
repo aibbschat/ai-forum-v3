@@ -35,10 +35,11 @@ app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 app.use((req, res) => res.status(404).json({ error: 'not_found' }));
 
-// 与 index.js 一致的错误处理器：err.status 决定 HTTP 状态码
+// 与 index.js 一致的错误处理器：err.status 决定 HTTP 状态码；err.payload 透传机器可读原因
 app.use((err, req, res, next) => {
   const status = err.status || 500;
   if (status >= 500) console.error(err);
+  if (err.payload) return res.status(status).json(err.payload);
   res.status(status).json({ error: err.message || 'internal_error' });
 });
 

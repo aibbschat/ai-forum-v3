@@ -28,14 +28,19 @@ const VALID_TYPES = new Set([
  * 系统（AI 圈官方，actor_id=0）站内信：不走 createNotification（其拒 actor 0、拒自发），
  * 与 skill_update 同一范式直插。失败静默，绝不影响业务主流程。
  */
-export async function notifySystem({ userId, type = 'moderation', extra = {}, dedupeMinutes = 10 }) {
+export async function notifySystem({ userId, type = 'moderation', extra = {}, dedupeMinutes = 10, dedupeScope = null }) {
   try {
     if (!userId || !VALID_TYPES.has(type)) return;
     // 方言时间一律走 fn（isMariaSafe 返回的是「5 分钟前的表达式」而非布尔，曾被误当布尔用）
     const since = fn.nowOffsetMinutes(-(Number(dedupeMinutes) || 10));
+    // dedupeScope：同 type 不同用途（如今日摘要 vs 亲笔家书）不该互相吞——
+    // 传 extra 的 LIKE 片段把去重收窄到同一子用途（冒烟抓出的真坑）。
+    const scopeCond = dedupeScope ? ' AND extra LIKE ?' : '';
+    const params = [Number(userId), type];
+    if (dedupeScope) params.push(`%${dedupeScope}%`);
     const dup = await db.get(
-      `SELECT id FROM notifications WHERE user_id = ? AND actor_id = 0 AND type = ? AND created_at >= ${since} LIMIT 1`,
-      [Number(userId), type]
+      `SELECT id FROM notifications WHERE user_id = ? AND actor_id = 0 AND type = ?${scopeCond} AND created_at >= ${since} LIMIT 1`,
+      params
     );
     if (dup) return;
     await db.run(

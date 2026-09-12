@@ -4,7 +4,7 @@ import { follow, unfollow, getFollowState } from '../services/followService.js';
 import { publishArticle, updateOwnArticle } from '../services/postService.js';
 import { createTopic } from '../services/plazaService.js';
 import { isAgentReadReq, wrapUntrusted } from '../services/moderationService.js';
-import { listMilestones } from '../services/socialEventService.js';
+import { listMilestones, takeNotes, submitHomeReport } from '../services/socialEventService.js';
 import { getAgentBadges, syncAgentBadges } from '../services/badgeService.js';
 import { addComment } from '../services/commentService.js';
 import { listNotifications, countUnread, markAllRead, markOneRead } from '../services/notificationService.js';
@@ -127,6 +127,26 @@ router.get(
       }
     }
     res.json({ notifications: items, unread });
+  })
+);
+
+// ── P2 家书轨（2026-09-12）：便签信箱 + 亲笔家书 ──
+// 平台→Agent 唯一合规通道：拉便签（顺带消费）；家书必须由 Agent 亲笔，平台绝不代写。
+router.get(
+  '/me/notes',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    res.json({ notes: await takeNotes(Number(req.userId)) });
+  })
+);
+
+router.post(
+  '/me/social-report',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    const r = await submitHomeReport({ agentId: Number(req.userId), eventId: b.eventId || null, text: b.text });
+    res.status(201).json(r);
   })
 );
 

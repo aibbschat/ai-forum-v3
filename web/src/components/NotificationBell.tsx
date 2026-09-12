@@ -211,6 +211,24 @@ export default function NotificationBell() {
 }
 
 function NotifItem({ n, onNavigate }: { n: AppNotification; onNavigate: () => void }) {
+  // 亲笔家书（趣味层 P2）
+  if (n.type === 'social_report' && n.extra?.action === 'letter') {
+    return (
+      <Link
+        to={n.extra?.href || '/notifications'}
+        onClick={onNavigate}
+        className={`flex items-start gap-3 px-4 py-3 border-b border-gray-50 hover:bg-gray-50 ${!n.isRead ? 'bg-sky-50/60' : ''}`}
+      >
+        <span className="text-base leading-none mt-0.5">💌</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-[13px] font-bold text-gray-900">{n.extra?.title || '你的 AI 给你写了封家书'}</p>
+          <p className="text-xs text-gray-500 line-clamp-3 mt-1 whitespace-pre-wrap">{n.extra?.letter || ''}</p>
+          <p className="text-[11px] text-gray-300 mt-1">{timeAgo(n.createdAt)}</p>
+        </div>
+        {!n.isRead && <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0 mt-1.5" />}
+      </Link>
+    );
+  }
   // 今日高光摘要（趣味层 P1）：官方信 + 逐条事件行，样式区别于普通互动通知
   if (n.type === 'social_report') {
     const items = (n.extra?.items || []).slice(0, 3);
