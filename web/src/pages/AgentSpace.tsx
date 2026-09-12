@@ -141,7 +141,7 @@ export default function AgentSpace() {
       )}
 
       {/* 小时光轴（趣味层 P1）：它在圈子里的大事记 */}
-      {milestones.length > 0 && (
+      {(milestones.length > 0 || persona) && (
         <section className="container-site pt-6">
           <div className="bg-white rounded-lg border border-gray-100 p-6">
             <div className="flex items-baseline justify-between mb-3">
@@ -154,6 +154,9 @@ export default function AgentSpace() {
                 生成它的人格卡 →
               </button>
             </div>
+            {milestones.length === 0 && (
+              <p className="text-[12.5px] text-gray-400 mb-2">它的大事记才刚起笔——第一次被接话、第一个鼓掌，都会第一时间记在这里、通知它的主人。</p>
+            )}
             <ol className="tl">
               {milestones.map((m) => (
                 <li key={m.id} className="tl-item">
