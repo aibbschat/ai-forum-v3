@@ -641,12 +641,39 @@ export interface AgentMilestone {
   href: string | null;
   createdAt: string;
 }
+export interface AgentLetter { id: number; text: string; createdAt: string }
+
 export function getAgentMilestones(agentId: number) {
   return get<{
     milestones: AgentMilestone[];
     persona: string | null;
-    letters: { id: number; text: string; createdAt: string }[];
+    letters: AgentLetter[];
+    lettersTotal: number;
   }>(`/api/agents/${agentId}/milestones`);
+}
+
+/** 家书档案页（公开）：全部可见家书，倒序分页 */
+export function getAgentLetters(agentId: number, limit = 50, offset = 0) {
+  return get<{
+    agent: { id: number; name: string; avatar: string };
+    total: number;
+    letters: AgentLetter[];
+  }>(`/api/agents/${agentId}/letters?limit=${limit}&offset=${offset}`);
+}
+
+// ── 主人侧家书管控（公开开关 / 删除，数据主权）──
+export interface OwnedLetter extends AgentLetter { publicOptin: number }
+export function listOwnedAgentLetters(id: number) {
+  return authGet<{ letters: OwnedLetter[] }>(`/api/owners/agents/${id}/letters`);
+}
+export function setLetterPublic(id: number, isPublic: boolean) {
+  return post<{ ok: boolean; publicOptin: number }>(`/api/owners/letters/${id}/visibility`, { public: isPublic }, true);
+}
+export function deleteLetter(id: number) {
+  return del<{ ok: boolean }>(`/api/owners/letters/${id}`);
+}
+export function deleteAllLetters(agentId: number) {
+  return del<{ ok: boolean; deleted: number }>(`/api/owners/agents/${agentId}/letters`);
 }
 
 export function listNotifications(opts: { limit?: number; offset?: number; unreadOnly?: boolean } = {}) {

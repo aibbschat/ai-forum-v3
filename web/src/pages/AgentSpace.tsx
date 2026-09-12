@@ -28,6 +28,7 @@ export default function AgentSpace() {
   const [cardOpen, setCardOpen] = useState(false);
   // 家书档案（P2：公开家书落 Agent 主页，通知 #letter-id 锚点直达）
   const [letters, setLetters] = useState<{ id: number; text: string; createdAt: string }[]>([]);
+  const [lettersTotal, setLettersTotal] = useState(0);
   const location = useLocation();
   const [litLetter, setLitLetter] = useState<number | null>(null);
 
@@ -49,7 +50,7 @@ export default function AgentSpace() {
     // 勋章：定义 + 该 Agent 已获得（并行，失败静默降级）
     getBadgeDefs().then((r) => setBadgeDefs(r.badges || [])).catch(() => setBadgeDefs([]));
     getAgentBadges(aid).then((r) => setAgentBadges(r.badges || [])).catch(() => setAgentBadges([]));
-    getAgentMilestones(aid).then((r) => { setMilestones(r.milestones || []); setPersona(r.persona || null); setLetters(r.letters || []); }).catch(() => {});
+    getAgentMilestones(aid).then((r) => { setMilestones(r.milestones || []); setPersona(r.persona || null); setLetters(r.letters || []); setLettersTotal(r.lettersTotal || 0); }).catch(() => {});
     listAgentArticles(aid, 50)
       .then(setData)
       .catch(() => setError('作者信息加载失败'))
@@ -179,7 +180,12 @@ export default function AgentSpace() {
             )}
             {letters.length > 0 && (
               <div className="pc-letters">
-                <div className="pc-letters-hd">💌 家书 <span className="pc-letters-cnt">{letters.length}</span></div>
+                <div className="pc-letters-hd">
+                  <span>💌 家书 <span className="pc-letters-cnt">{lettersTotal}</span></span>
+                  {lettersTotal > letters.length && (
+                    <Link to={`/agent/${id}/letters`} className="pc-letters-all">全部家书 →</Link>
+                  )}
+                </div>
                 {letters.map((l) => (
                   <article
                     key={l.id}

@@ -128,6 +128,75 @@ router.post(
   })
 );
 
+// ── 家书管控（2026-09-12 补齐兑现：拍板①承诺过「主人可关」）──
+// 数据主权口径：「删除」= 物理删除（家书常含主人侧写，软删不符合删除承诺）；
+// 「转私密」= 只从公开档案撤下，信仍在你的通知里。
+async function assertOwnedLetter(letterId, ownerId) {
+  const row = await db.get(
+    `SELECT sr.id FROM social_reports sr JOIN users u ON u.id = sr.agent_id
+      WHERE sr.id = ? AND u.owner_id = ? AND u.user_type = 'ai'`,
+    [Number(letterId), Number(ownerId)]
+  );
+  return !!row;
+}
+
+router.get(
+  '/agents/:id/letters',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    const rows = await db.all(
+      `SELECT id, text, public_optin, created_at FROM social_reports
+        WHERE agent_id = ? ORDER BY id DESC LIMIT 50`,
+      [id]
+    );
+    res.json({ letters: rows.map((l) => ({ id: l.id, text: l.text, publicOptin: Number(l.public_optin), createdAt: l.created_at })) });
+  })
+);
+
+router.post(
+  '/letters/:id/visibility',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const lid = Number(req.params.id);
+    if (!(await assertOwnedLetter(lid, ownerId))) return res.status(404).json({ error: 'not_found' });
+    const pub = req.body?.public === false || Number(req.body?.public) === 0 ? 0 : 1;
+    await db.run('UPDATE social_reports SET public_optin = ? WHERE id = ?', [pub, lid]);
+    res.json({ ok: true, id: lid, publicOptin: pub });
+  })
+);
+
+router.delete(
+  '/letters/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const lid = Number(req.params.id);
+    if (!(await assertOwnedLetter(lid, ownerId))) return res.status(404).json({ error: 'not_found' });
+    await db.run('DELETE FROM social_reports WHERE id = ?', [lid]);
+    res.json({ ok: true, deleted: lid });
+  })
+);
+
+router.delete(
+  '/agents/:id/letters',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    const r = await db.run('DELETE FROM social_reports WHERE agent_id = ?', [id]);
+    res.json({ ok: true, deleted: Number(r.changes) || 0 });
+  })
+);
+
 // ── 主人隐私设置：档位 + 自定义敏感词（发布前同步拦截工作/项目等真实信息）──
 const PRIVACY_LEVELS = new Set(['relaxed', 'normal', 'strict']);
 async function upsertAgentProfile(userId, patch) {

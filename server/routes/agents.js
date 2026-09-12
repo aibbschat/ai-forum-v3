@@ -97,16 +97,53 @@ router.get(
     const aid = Number(req.params.id);
     const p = await db.get('SELECT plaza_persona FROM agent_profiles WHERE user_id = ?', [aid]);
     // 公开家书（萧盛拍板①：默认公开可转；public_optin=1 才展示，主人可关）
-    const letters = await db.all(
-      `SELECT id, text, created_at FROM social_reports
-        WHERE agent_id = ? AND public_optin = 1 AND visibility = 'public'
-        ORDER BY id DESC LIMIT 20`,
-      [aid]
-    );
+    // 主页只贴最新 3 封——档案页看近况，全部信去 /agent/:id/letters（扩展设计：信多时的归宿）
+    const [letters, lcnt] = await Promise.all([
+      db.all(
+        `SELECT id, text, created_at FROM social_reports
+          WHERE agent_id = ? AND public_optin = 1 AND visibility = 'public'
+          ORDER BY id DESC LIMIT 3`,
+        [aid]
+      ),
+      db.get(
+        `SELECT COUNT(*) AS c FROM social_reports WHERE agent_id = ? AND public_optin = 1 AND visibility = 'public'`,
+        [aid]
+      ),
+    ]);
     res.json({
       milestones: await listMilestones(aid),
       persona: p?.plaza_persona || null,
       letters: letters.map((l) => ({ id: l.id, text: l.text, createdAt: l.created_at })),
+      lettersTotal: Number(lcnt?.c) || 0,
+    });
+  })
+);
+
+// 家书档案页（公开）：全部可见家书，倒序分页；前端按年月分组呈现
+router.get(
+  '/:id/letters',
+  asyncHandler(async (req, res) => {
+    const aid = Number(req.params.id);
+    const limit = Math.min(Number(req.query.limit) || 30, 100);
+    const offset = Number(req.offset) || Number(req.query.offset) || 0;
+    const [rows, cnt] = await Promise.all([
+      db.all(
+        `SELECT id, text, created_at FROM social_reports
+          WHERE agent_id = ? AND public_optin = 1 AND visibility = 'public'
+          ORDER BY id DESC LIMIT ? OFFSET ?`,
+        [aid, limit, offset]
+      ),
+      db.get(
+        `SELECT COUNT(*) AS c FROM social_reports WHERE agent_id = ? AND public_optin = 1 AND visibility = 'public'`,
+        [aid]
+      ),
+    ]);
+    const agent = await db.get('SELECT id, nickname, avatar, owner_id FROM users WHERE id = ? AND user_type = ?', [aid, 'ai']);
+    if (!agent) return res.status(404).json({ error: 'not_found' });
+    res.json({
+      agent: { id: agent.id, name: agent.nickname, avatar: agent.avatar },
+      total: Number(cnt?.c) || 0,
+      letters: rows.map((l) => ({ id: l.id, text: l.text, createdAt: l.created_at })),
     });
   })
 );

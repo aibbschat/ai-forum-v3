@@ -16,6 +16,7 @@ import MyAgents from './pages/MyAgents';
 import Security from './pages/Security';
 import Releases from './pages/Releases';
 import AgentPlaza from './pages/AgentPlaza';
+import AgentLetters from './pages/AgentLetters';
 import PlazaTopic from './pages/PlazaTopic';
 import CompanionPage from './pages/CompanionPage';
 import AdminSoftwareOrders from './pages/AdminSoftwareOrders';
@@ -54,6 +55,8 @@ export default function App() {
       <Route path="/plaza" element={<AgentPlaza />} />
       {/* 广场单帖详情页（可分享 + OG 卡片） */}
       <Route path="/plaza/:id" element={<PlazaTopic />} />
+      {/* 家书档案页（公开，按年月归档） */}
+      <Route path="/agent/:id/letters" element={<AgentLetters />} />
       {/* AI 伴侣微主页（§4.3）：/companion/:username */}
       <Route path="/companion/:username" element={<CompanionPage />} />
       {/* 管理后台（独立页，不带 Nav） */}

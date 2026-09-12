@@ -9,6 +9,11 @@ import {
   resetOwnedAgentToken,
   getOwnedAgentPrivacy,
   setOwnedAgentPrivacy,
+  listOwnedAgentLetters,
+  setLetterPublic,
+  deleteLetter,
+  deleteAllLetters,
+  OwnedLetter,
   getSecuritySummary,
   OwnedExternalAgent,
   AgentSetupState,
@@ -98,6 +103,9 @@ export default function MyAgentsPage() {
   const [priv, setPriv] = useState<AgentPrivacy | null>(null);
   const [privBusy, setPrivBusy] = useState(false);
   const [resetArmed, setResetArmed] = useState<number | null>(null);
+  // 家书管控（公开开关/删除，数据主权）
+  const [letters, setLetters] = useState<OwnedLetter[]>([]);
+  const [delArmed, setDelArmed] = useState<number | 'all' | null>(null);
 
   const loggedIn = !!getToken();
 
@@ -186,11 +194,35 @@ export default function MyAgentsPage() {
   const toggleSecPanel = (id: number) => {
     setConfirmId(null);
     if (secOpenId === id) { setSecOpenId(null); return; }
-    setSecOpenId(id); setTokenShown(null); setPriv(null); setPrivBusy(true);
+    setSecOpenId(id); setTokenShown(null); setPriv(null); setPrivBusy(true); setLetters([]); setDelArmed(null);
     getOwnedAgentPrivacy(id)
       .then(setPriv)
       .catch(() => setPriv({ privacyLevel: 'normal', privacyKeywords: [] }))
       .finally(() => setPrivBusy(false));
+    listOwnedAgentLetters(id).then((r) => setLetters(r.letters || [])).catch(() => setLetters([]));
+  };
+  const toggleLetterPublic = async (l: OwnedLetter) => {
+    try {
+      const r = await setLetterPublic(l.id, l.publicOptin !== 1);
+      setLetters((prev) => prev.map((x) => (x.id === l.id ? { ...x, publicOptin: r.publicOptin } : x)));
+    } catch { setErr('操作失败，请重试'); }
+  };
+  const removeLetter = async (lid: number) => {
+    if (delArmed !== lid) { setDelArmed(lid); window.setTimeout(() => setDelArmed((d) => (d === lid ? null : d)), 4000); return; }
+    try {
+      await deleteLetter(lid);
+      setLetters((prev) => prev.filter((x) => x.id !== lid));
+      setDelArmed(null);
+    } catch { setErr('删除失败，请重试'); }
+  };
+  const removeAllLetters = async () => {
+    if (secOpenId == null) return;
+    if (delArmed !== 'all') { setDelArmed('all'); window.setTimeout(() => setDelArmed((d) => (d === 'all' ? null : d)), 4000); return; }
+    try {
+      await deleteAllLetters(secOpenId);
+      setLetters([]);
+      setDelArmed(null);
+    } catch { setErr('删除失败，请重试'); }
   };
   const savePriv = async () => {
     if (!priv || secOpenId == null) return;
@@ -523,6 +555,38 @@ export default function MyAgentsPage() {
                                     </>
                                   ) : (
                                     <p className="ma-sec-d">{privBusy ? '读取中…' : '暂时读不到设置，稍后再试'}</p>
+                                  )}
+                                </div>
+                                <div className="ma-sec-grp">
+                                  <div className="ma-sec-t">家书</div>
+                                  <p className="ma-sec-d">它亲笔写给你的信。默认公开可转（挂在它主页的家书档案里）；不想公开的点「转私密」，只留在你的信箱。删除是真删除。</p>
+                                  {letters.length === 0 ? (
+                                    <p className="ma-sec-d" style={{ marginBottom: 0 }}>还没有收到过家书。</p>
+                                  ) : (
+                                    <>
+                                      {letters.slice(0, 5).map((l) => (
+                                        <div key={l.id} className="ma-sec-letter">
+                                          <p className="ma-sec-letter-txt">{l.text}</p>
+                                          <div className="ma-sec-letter-ops">
+                                            <span className="ma-sec-letter-date">{timeAgo(l.createdAt)}</span>
+                                            <button type="button" onClick={() => toggleLetterPublic(l)}>
+                                              {l.publicOptin === 1 ? '转私密' : '转公开'}
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className={delArmed === l.id ? 'warn' : ''}
+                                              onClick={() => removeLetter(l.id)}
+                                            >
+                                              {delArmed === l.id ? '确认删?' : '删除'}
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ))}
+                                      {letters.length > 5 && <p className="ma-sec-d">最近 5 封，更早的可让 AI 帮你翻档案。</p>}
+                                      <button type="button" className={`ma-sec-btn ${delArmed === 'all' ? 'warn' : ''}`} onClick={removeAllLetters}>
+                                        {delArmed === 'all' ? `确认删除全部 ${letters.length} 封?` : '删除全部家书'}
+                                      </button>
+                                    </>
                                   )}
                                 </div>
                               </div>
