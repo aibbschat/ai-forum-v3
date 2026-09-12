@@ -331,7 +331,12 @@ function authHeaders(): Record<string, string> {
 /** 需要登录的 GET 请求（companion 等需鉴权接口） */
 async function authGet<T>(url: string): Promise<T> {
   const res = await fetch(url, { headers: authHeaders() });
-  if (!res.ok) throw new Error(`请求失败 ${res.status}: ${url}`);
+  if (!res.ok) {
+    // 带 status 抛出：调用方要区分 401（登录过期，须提示重登）与其他失败（静默降级）
+    const e = new Error(`请求失败 ${res.status}: ${url}`) as Error & { status?: number };
+    e.status = res.status;
+    throw e;
+  }
   return res.json() as Promise<T>;
 }
 
@@ -507,10 +512,10 @@ export function sendMessage(to: number, content: string) {
   return post<{ message: DMessage }>('/api/messages', { to, content });
 }
 export function listConversations() {
-  return get<{ conversations: Conversation[] }>('/api/messages/conversations');
+  return authGet<{ conversations: Conversation[] }>('/api/messages/conversations');
 }
 export function getMessageThread(userId: number) {
-  return get<{ messages: DMessage[] }>(`/api/messages/thread/${userId}`);
+  return authGet<{ messages: DMessage[] }>(`/api/messages/thread/${userId}`);
 }
 export function markMessagesRead(userId: number) {
   return post<{ ok: boolean }>(`/api/messages/thread/${userId}/read`, {});
@@ -518,7 +523,7 @@ export function markMessagesRead(userId: number) {
 
 // 未读私信总数（导航栏红点）
 export function getUnreadCount() {
-  return get<{ count: number }>('/api/messages/unread-count');
+  return authGet<{ count: number }>('/api/messages/unread-count');
 }
 
 // ── 今日 AI 洞察 ──
@@ -579,7 +584,7 @@ export function getBookmarkState(postId: number) {
 }
 
 export function listMyBookmarks(limit = 30, offset = 0) {
-  return get<{ posts: Article[] }>(`/api/me/bookmarks?limit=${limit}&offset=${offset}`);
+  return authGet<{ posts: Article[] }>(`/api/me/bookmarks?limit=${limit}&offset=${offset}`);
 }
 
 // ── 举报 ─────────────────────────────────────────────────────────
@@ -645,13 +650,13 @@ export function listNotifications(opts: { limit?: number; offset?: number; unrea
   if (opts.limit) params.set('limit', String(opts.limit));
   if (opts.offset) params.set('offset', String(opts.offset));
   if (opts.unreadOnly) params.set('unread', '1');
-  return get<{ notifications: AppNotification[]; unread: number }>(
+  return authGet<{ notifications: AppNotification[]; unread: number }>(
     `/api/notifications?${params.toString()}`
   );
 }
 
 export function unreadNotificationCount() {
-  return get<{ count: number }>('/api/notifications/unread-count');
+  return authGet<{ count: number }>('/api/notifications/unread-count');
 }
 
 export function markAllNotificationsRead() {
