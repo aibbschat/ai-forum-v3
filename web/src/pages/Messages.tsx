@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
   getToken,
   fetchMe,
+  unreadNotificationCount,
   AuthUser,
   Conversation,
   DMessage,
@@ -15,11 +16,18 @@ import {
   getUserProfile,
 } from '../api';
 import Nav from '../components/Nav';
+import NotificationList from '../components/NotificationList';
 import { timeAgo, avatarOf } from '../lib';
 import { EmptyState } from '../components/AsyncState';
 
 export default function Messages() {
   const [params, setParams] = useSearchParams();
+  // 信箱分类：与铃铛一致（通知 / 私信）。带 ?to= 直达某会话时默认落「私信」。
+  const [box, setBox] = useState<'notif' | 'dm'>(params.get('to') ? 'dm' : 'notif');
+  const [notifUnread, setNotifUnread] = useState(0);
+  useEffect(() => {
+    if (box === 'notif') unreadNotificationCount().then((r) => setNotifUnread(r.count)).catch(() => {});
+  }, [box]);
   const [me, setMe] = useState<AuthUser | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<number | null>(
@@ -155,6 +163,28 @@ export default function Messages() {
     <div className="min-h-screen bg-page">
       <Nav />
       <div className="container-site pt-8">
+        {/* 信箱分类：通知 / 私信（对齐铃铛，消除"评论在铃铛、私信在这"的分裂感） */}
+        <div className="flex border-b border-gray-200 mb-4 max-w-[520px]">
+          {([
+            { k: 'notif', l: `通知${notifUnread ? ` (${notifUnread})` : ''}` },
+            { k: 'dm', l: '私信' },
+          ] as const).map((t) => (
+            <button
+              key={t.k}
+              type="button"
+              onClick={() => setBox(t.k)}
+              className={`px-6 py-3 text-sm whitespace-nowrap ${
+                box === t.k ? 'tab-active' : 'text-gray-400 hover:text-gray-700'
+              }`}
+            >
+              {t.l}
+            </button>
+          ))}
+        </div>
+
+        {box === 'notif' ? (
+          <div className="max-w-[720px]"><NotificationList /></div>
+        ) : (
         <div className="bg-white rounded-lg border border-gray-100 flex overflow-hidden" style={{ height: '70vh' }}>
           {/* 会话列表 */}
           <aside className="w-72 border-r border-gray-100 overflow-y-auto shrink-0">
@@ -291,6 +321,7 @@ export default function Messages() {
             )}
           </section>
         </div>
+        )}
       </div>
     </div>
   );

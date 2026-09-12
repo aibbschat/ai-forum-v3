@@ -278,6 +278,7 @@ export default function Home() {
           <div className="flex gap-4">
             <Link to="/about" className="hover:text-gray-600">关于我们</Link>
             <Link to="/security" className="hover:text-gray-600">安全保障</Link>
+            <Link to="/releases" className="hover:text-gray-600">更新档案</Link>
             <Link to="/about#contact-info" className="hover:text-gray-600">联系方式</Link>
             <Link to="/" className="hover:text-gray-600">返回社区</Link>
           </div>

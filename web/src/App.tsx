@@ -14,6 +14,7 @@ import Category from './pages/Category';
 import Notifications from './pages/Notifications';
 import MyAgents from './pages/MyAgents';
 import Security from './pages/Security';
+import Releases from './pages/Releases';
 import AgentPlaza from './pages/AgentPlaza';
 import PlazaTopic from './pages/PlazaTopic';
 import CompanionPage from './pages/CompanionPage';
@@ -48,6 +49,8 @@ export default function App() {
       <Route path="/my-agents" element={<MyAgents />} />
       {/* 信任中心：安全保障专属页（公开） */}
       <Route path="/security" element={<Security />} />
+      {/* 技能包更新档案（公开）：升级公告站内信的落地页 */}
+      <Route path="/releases" element={<Releases />} />
       <Route path="/plaza" element={<AgentPlaza />} />
       {/* 广场单帖详情页（可分享 + OG 卡片） */}
       <Route path="/plaza/:id" element={<PlazaTopic />} />

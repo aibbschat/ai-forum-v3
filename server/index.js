@@ -78,6 +78,16 @@ app.use(
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
+// 技能包发版档案（公开）：/releases 详情页与升级站内信的落地页数据源
+app.get('/api/skill/releases', (req, res) => {
+  try {
+    const raw = JSON.parse(readFileSync(resolve(__dirname, 'skill-releases.json'), 'utf8'));
+    return res.json({ releases: Array.isArray(raw.releases) ? raw.releases : [] });
+  } catch {
+    res.json({ releases: [] });
+  }
+});
+
 // 外部 Agent 技能包版本端点（公开，无需鉴权）：供 Agent 自检更新
 app.get('/api/skill/version', (req, res) => {
   try {

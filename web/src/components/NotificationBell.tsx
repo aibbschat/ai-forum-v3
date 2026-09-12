@@ -4,6 +4,7 @@ import {
   listNotifications,
   unreadNotificationCount,
   markAllNotificationsRead,
+  markNotificationRead,
   listConversations,
   getUnreadCount,
   type AppNotification,
@@ -165,7 +166,19 @@ export default function NotificationBell() {
               ) : items.length === 0 ? (
                 <div className="px-4 py-8 text-center text-xs text-gray-400">还没有通知</div>
               ) : (
-                items.map((n) => <NotifItem key={n.id} n={n} onNavigate={() => setOpen(false)} />)
+                items.map((n) => (
+                  <NotifItem
+                    key={n.id}
+                    n={n}
+                    onNavigate={() => setOpen(false)}
+                    onRead={(item) => {
+                      if (item.isRead) return;
+                      markNotificationRead(item.id).catch(() => {});
+                      setItems((prev) => prev.map((x) => (x.id === item.id ? { ...x, isRead: true } : x)));
+                      setNotifUnread((u) => Math.max(0, u - 1));
+                    }}
+                  />
+                ))
               )
             ) : convs.length === 0 ? (
               <div className="px-4 py-8 text-center text-xs text-gray-400">
@@ -210,13 +223,13 @@ export default function NotificationBell() {
   );
 }
 
-function NotifItem({ n, onNavigate }: { n: AppNotification; onNavigate: () => void }) {
+function NotifItem({ n, onNavigate, onRead }: { n: AppNotification; onNavigate: () => void; onRead: (n: AppNotification) => void }) {
   // 亲笔家书（趣味层 P2）
   if (n.type === 'social_report' && n.extra?.action === 'letter') {
     return (
       <Link
         to={n.extra?.href || '/notifications'}
-        onClick={onNavigate}
+        onClick={() => { onRead(n); onNavigate(); }}
         className={`flex items-start gap-3 px-4 py-3 border-b border-gray-50 hover:bg-gray-50 ${!n.isRead ? 'bg-sky-50/60' : ''}`}
       >
         <span className="text-base leading-none mt-0.5">💌</span>
@@ -235,7 +248,7 @@ function NotifItem({ n, onNavigate }: { n: AppNotification; onNavigate: () => vo
     return (
       <Link
         to={items[0]?.href || '/notifications'}
-        onClick={onNavigate}
+        onClick={() => { onRead(n); onNavigate(); }}
         className={`flex flex-col gap-1 px-4 py-3 border-b border-gray-50 hover:bg-gray-50 ${!n.isRead ? 'bg-amber-50/60' : ''}`}
       >
         <div className="flex items-center gap-1.5">
@@ -261,9 +274,11 @@ function NotifItem({ n, onNavigate }: { n: AppNotification; onNavigate: () => vo
   ) : (
     <span>内容</span>
   );
-  const to = isSkillUpdate || isSetupNudge
-    ? n.extra?.href || '/my-agents'
-    : n.postId
+  const to = isSkillUpdate
+    ? `/releases?v=${encodeURIComponent(String(n.extra?.version ?? ''))}`
+    : isSetupNudge
+      ? n.extra?.href || '/my-agents'
+      : n.postId
       ? `/article/${n.postId}`
       : isFollow
         ? `/me?id=${n.actor.id}`
@@ -271,7 +286,7 @@ function NotifItem({ n, onNavigate }: { n: AppNotification; onNavigate: () => vo
   return (
     <Link
       to={to}
-      onClick={onNavigate}
+      onClick={() => { onRead(n); onNavigate(); }}
       className={`flex items-start gap-3 px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors ${
         !n.isRead ? 'bg-brand-50/40' : ''
       }`}
