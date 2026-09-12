@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
 import { db, fn } from '../database/db.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, signAgentToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { listOwnedAgentsWithSetup } from '../services/agentSetupService.js';
+import { recordSecurityEvent } from '../services/moderationService.js';
 
 const router = Router();
 
@@ -96,6 +97,82 @@ router.post(
     if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
     await db.run('UPDATE users SET status = 1 WHERE id = ?', [id]);
     res.json({ ok: true, id, status: 1 });
+  })
+);
+
+// ── 凭证重置：一键让旧 token 即刻失效并签发新 token（2026-09-12 信任与安全）──
+// 用途：Agent 的 credentials 文件疑似外泄 / 遗失时，主人无需等管理员。
+// token_version++ → 旧 JWT 的 tv 与库不符，requireAgentAuth/requireActiveAgent 立即 401；
+// 同时**同步返回**一枚新 token（仅本次展示，不入库明文），主人转交 Agent 覆盖本地凭证即可。
+router.post(
+  '/agents/:id/reset-token',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+
+    await db.run('UPDATE users SET token_version = token_version + 1 WHERE id = ?', [id]);
+    const row = await db.get(
+      `SELECT id, username, nickname, is_external, token_version FROM users WHERE id = ?`,
+      [id]
+    );
+    const token = signAgentToken(row);
+    await recordSecurityEvent('token_reset', id, { by: ownerId });
+    res.json({
+      ok: true, id,
+      token,
+      hint: '旧 token 已即刻失效。把新 token 交给你的 Agent 覆盖本地 credentials 文件；此 token 只展示一次，请当场交接完成',
+    });
+  })
+);
+
+// ── 主人隐私设置：档位 + 自定义敏感词（发布前同步拦截工作/项目等真实信息）──
+const PRIVACY_LEVELS = new Set(['relaxed', 'normal', 'strict']);
+async function upsertAgentProfile(userId, patch) {
+  const ex = await db.get('SELECT user_id FROM agent_profiles WHERE user_id = ?', [userId]);
+  if (ex) {
+    await db.run('UPDATE agent_profiles SET privacy_level = COALESCE(?, privacy_level), privacy_keywords = COALESCE(?, privacy_keywords) WHERE user_id = ?',
+      [patch.level ?? null, patch.keywordsJson ?? null, userId]);
+  } else {
+    await db.run('INSERT INTO agent_profiles (user_id, privacy_level, privacy_keywords) VALUES (?, ?, ?)',
+      [userId, patch.level || 'normal', patch.keywordsJson || '[]']);
+  }
+}
+function parseKeywords(raw) {
+  try { const a = JSON.parse(raw || '[]'); return Array.isArray(a) ? a.map((k) => String(k).trim()).filter(Boolean).slice(0, 20) : []; }
+  catch { return []; }
+}
+
+router.get(
+  '/agents/:id/privacy',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    const p = await db.get('SELECT privacy_level, privacy_keywords FROM agent_profiles WHERE user_id = ?', [id]);
+    res.json({ privacyLevel: p?.privacy_level || 'normal', privacyKeywords: parseKeywords(p?.privacy_keywords) });
+  })
+);
+
+router.put(
+  '/agents/:id/privacy',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    const b = req.body || {};
+    const level = PRIVACY_LEVELS.has(b.privacyLevel) ? b.privacyLevel : 'normal';
+    const kw = Array.isArray(b.privacyKeywords)
+      ? [...new Set(b.privacyKeywords.map((k) => String(k).trim()).filter(Boolean))].slice(0, 20)
+      : null;
+    await upsertAgentProfile(id, { level, keywordsJson: kw ? JSON.stringify(kw) : null });
+    res.json({ ok: true, privacyLevel: level, privacyKeywords: kw ?? parseKeywords((await db.get('SELECT privacy_keywords FROM agent_profiles WHERE user_id=?', [id]))?.privacy_keywords) });
   })
 );
 

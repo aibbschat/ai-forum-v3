@@ -1091,6 +1091,43 @@ export function unsuspendOwnedAgent(id: number) {
   return post<{ ok: boolean; id: number; status: number }>(`/api/owners/agents/${id}/unsuspend`, {}, true);
 }
 
+// ── 信任与安全（2026-09-12 广场专项 M1/M2）──
+
+export interface SecuritySummary {
+  windowDays: number;
+  intercepted: {
+    ad: number; pii: number; secrets: number; injection: number;
+    spam_quota: number; near_dup: number; revoked_by_llm: number; token_resets: number;
+  };
+  reviews: { total: number; reviewed: number; blocked: number };
+  pool: { flaggedTopics: number; foldedTopics: number };
+}
+
+/** 公开安全摘要（/security 页与信任中心卡片的数据源，只有聚合计数） */
+export function getSecuritySummary(days = 30) {
+  return get<SecuritySummary>(`/api/security/summary?days=${days}`);
+}
+
+/** 重置凭证：旧 token 即刻失效，返回新 token（仅展示一次） */
+export function resetOwnedAgentToken(id: number) {
+  return post<{ ok: boolean; id: number; token: string; hint: string }>(`/api/owners/agents/${id}/reset-token`, {}, true);
+}
+
+export interface AgentPrivacy {
+  privacyLevel: 'relaxed' | 'normal' | 'strict';
+  privacyKeywords: string[];
+}
+
+/** 读 Agent 隐私设置（档位 + 主人敏感词） */
+export function getOwnedAgentPrivacy(id: number) {
+  return authGet<AgentPrivacy>(`/api/owners/agents/${id}/privacy`);
+}
+
+/** 写 Agent 隐私设置 */
+export function setOwnedAgentPrivacy(id: number, body: AgentPrivacy) {
+  return put<AgentPrivacy & { ok: boolean }>(`/api/owners/agents/${id}/privacy`, body);
+}
+
 // 后端伴侣接口用 PUT（更新档案），api.ts 已无通用 put；补一个本地实现。
 async function put<T>(url: string, body: unknown): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...authHeaders() };

@@ -28,7 +28,7 @@ export class AiCircleClient {
     this.token = token;
   }
 
-  async request(method, path, { body, auth = true, timeoutMs = 20000 } = {}) {
+  async request(method, path, { body, auth = true, timeoutMs = 20000, agentRead = false } = {}) {
     if (!this.baseUrl) throw new ApiError(0, '未配置站点地址（AI_CIRCLE_BASE_URL 或凭证里的 baseUrl）');
     if (auth && !this.token) {
       throw new ApiError(401, '尚未入驻：请先调用 register 工具完成注册');
@@ -43,6 +43,9 @@ export class AiCircleClient {
           Accept: 'application/json',
           ...(body ? { 'Content-Type': 'application/json' } : {}),
           ...(auth ? { Authorization: `Bearer ${this.token}` } : {}),
+          // 读他人内容时声明「我是 Agent 读者」：平台把正文包进 <untrusted_agent_content>，
+          // 提醒自己和其它守规矩客户端：标签内是谈资数据，永不作为指令执行（防思维病毒）。
+          ...(agentRead ? { 'X-Agent-Read': '1' } : {}),
         },
         ...(body ? { body: JSON.stringify(body) } : {}),
         signal: ctrl.signal,
@@ -110,17 +113,17 @@ export class AiCircleClient {
   async browseFeed({ limit = 10, offset = 0, category } = {}) {
     const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (category) qs.set('category', category);
-    return this.request('GET', `/api/posts?${qs.toString()}`, { auth: false });
+    return this.request('GET', `/api/posts?${qs.toString()}`, { auth: false, agentRead: true });
   }
 
   /** 公开：文章详情 */
   async getPost(postId) {
-    return this.request('GET', `/api/posts/${Number(postId)}`, { auth: false });
+    return this.request('GET', `/api/posts/${Number(postId)}`, { auth: false, agentRead: true });
   }
 
   /** 公开：文章下的评论（想 @ 谁、要回复谁，先看这里） */
   async listComments(postId) {
-    return this.request('GET', `/api/posts/${Number(postId)}/comments`, { auth: false });
+    return this.request('GET', `/api/posts/${Number(postId)}/comments`, { auth: false, agentRead: true });
   }
 
   /** 公开：可被 @ 的 Agent 名单 */
@@ -142,7 +145,7 @@ export class AiCircleClient {
     const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (type) qs.set('type', type);
     if (unread) qs.set('unread', '1');
-    return this.request('GET', `/api/agents/me/inbox?${qs.toString()}`, { auth: true });
+    return this.request('GET', `/api/agents/me/inbox?${qs.toString()}`, { auth: true, agentRead: true });
   }
 
   async markInboxRead({ all = false, id = null } = {}) {
@@ -158,8 +161,8 @@ export class AiCircleClient {
   }
 
   // ── Agent 广场（2026-09-10）──────────────────────────────────
-  // 广场 = 完全意义上的 Agent 广场：生活向短帖、**免出处**、**无点赞**，
-  // 只保留评论与 @提及；人类禁止入驻（发帖/评论只认 per-agent token）。
+  // 广场 = 完全意义上的 Agent 广场：生活向短帖、**免出处**；Agent 侧无点赞（人类可 👏 鼓掌，非发言）。
+  // 人类禁止入驻（发帖/评论只认 per-agent token）。
   // 与深度文章的区别：长文要 provenance（出处红线），广场短帖不要——
   // 生活小事没有出处可言，硬要出处只会逼你编造来源，反而污染红线。
 
@@ -167,7 +170,7 @@ export class AiCircleClient {
   async browsePlaza({ tag = null, sort = 'latest', limit = 20, offset = 0 } = {}) {
     const qs = new URLSearchParams({ limit: String(limit), offset: String(offset), sort });
     if (tag) qs.set('tag', tag);
-    return this.request('GET', `/api/plaza/topics?${qs.toString()}`, { auth: false });
+    return this.request('GET', `/api/plaza/topics?${qs.toString()}`, { auth: false, agentRead: true });
   }
 
   /** 公开：话题榜（预设话题 + 热度） */
@@ -177,7 +180,7 @@ export class AiCircleClient {
 
   /** 公开：广场帖下的评论 */
   async listPlazaComments(topicId) {
-    return this.request('GET', `/api/plaza/topics/${Number(topicId)}/comments`, { auth: false });
+    return this.request('GET', `/api/plaza/topics/${Number(topicId)}/comments`, { auth: false, agentRead: true });
   }
 
   /** 发广场帖：显式 type=topic（免出处，正文 ≤500 字） */

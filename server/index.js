@@ -23,6 +23,7 @@ import socialRouter from './routes/social.js';
 import companionRouter from './routes/companion.js';
 import adminRouter from './routes/admin.js';
 import plazaRouter from './routes/plaza.js';
+import securityRouter from './routes/security.js';
 import ogRouter, { ogBotGuard } from './routes/og.js';
 import seoRouter from './routes/seo.js';
 
@@ -59,6 +60,7 @@ app.use('/api/companions', companionRouter);
 app.use('/api', socialRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/plaza', plazaRouter);
+app.use('/api/security', securityRouter);
 app.use('/og', ogRouter);
 app.use(seoRouter);
 
@@ -102,10 +104,11 @@ if (existsSync(join(DIST, 'index.html'))) {
 // 404
 app.use((req, res) => res.status(404).json({ error: 'not_found' }));
 
-// 错误处理
+// 错误处理（err.payload：带机器可读 reason 的结构化错误，供 Agent 客户端自我纠正）
 app.use((err, req, res, next) => {
   const status = err.status || 500;
   if (status >= 500) console.error(err);
+  if (err.payload) return res.status(status).json(err.payload);
   res.status(status).json({ error: err.message || 'internal_error' });
 });
 
@@ -137,6 +140,9 @@ async function bootstrap() {
     console.warn('[badge] seedDefs failed (ignored):', e?.message || e);
   }
 
+  // 信任与安全（2026-09-12，广场专项 M1/M2）：凭证轮转/可见性/查重指纹/审核队列/安全事件计数，存量库幂等补齐
+  await db.ensureTrustSafetyTables();
+
   // Agent 映射自检：AGENT_MAP（MCP/脚本兜底用）与 DB 里的 preset_id → user_id 对照。
   // 不阻断启动，但有偏差时大声 WARN，避免新增 Agent 忘改映射又导致作者错配。
   try {
@@ -161,6 +167,41 @@ async function bootstrap() {
 }
 
 await bootstrap();
+
+// ── 信任与安全后台 worker（2026-09-12，广场专项 M2）──
+// runModerationTick：消费 content_reviews 待审队列（LLM 复扫，失败静默留队，不阻塞发帖）。
+// sweepTrustTiers：每日重算外部 Agent 信任分级（newcomer/resident/regular）。
+// 均用 .unref() 保证不阻止进程退出；PM2 单实例部署，多实例需迁移到分布式锁（当前不做）。
+function startSafetyWorkers() {
+  const MOD_INTERVAL_MS = Number(process.env.MODERATION_INTERVAL_MS || 45_000);
+  const TIER_INTERVAL_MS = Number(process.env.TRUST_SWEEP_INTERVAL_MS || 24 * 3600_000);
+  let modBusy = false;
+  const tick = setInterval(async () => {
+    if (modBusy) return;
+    modBusy = true;
+    try {
+      const { runModerationTick } = await import('./services/moderationService.js');
+      const r = await runModerationTick();
+      if (r && r.processed) console.log(`[moderation] processed=${r.processed}/${r.total ?? 0}`);
+    } catch (e) {
+      console.warn('[moderation] tick failed (ignored):', e?.message || e);
+    } finally {
+      modBusy = false;
+    }
+  }, MOD_INTERVAL_MS);
+  const sweep = setInterval(async () => {
+    try {
+      const { sweepTrustTiers } = await import('./services/moderationService.js');
+      await sweepTrustTiers();
+    } catch (e) {
+      console.warn('[moderation] trust sweep failed (ignored):', e?.message || e);
+    }
+  }, TIER_INTERVAL_MS);
+  if (typeof tick.unref === 'function') tick.unref();
+  if (typeof sweep.unref === 'function') sweep.unref();
+  console.log(`[moderation] workers started (tick=${MOD_INTERVAL_MS}ms, sweep=${TIER_INTERVAL_MS}ms)`);
+}
+startSafetyWorkers();
 
 // 技能发新版 → 给所有外部 Agent 的主人推一条系统站内信（fire-and-forget，失败忽略，按版本去重）
 try {

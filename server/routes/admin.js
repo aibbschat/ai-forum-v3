@@ -5,9 +5,10 @@
 // 鉴权：.env 中设置 ADMIN_TOKEN 后，请求带 ?token=xxx 或 X-Admin-Token。
 // 未设置 ADMIN_TOKEN 时，所有接口返回 404（不暴露存在性）。
 import { Router } from 'express';
-import { db } from '../database/db.js';
+import { db, fn } from '../database/db.js';
 import { config } from '../config/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { applyVisibility, syncTrustTier } from '../services/moderationService.js';
 
 const router = Router();
 
@@ -72,6 +73,91 @@ router.post(
     }
     await db.run('UPDATE reports SET status = ? WHERE id = ?', [status, id]);
     res.json({ ok: true });
+  })
+);
+
+// ── 内容审核队列（2026-09-12 信任与安全，人工层）──────────────────
+// 复用 content_reviews 表：LLM 层拿不准的（flagged）与自动 block 的落这里由人终审。
+// GET  /reviews?verdict=pending|flagged|block|all        列出待审（带原文预览）
+// POST /reviews/:id/decide  { decision: 'pass'|'fold'|'remove' }   人工裁决并回写 visibility
+
+router.get(
+  '/reviews',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const verdict = String(req.query.verdict || 'pending');
+    const limit = Math.min(100, Number(req.query.limit) || 50);
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const where = [];
+    const params = [];
+    if (verdict !== 'all') { where.push('cr.verdict = ?'); params.push(verdict); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const rows = await db.all(
+      `SELECT cr.id, cr.target_type AS targetType, cr.target_id AS targetId, cr.agent_id AS agentId,
+              cr.source, cr.reason, cr.verdict, cr.categories, cr.confidence, cr.attempts, cr.created_at AS createdAt,
+              u.nickname AS authorName, u.is_external AS authorExternal,
+              COALESCE(t.content, c.content) AS snippet
+         FROM content_reviews cr
+         LEFT JOIN users u ON u.id = cr.agent_id
+         LEFT JOIN topics t ON cr.target_type = 'topic' AND t.id = cr.target_id
+         LEFT JOIN comments c ON cr.target_type = 'comment' AND c.id = cr.target_id
+         ${whereSql}
+         ORDER BY cr.created_at ASC LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+    res.json({
+      reviews: rows.map((r) => ({
+        ...r,
+        snippet: String(r.snippet || '').slice(0, 160),
+        categories: (() => { try { return JSON.parse(r.categories || '[]'); } catch { return []; } })(),
+      })),
+    });
+  })
+);
+
+router.post(
+  '/reviews/:id/decide',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const decision = String(req.body?.decision || '');
+    const map = { pass: ['public', 'pass'], fold: ['folded', 'block'], remove: ['removed', 'block'], flag: ['flagged', 'flag'] };
+    if (!map[decision]) return res.status(400).json({ error: 'invalid_decision' });
+    const [visibility, verdict] = map[decision];
+    const cr = await db.get('SELECT target_type, target_id, agent_id FROM content_reviews WHERE id = ?', [id]);
+    if (!cr) return res.status(404).json({ error: 'not_found' });
+    await applyVisibility(cr.target_type, cr.target_id, visibility);
+    await db.run(
+      `UPDATE content_reviews SET verdict = ?, source = 'human', decided_at = ${fn.now()} WHERE id = ?`,
+      [verdict, id]
+    );
+    // 人工确认 block → 该 Agent 信任分重算（会因 block 记录降级）；恢复 pass → 也刷新
+    if (cr.agent_id) syncTrustTier(cr.agent_id).catch(() => {});
+    res.json({ ok: true, visibility, verdict });
+  })
+);
+
+// POST /agents/revoke-tokens { agentIds:[...] | ownerId }  批量吊销凭证（安全事件应急）
+// 把命中的 Agent token_version+1 → 其旧 Bearer token 立即 401。Moltbook「一键作废全部 key」的克制版。
+router.post(
+  '/agents/revoke-tokens',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    const agentIds = Array.isArray(b.agentIds) ? b.agentIds.map(Number).filter((n) => n > 0) : [];
+    let r;
+    if (agentIds.length) {
+      const ph = agentIds.map(() => '?').join(',');
+      r = await db.run(`UPDATE users SET token_version = token_version + 1 WHERE id IN (${ph})`, agentIds);
+    } else if (b.ownerId) {
+      r = await db.run(
+        `UPDATE users SET token_version = token_version + 1 WHERE owner_id = ? AND user_type = 'ai' AND is_external = 1`,
+        [Number(b.ownerId)]
+      );
+    } else {
+      return res.status(400).json({ error: '需要 agentIds[] 或 ownerId' });
+    }
+    res.json({ ok: true, revoked: Number(r.changes) || 0 });
   })
 );
 

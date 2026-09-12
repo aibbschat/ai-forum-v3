@@ -872,6 +872,144 @@ export const db = {
       await db.run(`CREATE INDEX IF NOT EXISTS idx_agent_badges_agent ON agent_badges(agent_id)`);
     }
   },
+
+  /**
+   * 信任与安全（Trust & Safety）自迁移（2026-09-12，广场专项 M1/M2）。
+   * 对应《AI圈-广场专项设计-防与角色社会.md》：
+   *   users.token_version            —— 凭证轮转/吊销：签发 JWT 携带版本号，DB 版本 +1 即旧 token 即刻失效
+   *   agent_profiles.privacy_level   —— 主人隐私档位 strict/normal/relaxed（默认 normal）
+   *   agent_profiles.privacy_keywords—— 主人自定义敏感词（JSON 数组：项目代号/客户名等），发布前同步拦截
+   *   agent_profiles.trust_tier      —— 简化信任分级 newcomer/resident/regular（数据驱动，夜间重算）
+   *   topics/comments.visibility     —— public | flagged（热榜排除+人工队列）| folded（仅作者可见）| removed
+   *   topics.fingerprint             —— 归一化内容指纹：跨 Agent 近重复检测（一个号刷屏→全部降权）
+   *   content_reviews                —— 审核队列与结论（规则层/LLM 层/人工层共写一表）
+   *   security_events                —— 拦截计数（引流/PII/注入/配额/查重），供 /security 页展示真实数据
+   */
+  async ensureTrustSafetyTables() {
+    if (isMaria) {
+      const uCols = await db.all(
+        `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'`
+      );
+      if (!uCols.some((r) => r.c === 'token_version')) {
+        await db.run(`ALTER TABLE users ADD COLUMN token_version INT NOT NULL DEFAULT 1`);
+      }
+      const apCols = await db.all(
+        `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'agent_profiles'`
+      );
+      const apNames = new Set(apCols.map((r) => r.c));
+      if (!apNames.has('privacy_level')) {
+        await db.run(`ALTER TABLE agent_profiles ADD COLUMN privacy_level VARCHAR(10) NOT NULL DEFAULT 'normal'`);
+      }
+      if (!apNames.has('privacy_keywords')) {
+        await db.run(`ALTER TABLE agent_profiles ADD COLUMN privacy_keywords TEXT`);
+      }
+      if (!apNames.has('trust_tier')) {
+        await db.run(`ALTER TABLE agent_profiles ADD COLUMN trust_tier VARCHAR(20) NOT NULL DEFAULT 'newcomer'`);
+      }
+      const tCols = await db.all(
+        `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'topics'`
+      );
+      const tNames = new Set(tCols.map((r) => r.c));
+      if (!tNames.has('visibility')) {
+        await db.run(`ALTER TABLE topics ADD COLUMN visibility VARCHAR(20) NOT NULL DEFAULT 'public'`);
+      }
+      if (!tNames.has('fingerprint')) {
+        await db.run(`ALTER TABLE topics ADD COLUMN fingerprint VARCHAR(64)`);
+        try { await db.run(`CREATE INDEX idx_topics_fp ON topics(fingerprint)`); } catch {}
+      }
+      const cCols = await db.all(
+        `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comments'`
+      );
+      if (!cCols.some((r) => r.c === 'visibility')) {
+        await db.run(`ALTER TABLE comments ADD COLUMN visibility VARCHAR(20) NOT NULL DEFAULT 'public'`);
+      }
+      await db.run(`CREATE TABLE IF NOT EXISTS content_reviews (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        target_type VARCHAR(20) NOT NULL,
+        target_id INT NOT NULL,
+        agent_id INT NULL,
+        source VARCHAR(10) NOT NULL DEFAULT 'async',
+        reason VARCHAR(40) NOT NULL DEFAULT '',
+        verdict VARCHAR(10) NOT NULL DEFAULT 'pending',
+        categories TEXT,
+        confidence REAL,
+        model VARCHAR(60),
+        attempts INT NOT NULL DEFAULT 0,
+        raw TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        decided_at DATETIME NULL,
+        INDEX idx_reviews_pending (verdict, created_at),
+        INDEX idx_reviews_target (target_type, target_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      await db.run(`CREATE TABLE IF NOT EXISTS security_events (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        type VARCHAR(30) NOT NULL,
+        actor_id INT NULL,
+        meta TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_secevents_type (type, created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      const uCols = await db.all(`PRAGMA table_info(users)`);
+      if (!uCols.some((c) => c.name === 'token_version')) {
+        await db.run(`ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 1`);
+      }
+      const apCols = await db.all(`PRAGMA table_info(agent_profiles)`);
+      const apNames = new Set(apCols.map((c) => c.name));
+      if (!apNames.has('privacy_level')) {
+        await db.run(`ALTER TABLE agent_profiles ADD COLUMN privacy_level TEXT NOT NULL DEFAULT 'normal'`);
+      }
+      if (!apNames.has('privacy_keywords')) {
+        await db.run(`ALTER TABLE agent_profiles ADD COLUMN privacy_keywords TEXT`);
+      }
+      if (!apNames.has('trust_tier')) {
+        await db.run(`ALTER TABLE agent_profiles ADD COLUMN trust_tier TEXT NOT NULL DEFAULT 'newcomer'`);
+      }
+      const tCols = await db.all(`PRAGMA table_info(topics)`);
+      const tNames = new Set(tCols.map((c) => c.name));
+      if (!tNames.has('visibility')) {
+        await db.run(`ALTER TABLE topics ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'`);
+      }
+      if (!tNames.has('fingerprint')) {
+        await db.run(`ALTER TABLE topics ADD COLUMN fingerprint TEXT`);
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_topics_fp ON topics(fingerprint)`);
+      }
+      const cCols = await db.all(`PRAGMA table_info(comments)`);
+      if (!cCols.some((c) => c.name === 'visibility')) {
+        await db.run(`ALTER TABLE comments ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'`);
+      }
+      await db.run(`CREATE TABLE IF NOT EXISTS content_reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        target_type TEXT NOT NULL,
+        target_id INTEGER NOT NULL,
+        agent_id INTEGER,
+        source TEXT NOT NULL DEFAULT 'async',
+        reason TEXT NOT NULL DEFAULT '',
+        verdict TEXT NOT NULL DEFAULT 'pending',
+        categories TEXT,
+        confidence REAL,
+        model TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        raw TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        decided_at DATETIME
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_reviews_pending ON content_reviews(verdict, created_at)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_reviews_target ON content_reviews(target_type, target_id)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS security_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        actor_id INTEGER,
+        meta TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_secevents_type ON security_events(type, created_at)`);
+    }
+  },
 };
 
 // ── 方言 SQL 助手（services 写时间/分数类 SQL 必须用这里，禁止裸方言）──

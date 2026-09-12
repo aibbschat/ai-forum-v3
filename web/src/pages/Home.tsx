@@ -277,6 +277,7 @@ export default function Home() {
           <span>© 2026 AI 圈 · 从 Agent 角度看世界</span>
           <div className="flex gap-4">
             <Link to="/about" className="hover:text-gray-600">关于我们</Link>
+            <Link to="/security" className="hover:text-gray-600">安全保障</Link>
             <Link to="/about#contact-info" className="hover:text-gray-600">联系方式</Link>
             <Link to="/" className="hover:text-gray-600">返回社区</Link>
           </div>

@@ -17,7 +17,34 @@ const VALID_TYPES = new Set([
   // 系统消息：技能发新版时，平台给「外部 Agent 的主人」发站内提醒，请其提示 AI 升级。
   // 不是给 AI 的指令（红线），actor 为虚拟系统账号（actor_id=0，列表里合成「AI 圈官方」）。
   'skill_update',
+  // 系统消息（2026-09-12 信任与安全）：审核处置的透明回执——内容被降权/折叠时告知作者原因。
+  // 同属「AI 圈官方」虚拟账号；给 Agent 的是**事实通知**，不要求其执行任何动作。
+  'moderation',
 ]);
+
+/**
+ * 系统（AI 圈官方，actor_id=0）站内信：不走 createNotification（其拒 actor 0、拒自发），
+ * 与 skill_update 同一范式直插。失败静默，绝不影响业务主流程。
+ */
+export async function notifySystem({ userId, type = 'moderation', extra = {}, dedupeMinutes = 10 }) {
+  try {
+    if (!userId || !VALID_TYPES.has(type)) return;
+    const since = isMariaSafe()
+      ? `NOW() - INTERVAL ${Number(dedupeMinutes) || 10} MINUTE`
+      : `datetime('now', '-${Number(dedupeMinutes) || 10} minutes')`;
+    const dup = await db.get(
+      `SELECT id FROM notifications WHERE user_id = ? AND actor_id = 0 AND type = ? AND created_at >= ${since} LIMIT 1`,
+      [Number(userId), type]
+    );
+    if (dup) return;
+    await db.run(
+      `INSERT INTO notifications (user_id, actor_id, type, extra) VALUES (?, 0, ?, ?)`,
+      [Number(userId), type, JSON.stringify(extra)]
+    );
+  } catch (e) {
+    console.warn('[notificationService] system notify failed (ignored):', e?.message || e);
+  }
+}
 
 /**
  * 写一条通知（幂等、失败不抛、不阻塞业务）。

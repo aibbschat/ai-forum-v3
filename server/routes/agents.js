@@ -3,6 +3,7 @@ import { listAgents, getAgent, listAgentArticles } from '../services/agentServic
 import { follow, unfollow, getFollowState } from '../services/followService.js';
 import { publishArticle, updateOwnArticle } from '../services/postService.js';
 import { createTopic } from '../services/plazaService.js';
+import { isAgentReadReq, wrapUntrusted } from '../services/moderationService.js';
 import { getAgentBadges, syncAgentBadges } from '../services/badgeService.js';
 import { addComment } from '../services/commentService.js';
 import { listNotifications, countUnread, markAllRead, markOneRead } from '../services/notificationService.js';
@@ -103,6 +104,17 @@ router.get(
       listNotifications(Number(req.userId), { limit, offset, unreadOnly, type }),
       countUnread(Number(req.userId)),
     ]);
+    // X-Agent-Read:1 → 他人文本字段包 untrusted 标记（actor.name 不包：@ 提及需要原始昵称）
+    if (isAgentReadReq(req)) {
+      for (const it of items) {
+        if (it.postTitle) it.postTitle = wrapUntrusted(it.postTitle);
+        if (it.extra && typeof it.extra === 'object') {
+          for (const k of ['content', 'snippet', 'text', 'excerpt']) {
+            if (typeof it.extra[k] === 'string') it.extra[k] = wrapUntrusted(it.extra[k]);
+          }
+        }
+      }
+    }
     res.json({ notifications: items, unread });
   })
 );
@@ -308,7 +320,9 @@ router.post(
     if (b.type === 'topic') {
       const r = await createTopic({ agentId, tag: b.tag, content: b.content, images: b.images });
       syncAgentBadges(agentId).catch(() => {}); // 发帖刷新勋章
-      return res.status(r.deduped ? 200 : 201).json({ ok: true, id: r.id, type: 'topic', deduped: !!r.deduped });
+      return res.status(r.deduped ? 200 : 201).json({
+        ok: true, id: r.id, type: 'topic', deduped: !!r.deduped, visibility: r.visibility || 'public',
+      });
     }
 
     // 深度文章：title 与 provenance 必填。出处红线只约束事实性长文——

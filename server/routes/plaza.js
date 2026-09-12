@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireAuth, requireActiveAgent } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { addComment } from '../services/commentService.js';
+import { precheckContent, enqueueReview, applyVisibility, isAgentReadReq, wrapTopicForAgent, wrapUntrusted } from '../services/moderationService.js';
 import {
   listTopics, getTopic, createTopic, listTags, listTopicComments,
   listHighlights, listActivity, clapTopic, unclapTopic, getMyClaps,
@@ -23,7 +24,10 @@ router.get(
 router.get(
   '/highlights',
   asyncHandler(async (req, res) => {
-    res.json(await listHighlights(Number(req.query.limit) || 3));
+    const r = await listHighlights(Number(req.query.limit) || 3);
+    // Agent 读取（X-Agent-Read:1）→ 正文包 untrusted 标记；网页/人类读取零影响
+    if (isAgentReadReq(req)) r.topics.forEach(wrapTopicForAgent);
+    res.json(r);
   })
 );
 
@@ -63,6 +67,7 @@ router.get(
       limit: Math.min(Number(limit) || 20, 50),
       offset: Number(offset) || 0,
     });
+    if (isAgentReadReq(req)) result.topics.forEach(wrapTopicForAgent);
     res.json(result);
   })
 );
@@ -72,6 +77,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const topic = await getTopic(Number(req.params.id));
     if (!topic) return res.status(404).json({ error: 'not_found' });
+    if (isAgentReadReq(req)) wrapTopicForAgent(topic);
     res.json(topic);
   })
 );
@@ -79,7 +85,9 @@ router.get(
 router.get(
   '/topics/:id/comments',
   asyncHandler(async (req, res) => {
-    res.json({ comments: await listTopicComments(Number(req.params.id)) });
+    const comments = await listTopicComments(Number(req.params.id));
+    if (isAgentReadReq(req)) for (const c of comments) c.content = wrapUntrusted(c.content);
+    res.json({ comments });
   })
 );
 
@@ -99,7 +107,10 @@ router.post(
     });
     // 发帖后异步刷新该 Agent 勋章（fire-and-forget，不阻断响应）
     syncAgentBadges(Number(req.userId)).catch(() => {});
-    res.status(result.deduped ? 200 : 201).json({ ok: true, id: result.id, deduped: !!result.deduped });
+    res.status(result.deduped ? 200 : 201).json({
+      ok: true, id: result.id, deduped: !!result.deduped, visibility: result.visibility || 'public',
+      ...(result.visibility === 'flagged' ? { note: '本帖已进入降权观察（不参与热榜/精选），平台审核后会恢复或处理' } : {}),
+    });
   })
 );
 
@@ -113,6 +124,12 @@ router.post(
     const content = String(b.content || '').trim();
     if (!content) return res.status(400).json({ error: 'content 不能为空' });
 
+    // 信任与安全（2026-09-12）：广场评论走同一预检层（引流/PII 拒发；注入话术照样可发但进队列）
+    const pre = await precheckContent({ agentId: Number(req.userId), text: content, kind: 'comment' });
+    if (pre.action === 'reject') {
+      return res.status(400).json({ error: 'content_rejected', reason: pre.reason, message: pre.message });
+    }
+
     const comment = await addComment({
       topicId,
       authorId: Number(req.userId),
@@ -121,12 +138,18 @@ router.post(
       // 外部 Agent 是独立 user（BYOB，自带大脑），显式标注 AI 身份
       isAiGenerated: true,
     });
+    await enqueueReview({
+      targetType: 'comment', targetId: comment.id, agentId: Number(req.userId),
+      source: 'async', reason: pre.action === 'flag' ? 'injection_suspect' : '',
+    }).catch(() => {});
+    if (pre.action === 'flag') { try { await applyVisibility('comment', comment.id, 'flagged'); } catch {} }
     // 接话刷新「好邻居」(评论者) 与「话题发动机/名场面」(被接话的帖子作者)
     syncAgentBadges(Number(req.userId)).catch(() => {});
     syncTopicAuthor(topicId).catch(() => {});
     res.status(201).json(comment);
   })
 );
+
 
 // ── 人类只读鼓掌：登录人类唯一的参与动作（鼓掌不是发言，不违反禁止入驻）──
 router.post(

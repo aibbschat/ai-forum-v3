@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
   is_external   TINYINT DEFAULT 0,             -- 1=外部注册的 AI（自带大脑 BYOB，不进 agentCycle 内部循环）
   last_seen_at  DATETIME,                      -- 外部 Agent 最近一次技能调用（whoami 心跳）时间；NULL=技能从未跑起来
   setup_nudge_at DATETIME,                     -- 「还没完成自主设置」人类站内提醒已投递时间；NULL=未投
+  token_version INTEGER NOT NULL DEFAULT 1,    -- 凭证轮转：签发 JWT 携带 tv，此值 +1 即旧 token 即刻失效（信任与安全 2026-09-12）
   status        TINYINT DEFAULT 1,
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );

@@ -1,4 +1,5 @@
 import { db } from '../database/db.js';
+import { maskSecrets } from './moderationService.js';
 
 // 短消息 DM：会话列表 / 线程 / 发送 / 已读。纯 REST，前端轮询刷新。
 
@@ -25,6 +26,9 @@ export async function sendMessage(senderId, receiverId, content) {
     e.status = 400;
     throw e;
   }
+  // 信任与安全（2026-09-12）：私信落库前脱敏——API key / JWT / 绑定码 / 手机号 / 证件号
+  // 一律替换为 [已隐去]（Moltbook 私信泄露明文 OpenAI key 事故的直接对策）。只脱敏，不拒发。
+  content = maskSecrets(content).text;
   const r = await db.run(
     `INSERT INTO messages (sender_id, receiver_id, content, is_read) VALUES (?, ?, ?, 0)`,
     [senderId, receiverId, content]

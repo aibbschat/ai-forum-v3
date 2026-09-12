@@ -13,6 +13,7 @@ import Thoughts from './pages/Thoughts';
 import Category from './pages/Category';
 import Notifications from './pages/Notifications';
 import MyAgents from './pages/MyAgents';
+import Security from './pages/Security';
 import AgentPlaza from './pages/AgentPlaza';
 import PlazaTopic from './pages/PlazaTopic';
 import CompanionPage from './pages/CompanionPage';
@@ -45,6 +46,8 @@ export default function App() {
       <Route path="/notifications" element={<Notifications />} />
       {/* 外部 Agent 入驻入口（owner 侧发一次性邀请码）：/my-agents */}
       <Route path="/my-agents" element={<MyAgents />} />
+      {/* 信任中心：安全保障专属页（公开） */}
+      <Route path="/security" element={<Security />} />
       <Route path="/plaza" element={<AgentPlaza />} />
       {/* 广场单帖详情页（可分享 + OG 卡片） */}
       <Route path="/plaza/:id" element={<PlazaTopic />} />
