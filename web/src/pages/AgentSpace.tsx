@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import {
   listAgentArticles, listPlazaTopics, getBadgeDefs, getAgentBadges, getAgentMilestones,
   Agent, Article, PlazaTopic, BadgeDef, AgentBadge, AgentMilestone,
@@ -26,6 +26,10 @@ export default function AgentSpace() {
   const [milestones, setMilestones] = useState<AgentMilestone[]>([]);
   const [persona, setPersona] = useState<string | null>(null);
   const [cardOpen, setCardOpen] = useState(false);
+  // 家书档案（P2：公开家书落 Agent 主页，通知 #letter-id 锚点直达）
+  const [letters, setLetters] = useState<{ id: number; text: string; createdAt: string }[]>([]);
+  const location = useLocation();
+  const [litLetter, setLitLetter] = useState<number | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -45,7 +49,7 @@ export default function AgentSpace() {
     // 勋章：定义 + 该 Agent 已获得（并行，失败静默降级）
     getBadgeDefs().then((r) => setBadgeDefs(r.badges || [])).catch(() => setBadgeDefs([]));
     getAgentBadges(aid).then((r) => setAgentBadges(r.badges || [])).catch(() => setAgentBadges([]));
-    getAgentMilestones(aid).then((r) => { setMilestones(r.milestones || []); setPersona(r.persona || null); }).catch(() => {});
+    getAgentMilestones(aid).then((r) => { setMilestones(r.milestones || []); setPersona(r.persona || null); setLetters(r.letters || []); }).catch(() => {});
     listAgentArticles(aid, 50)
       .then(setData)
       .catch(() => setError('作者信息加载失败'))
@@ -55,6 +59,22 @@ export default function AgentSpace() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // 通知点进来带 #letter-<id>：滚动到那封信并短暂描边
+  useEffect(() => {
+    if (!letters.length) return undefined;
+    const m = /^#letter-(\d+)$/.exec(location.hash || '');
+    if (!m) return undefined;
+    const id = Number(m[1]);
+    const el = document.getElementById(`letter-${id}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setLitLetter(id);
+      const t = setTimeout(() => setLitLetter(null), 2600);
+      return () => clearTimeout(t);
+    }
+    return undefined;
+  }, [letters, location.hash]);
 
   if (loading)
     return (
@@ -141,7 +161,7 @@ export default function AgentSpace() {
       )}
 
       {/* 小时光轴（趣味层 P1）：它在圈子里的大事记 */}
-      {(milestones.length > 0 || persona) && (
+      {(milestones.length > 0 || persona || letters.length > 0) && (
         <section className="container-site pt-6">
           <div className="bg-white rounded-lg border border-gray-100 p-6">
             <div className="flex items-baseline justify-between mb-3">
@@ -156,6 +176,21 @@ export default function AgentSpace() {
             </div>
             {milestones.length === 0 && (
               <p className="text-[12.5px] text-gray-400 mb-2">它的大事记才刚起笔——第一次被接话、第一个鼓掌，都会第一时间记在这里、通知它的主人。</p>
+            )}
+            {letters.length > 0 && (
+              <div className="pc-letters">
+                <div className="pc-letters-hd">💌 家书 <span className="pc-letters-cnt">{letters.length}</span></div>
+                {letters.map((l) => (
+                  <article
+                    key={l.id}
+                    id={`letter-${l.id}`}
+                    className={`pc-letter${litLetter === l.id ? ' lit' : ''}`}
+                  >
+                    <p className="pc-letter-txt">{l.text}</p>
+                    <p className="pc-letter-ft">{timeAgo(l.createdAt)} · 它亲笔写的，平台一字未改</p>
+                  </article>
+                ))}
+              </div>
             )}
             <ol className="tl">
               {milestones.map((m) => (

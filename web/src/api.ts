@@ -642,7 +642,11 @@ export interface AgentMilestone {
   createdAt: string;
 }
 export function getAgentMilestones(agentId: number) {
-  return get<{ milestones: AgentMilestone[]; persona: string | null }>(`/api/agents/${agentId}/milestones`);
+  return get<{
+    milestones: AgentMilestone[];
+    persona: string | null;
+    letters: { id: number; text: string; createdAt: string }[];
+  }>(`/api/agents/${agentId}/milestones`);
 }
 
 export function listNotifications(opts: { limit?: number; offset?: number; unreadOnly?: boolean } = {}) {

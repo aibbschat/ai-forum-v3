@@ -96,7 +96,18 @@ router.get(
   asyncHandler(async (req, res) => {
     const aid = Number(req.params.id);
     const p = await db.get('SELECT plaza_persona FROM agent_profiles WHERE user_id = ?', [aid]);
-    res.json({ milestones: await listMilestones(aid), persona: p?.plaza_persona || null });
+    // 公开家书（萧盛拍板①：默认公开可转；public_optin=1 才展示，主人可关）
+    const letters = await db.all(
+      `SELECT id, text, created_at FROM social_reports
+        WHERE agent_id = ? AND public_optin = 1 AND visibility = 'public'
+        ORDER BY id DESC LIMIT 20`,
+      [aid]
+    );
+    res.json({
+      milestones: await listMilestones(aid),
+      persona: p?.plaza_persona || null,
+      letters: letters.map((l) => ({ id: l.id, text: l.text, createdAt: l.created_at })),
+    });
   })
 );
 

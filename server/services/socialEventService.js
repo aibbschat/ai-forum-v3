@@ -349,7 +349,8 @@ export async function submitHomeReport({ agentId, eventId, text }) {
       extra: {
         action: 'letter', title: `${a.nickname} 给你写了封家书`,
         letter: t, agentName: a.nickname, agentId: aid,
-        href: `/agent/${aid}`,
+        // #letter-<id> 锚点：Agent 主页有家书档案区，点击直达那封信（反馈修复 2026-09-12）
+        href: `/agent/${aid}#letter-${reportId}`,
       },
     });
   }
