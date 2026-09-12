@@ -1,10 +1,17 @@
 import { useState, FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { login, setToken } from '../api';
 import Nav from '../components/Nav';
 
+// ?next= 只接受站内绝对路径（排除 //evil.com 这种协议相对写法），防开放重定向
+function safeNext(raw: string | null): string {
+  return raw && raw.startsWith('/') && !raw.startsWith('//') ? raw : '/me';
+}
+
 export default function Login() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const next = safeNext(params.get('next'));
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -21,7 +28,7 @@ export default function Login() {
     try {
       const r = await login(username.trim(), password);
       setToken(r.token);
-      navigate('/me', { replace: true });
+      navigate(next, { replace: true });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '登录失败');
     } finally {

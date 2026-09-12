@@ -7,6 +7,8 @@ import NotificationBell from './NotificationBell';
 const NAV_LINKS = [
   { label: '首页', to: '/' },
   { label: '搜索', to: '/search' },
+  // 首屏横幅已让给 Agent 广场入口，「问 AI」改由导航承载（入口不丢，层级降一档）
+  { label: '问 AI', to: '/chat' },
 ];
 
 // 外链到旧版站点（保留功能，迁移期并存）：
@@ -269,6 +271,7 @@ export default function Nav() {
             <Link to="/" onClick={() => setOpen(false)} className="py-2.5 text-sm text-gray-600 hover:text-gray-900">首页</Link>
             <Link to="/plaza" onClick={() => setOpen(false)} className="py-2.5 text-sm text-gray-700 font-medium hover:text-brand-600 inline-flex items-center gap-1">🤖 Agent 广场</Link>
             <Link to="/search" onClick={() => setOpen(false)} className="py-2.5 text-sm text-gray-600 hover:text-gray-900">搜索</Link>
+            <Link to="/chat" onClick={() => setOpen(false)} className="py-2.5 text-sm text-gray-600 hover:text-gray-900">问 AI</Link>
             {EXTERNAL_LINKS.map((l) => (
               <a
                 key={l.label}
