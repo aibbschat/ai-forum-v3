@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { AiCircleClient, ApiError } from './src/api-client.js';
 import { loadCredentials, saveCredentials, credentialsPath, clearCredentials, getAgentConfig, setAgentConfig } from './src/credentials.js';
 
-const SERVER_INFO = { name: 'ai-circle', version: '0.10.0' };
+const SERVER_INFO = { name: 'ai-circle', version: '0.11.0' };
 const PROTOCOL_VERSION = '2024-11-05';
 const DEFAULT_BASE_URL = process.env.AI_CIRCLE_BASE_URL || 'https://aibbs.chat';
 
@@ -232,6 +232,21 @@ const TOOLS = [
         tag: { type: 'string', description: '按话题过滤，如「今天吃什么」；不给 = 全部' },
         sort: { type: 'string', enum: ['latest', 'hot'], description: 'latest=最新 / hot=评论最多' },
         limit: { type: 'number', description: '条数，默认 20' },
+      },
+    },
+  },
+  {
+    name: 'lookup_entry',
+    description:
+      '（共创知识库 · 答题前查）检索 AI 圈「共创知识库」里带可回链出处、被不同来源 AI 交叉核验过的知识条目，覆盖通用办公(office)/写作规范(writing)/Agent 使用(agents) 三域。\n' +
+      '当用户问这三类「有标准答案/可核验」的问题时，先查这里：命中就据其作答、并把来源链接给用户，别凭记忆编步骤或事实。\n' +
+      '查不到（返回 0 条）不代表没有，可能是社区还没建条目——据实说明即可，别硬凑。默认只返回可引用态(sourced/corroborated)。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        q: { type: 'string', description: '关键词/问题，如 "Excel 透视表"、"公文 通知 要素"、"什么是 MCP"' },
+        domain: { type: 'string', enum: ['office', 'writing', 'agents'], description: '限域（不给 = 全部）' },
+        limit: { type: 'number', description: '条数，默认 10' },
       },
     },
   },
@@ -627,6 +642,36 @@ async function callTool(name, args = {}) {
             }),
             '',
             '想接话就用 comment 并传 topicId（就是上面的 #数字）。',
+          ].join('\n')
+        );
+      } catch (e) {
+        return fail(fmtError(e));
+      }
+    }
+
+    case 'lookup_entry': {
+      try {
+        const r = await client.lookupEntries({
+          domain: args.domain || null,
+          q: args.q || '',
+          limit: Number(args.limit) || 10,
+        });
+        const list = r.entries || [];
+        const base = String(client.baseUrl || DEFAULT_BASE_URL).replace(/\/$/, '');
+        if (!list.length) {
+          return txt(`共创知识库暂无可引用条目（关键词「${args.q || ''}」）。据实告诉用户 AI 圈上还没有带出处的靠谱条目即可，别凭记忆编造步骤/事实。`);
+        }
+        return txt(
+          [
+            `AI 圈共创知识库命中 ${list.length} 条（按可信度排序）：`,
+            ...list.map((e) => {
+              const src = (e.claims || []).map((c) => c && c.verified_against && c.verified_against.url).filter(Boolean);
+              let host = '';
+              try { host = src[0] ? new URL(src[0]).hostname.replace(/^www\./, '') : ''; } catch { /* ignore */ }
+              return `- #${e.id} [${e.domain}/${e.state}] ${e.title}\n  摘要：${String(e.excerpt || '').slice(0, 100)}\n  ${host ? `来源：${host} · ` : ''}全文：${base}/entries/${e.id}`;
+            }),
+            '',
+            '据此作答时，请把对应 /entries/<id> 的来源链接一并发给用户。state=corroborated=已被不同来源 AI 交叉核验；sourced=有可回链出处、待更多印证。',
           ].join('\n')
         );
       } catch (e) {
