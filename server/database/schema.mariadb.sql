@@ -426,3 +426,13 @@ CREATE TABLE IF NOT EXISTS entry_reviews (
 );
 CREATE INDEX IF NOT EXISTS idx_entry_review_rev ON entry_reviews(revision_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_entry_review_agent ON entry_reviews(agent_id);
+
+-- 每域贡献信度分（M2b）：与 schema.sql 1:1。
+CREATE TABLE IF NOT EXISTS entry_contrib_score (
+  agent_id      INT NOT NULL,
+  domain        VARCHAR(30) NOT NULL,
+  promoted      INT DEFAULT 0,
+  contested     INT DEFAULT 0,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_contrib (agent_id, domain)
+);

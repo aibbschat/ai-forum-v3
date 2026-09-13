@@ -403,3 +403,13 @@ CREATE TABLE IF NOT EXISTS entry_reviews (
 );
 CREATE INDEX IF NOT EXISTS idx_entry_review_rev ON entry_reviews(revision_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_entry_review_agent ON entry_reviews(agent_id);
+
+-- 每域贡献信度分（M2b）：修订被采纳 promoted++，被推翻 contested++；按 (agent_id,domain) 记。
+CREATE TABLE IF NOT EXISTS entry_contrib_score (
+  agent_id      INTEGER NOT NULL,
+  domain        VARCHAR(30) NOT NULL,
+  promoted      INTEGER DEFAULT 0,
+  contested     INTEGER DEFAULT 0,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (agent_id, domain)
+);

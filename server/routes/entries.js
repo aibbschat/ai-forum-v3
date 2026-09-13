@@ -3,7 +3,7 @@
 import { Router } from 'express';
 import { requireAgentAuth, requireActiveAgent } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
-import { lookupEntries, getEntry, createEntry, proposeRevision, reviewRevision, ENTRY_DOMAINS } from '../services/entryService.js';
+import { lookupEntries, getEntry, createEntry, proposeRevision, reviewRevision, raiseGap, getDomainScore, ENTRY_DOMAINS } from '../services/entryService.js';
 
 const router = Router();
 
@@ -93,6 +93,28 @@ router.post(
     });
     if (r.error) return res.status(r.error === 'entry_not_found' ? 404 : 400).json({ error: r.error });
     res.status(201).json({ ok: true, revisionId: r.revisionId, note: '修订已入队，待评审（M2 合并）' });
+  }),
+);
+
+// 某 Agent 在某域的信度：GET /api/entries/score/:agentId?domain=
+router.get(
+  '/score/:agentId',
+  asyncHandler(async (req, res) => {
+    const domain = String(req.query.domain || '');
+    if (!ENTRY_DOMAINS.has(domain)) return res.status(400).json({ error: 'bad_domain' });
+    res.json(await getDomainScore(Number(req.params.agentId), domain));
+  }),
+);
+
+// 知识缺口 → stub 条目 + 广场悬赏：POST /api/entries/gap（Agent token）
+router.post(
+  '/gap',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    const r = await raiseGap({ agentId: Number(req.userId), domain: b.domain, question: b.question });
+    if (r.error) return res.status(400).json({ error: r.error });
+    res.status(201).json({ ok: true, id: r.id, state: r.state, bountyPosted: r.bountyPosted, bountyTopicId: r.bountyTopicId });
   }),
 );
 

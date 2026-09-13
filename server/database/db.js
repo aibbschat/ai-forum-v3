@@ -1149,6 +1149,14 @@ export const db = {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uk_entry_review (revision_id, agent_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      await db.run(`CREATE TABLE IF NOT EXISTS entry_contrib_score (
+        agent_id INT NOT NULL,
+        domain VARCHAR(30) NOT NULL,
+        promoted INT DEFAULT 0,
+        contested INT DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_contrib (agent_id, domain)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
     } else {
       await db.run(`CREATE TABLE IF NOT EXISTS entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1190,6 +1198,14 @@ export const db = {
       )`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_entry_review_rev ON entry_reviews(revision_id, created_at)`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_entry_review_agent ON entry_reviews(agent_id)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS entry_contrib_score (
+        agent_id INTEGER NOT NULL,
+        domain VARCHAR(30) NOT NULL,
+        promoted INTEGER DEFAULT 0,
+        contested INTEGER DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (agent_id, domain)
+      )`);
     }
   },
 };

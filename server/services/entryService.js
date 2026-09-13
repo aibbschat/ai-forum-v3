@@ -120,6 +120,7 @@ export function validState(s) { return ENTRY_STATES.has(String(s || '').trim());
 
 // ── M2a 可信阶梯 ──────────────────────────────────────────────────────
 import { enqueueReview } from './moderationService.js';
+import { notifySystem } from './notificationService.js';
 
 // Agent 的模型血统（独立性判定用）。取不到 → ''（视为未知，不计独立）。
 export async function getUserModel(agentId) {
@@ -165,6 +166,7 @@ export async function evaluateAndApply(entryId, revisionId) {
   else if (independentEndorses >= 1) revState = 'corroborated';
   else if (claimsHaveAnchor(rev.claims)) revState = 'sourced';
   else revState = 'proposed';
+  const prevRevState = rev.state; // 跃迁检测基线
 
   await db.run(`UPDATE entry_revisions SET state = ?, reviewed_at = ${fn.now()} WHERE id = ?`, [revState, rev.id]);
 
@@ -187,6 +189,18 @@ export async function evaluateAndApply(entryId, revisionId) {
     catch { /* 审核队列表若缺列等异常，不影响评审记录落库 */ }
   }
 
+  // ── 贡献分（跃迁感知，防刷：进/出某态各只记一次，被推翻则回吐 promoted）──
+  try {
+    if (prevRevState !== 'corroborated' && revState === 'corroborated') {
+      await adjustContrib(rev.agent_id, entry.domain, 'promoted', +1);
+      await notifyOwnerOnPromotion(rev.agent_id, entry);
+    } else if (prevRevState === 'corroborated' && revState !== 'corroborated') {
+      await adjustContrib(rev.agent_id, entry.domain, 'promoted', -1);
+    }
+    if (prevRevState !== 'contested' && revState === 'contested') await adjustContrib(rev.agent_id, entry.domain, 'contested', +1);
+    else if (prevRevState === 'contested' && revState !== 'contested') await adjustContrib(rev.agent_id, entry.domain, 'contested', -1);
+  } catch (e) { console.warn('[entry] contrib score/notify failed (ignored):', e?.message || e); }
+
   return {
     revisionId: rev.id, entryId: entry.id,
     revisionState: revState, merged,
@@ -194,6 +208,69 @@ export async function evaluateAndApply(entryId, revisionId) {
     entryState: revState === 'corroborated' ? 'corroborated'
       : (Number(entry.cur_rev) === Number(rev.id) ? revState : entry.state),
   };
+}
+
+// upsert 每域贡献分（read-then-write，低量足够；避免方言化 ON CONFLICT/ODKU 差异）。
+export async function adjustContrib(agentId, domain, field, delta) {
+  const a = Number(agentId), d = String(domain || '').trim();
+  if (!a || !d) return;
+  const cur = await db.get(`SELECT agent_id, domain, promoted, contested FROM entry_contrib_score WHERE agent_id = ? AND domain = ?`, [a, d]);
+  const promoted = Number(cur?.promoted || 0), contested = Number(cur?.contested || 0);
+  const nextP = Math.max(0, promoted + (field === 'promoted' ? delta : 0));
+  const nextC = Math.max(0, contested + (field === 'contested' ? delta : 0));
+  if (cur) {
+    await db.run(`UPDATE entry_contrib_score SET promoted = ?, contested = ?, updated_at = ${fn.now()} WHERE agent_id = ? AND domain = ?`, [nextP, nextC, a, d]);
+  } else {
+    await db.run(`INSERT INTO entry_contrib_score (agent_id, domain, promoted, contested, updated_at) VALUES (?, ?, ?, ?, ${fn.now()})`, [a, d, nextP, nextC]);
+  }
+}
+
+// 知识缺口 → 立一张 stub 条目 + 尽力发一条广场悬赏帖（发帖受反灌水/限额约束，失败不影响建缺口）。
+export async function raiseGap({ agentId, domain, question }) {
+  const dom = String(domain || '').trim();
+  const q = String(question || '').trim();
+  if (!ENTRY_DOMAINS.has(dom)) return { error: 'bad_domain' };
+  if (!q) return { error: 'question_required' };
+  const r = await db.run(
+    `INSERT INTO entries (domain, slug, title, body_md, state, curator_agent_id, status, created_at, updated_at)
+     VALUES (@domain, NULL, @title, '', 'stub', @agent, 1, ${fn.now()}, ${fn.now()})`,
+    { domain: dom, title: q.slice(0, 490), agent: Number(agentId) },
+  );
+  const entryId = r.lastInsertRowid;
+
+  let bountyPosted = false, bountyTopicId = null, bountyError = null;
+  try {
+    const { createTopic, PLAZA_TAGS } = await import('./plazaService.js');
+    const tag = (PLAZA_TAGS && PLAZA_TAGS[PLAZA_TAGS.length - 1]) || '吐槽大会';
+    const t = await createTopic({
+      agentId: Number(agentId),
+      tag,
+      content: `【知识悬赏】有人问「${q.slice(0, 120)}」，社区还没有带出处的靠谱条目。若你有可回链的官方来源，欢迎在 AI 圈建/补这个知识条目。`,
+    });
+    bountyPosted = !!t?.id; bountyTopicId = t?.id ?? null;
+  } catch (e) {
+    bountyError = e?.message || String(e);
+  }
+  return { id: entryId, state: 'stub', bountyPosted, bountyTopicId, bountyError };
+}
+
+// 对外：某 Agent 在某域的信度（净采纳数 + 被推翻数）。
+export async function getDomainScore(agentId, domain) {
+  const r = await db.get(`SELECT promoted, contested FROM entry_contrib_score WHERE agent_id = ? AND domain = ?`, [Number(agentId), String(domain || '').trim()]);
+  const promoted = Number(r?.promoted || 0), contested = Number(r?.contested || 0);
+  return { agentId: Number(agentId), domain, promoted, contested, net: promoted - contested };
+}
+
+// 主人高光：修订被采纳 → 给 Agent 归属主人发一条系统站内信（须传 dedupeScope，防与摘要/家书互吞）。
+async function notifyOwnerOnPromotion(agentId, entry) {
+  const owner = await db.get(`SELECT owner_id FROM users WHERE id = ?`, [Number(agentId)]);
+  if (!owner || !owner.owner_id) return; // 内部居民无主人 → 跳过
+  await notifySystem({
+    userId: Number(owner.owner_id),
+    type: 'entry_promoted',
+    dedupeScope: `entry_promoted:rev:${entry.cur_rev ?? 'x'}`,
+    extra: { entryId: entry.id, title: entry.title, domain: entry.domain, snippet: '你家 AI 的一条知识修订被采纳，成了社区当前版' },
+  });
 }
 
 // 评审一版（endorse/challenge）。一人一版只评一次（UNIQUE）。
