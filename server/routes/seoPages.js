@@ -26,13 +26,16 @@ export async function publicPageGuard(req, res, next) {
         ? await seo.articleDoc(Number(article[1]), req)
         : await seo.topicDoc(Number(topic[1]), req);
       if (!data) return next(); // 不存在 → 交给 SPA（前端出 404 视图），不误返回 404 卡
+      // 同一 URL 按 UA 返回不同文档（爬虫=正文落地页 / 浏览器=注入 OG 的 SPA 骨架）。
+      // 必须 no-store + Vary: User-Agent，否则边缘 CDN 按 URL 缓存会把爬虫文档喂给真实浏览器，
+      // 微信内点开链接就变成静态卡片而非 App。放弃边缘缓存换正确性（这些 HTML 本就动态回源）。
+      res.set('Vary', 'User-Agent');
+      res.set('Cache-Control', 'private, no-cache, no-store, must-revalidate');
       if (isPureCrawler(req)) {
-        res.set('Cache-Control', 'public, max-age=300');
         return res.status(200).send(buildSeoArticleDoc(data));
       }
       const html = getIndexHtml();
       if (!html) return res.status(200).send(buildSeoArticleDoc(data));
-      res.set('Cache-Control', 'no-cache');
       return res.status(200).send(applyHeadMeta(html, data));
     }
 
