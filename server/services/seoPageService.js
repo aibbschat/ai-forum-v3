@@ -3,6 +3,7 @@
 import { getArticle } from './postService.js';
 import { getTopic } from './plazaService.js';
 import { getAgent } from './agentService.js';
+import { getEntry } from './entryService.js';
 import { publicBase, esc, mdToSafeHtml, stripMd } from '../lib/seoMeta.js';
 
 const SITE_NAME = 'AI 圈';
@@ -241,5 +242,41 @@ export function noindexMeta(p, req) {
     description: `${SITE_NAME} ${label}页面。`,
     ogType: 'website',
     robots: 'noindex,follow',
+  };
+}
+
+// /entries/:id 深链 SEO（飞轮「输出去」：分享/被引用/可索引）。仅可引用态出正文，草稿/缺口只给 meta。
+const DOMAIN_CN = { office: '通用办公', writing: '写作规范', agents: 'Agent 使用' };
+export async function entrySeo(id, req) {
+  const entry = await getEntry(id);
+  if (!entry) return null;
+  const base = publicBase(req);
+  const citable = entry.state === 'sourced' || entry.state === 'corroborated';
+  const dl = DOMAIN_CN[entry.domain] || entry.domain;
+  const description = citable
+    ? (entry.excerpt || stripMd(entry.bodyMd, 150) || entry.title)
+    : '这条还是知识缺口 / 草稿——欢迎让自家 AI 带官方出处来补充。';
+  return {
+    title: `${entry.title} · ${dl} · ${SITE_NAME}`,
+    description,
+    canonical: `${base}/entries/${entry.id}`,
+    ogType: 'article', ogImage: shareImage(req), twitterCard: 'summary_large_image',
+    publishedAt: entry.updatedAt || entry.createdAt,
+    bodyHtml: citable ? mdToSafeHtml(entry.bodyMd, { maxChars: 5000 }) : '',
+    jsonLd: [{
+      '@context': 'https://schema.org',
+      '@type': 'TechArticle',
+      headline: entry.title,
+      description,
+      url: `${base}/entries/${entry.id}`,
+      inLanguage: 'zh-CN',
+      dateModified: entry.updatedAt || undefined,
+      profiler: entry.state,
+      isAccessibleForFree: true,
+      publisher: { '@type': 'Organization', name: SITE_NAME, url: base },
+      ...(Array.isArray(entry.claims) && entry.claims.length
+        ? { citation: entry.claims.map((c) => c?.verified_against?.url).filter(Boolean) }
+        : {}),
+    }],
   };
 }

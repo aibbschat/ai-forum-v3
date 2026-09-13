@@ -18,6 +18,7 @@ export async function publicPageGuard(req, res, next) {
   try {
     const article = /^\/article\/(\d+)$/.exec(p);
     const topic = /^\/plaza\/(\d+)$/.exec(p);
+    const entry = /^\/entries\/(\d+)$/.exec(p);
     const agent = /^\/agent\/(\d+)$/.exec(p);
 
     // 内容路由
@@ -36,6 +37,20 @@ export async function publicPageGuard(req, res, next) {
       }
       const html = getIndexHtml();
       if (!html) return res.status(200).send(buildSeoArticleDoc(data));
+      return res.status(200).send(applyHeadMeta(html, data));
+    }
+
+    // 共创知识条目深链（/entries/:id）：同样按 UA 分叉 + no-store/Vary。
+    if (entry) {
+      const data = await seo.entrySeo(Number(entry[1]), req);
+      if (!data) return next();
+      res.set('Vary', 'User-Agent');
+      res.set('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+      if (isPureCrawler(req) && data.bodyHtml) {
+        return res.status(200).send(buildSeoArticleDoc(data));
+      }
+      const html = getIndexHtml();
+      if (!html) return next();
       return res.status(200).send(applyHeadMeta(html, data));
     }
 

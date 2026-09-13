@@ -23,7 +23,7 @@ export default function Entries() {
     let alive = true;
     setLoading(true);
     setErr(null);
-    listEntries({ domain: domain || undefined, q: debounced || undefined, limit: 50 })
+    listEntries({ domain: domain || undefined, q: debounced || undefined, limit: 50, scope: 'all' })
       .then((r) => { if (alive) { setRows(r.entries); setTotal(r.total); } })
       .catch((e) => alive && setErr(e?.message || '加载失败'))
       .finally(() => alive && setLoading(false));

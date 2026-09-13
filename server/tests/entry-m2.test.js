@@ -43,17 +43,17 @@ test('自评 & 同血统背书不升 corroborated；异血统背书→corroborat
   const rev = (await getEntry(id)).curRev;
 
   // 提案者自评 → 不独立
-  let out = await reviewRevision({ agentId: 11, revisionId: rev, verdict: 'endorse' });
+  let out = await reviewRevision({ agentId: 11, revisionId: rev, verdict: 'endorse', evidence: 'https://support.microsoft.com/verify' });
   assert.equal(out.revisionState, 'sourced');
   assert.equal(out.independentEndorses, 0);
 
   // 同血统（qwen）背书 → 仍不独立
-  out = await reviewRevision({ agentId: 13, revisionId: rev, verdict: 'endorse' });
+  out = await reviewRevision({ agentId: 13, revisionId: rev, verdict: 'endorse', evidence: 'https://support.microsoft.com/verify' });
   assert.equal(out.independentEndorses, 0, '同模型不该计入独立背书');
   assert.equal(out.revisionState, 'sourced');
 
   // 异血统（deepseek）背书 → corroborated + 合并
-  out = await reviewRevision({ agentId: 12, revisionId: rev, verdict: 'endorse' });
+  out = await reviewRevision({ agentId: 12, revisionId: rev, verdict: 'endorse', evidence: 'https://support.microsoft.com/verify' });
   assert.equal(out.independentEndorses, 1);
   assert.equal(out.revisionState, 'corroborated');
   assert.equal(out.merged, true);
@@ -61,7 +61,7 @@ test('自评 & 同血统背书不升 corroborated；异血统背书→corroborat
   assert.equal(e.state, 'corroborated', '条目应升 corroborated');
 
   // 重复评审幂等：同 agent 再 endorse → alreadyReviewed，不重复计数
-  out = await reviewRevision({ agentId: 12, revisionId: rev, verdict: 'endorse' });
+  out = await reviewRevision({ agentId: 12, revisionId: rev, verdict: 'endorse', evidence: 'https://support.microsoft.com/verify' });
   assert.equal(out.alreadyReviewed, true);
 });
 

@@ -1,10 +1,19 @@
-// 共创知识 Entry 服务（升级方案 M1）。
-// M1 范围：条目与修订的持久化 + 只读 lookup（喂「外部 Agent 答题前 lookup」飞轮）。
-// 可信阶梯的「评审/合并/信度分/异血统判定」是 M2，本层只落 proposed/sourced 数据，不做状态跃迁。
-import { db, fn } from '../database/db.js';
+// 共创知识 Entry 服务（升级方案 M1 + M2a 可信阶梯 + M2b 信度分/高光/缺口 + 审计加固）。
+// 飞轮前提：外部 Agent 答题前 lookup 只会拿到「可引用」的条目；写接口有证据门槛 + 限流；claims URL 防注入。
+import { db, fn, isMaria } from '../database/db.js';
+import { enqueueReview } from './moderationService.js';
+import { notifySystem } from './notificationService.js';
 
 export const ENTRY_DOMAINS = new Set(['office', 'writing', 'agents']);
 const ENTRY_STATES = new Set(['stub', 'proposed', 'sourced', 'corroborated', 'contested']);
+
+// 只有这两种状态可被当作「答案」引用（飞轮默认）；stub/contested/proposed 不进默认 lookup。
+const CITABLE_STATES = ['sourced', 'corroborated'];
+
+// 每 Agent 每天写上限（广场有爬坡限额，entries 也要防灌：一条坏 sourced 会被很多人引用）。
+const ENTRY_WRITE_CAP = Number(process.env.ENTRY_WRITE_CAP || 40);
+const HTTP_URL = /^https?:\/\//i;
+const isHttpUrl = (u) => HTTP_URL.test(String(u || '').trim());
 
 function safeJsonArray(v) {
   if (Array.isArray(v)) return v;
@@ -17,79 +26,108 @@ function slugify(s) {
     .replace(/^-+|-+$/g, '')
     .slice(0, 120);
 }
+// 清洗 Agent 提交的 claims：只保留 http/https 的 verified_against.url（防 javascript:/data: 注入），
+// 文本截断，非对象丢弃。
+function sanitizeClaims(claims) {
+  if (!Array.isArray(claims)) return [];
+  return claims.map((c) => {
+    if (!c || typeof c !== 'object') return null;
+    const out = { text: String(c.text ?? '').slice(0, 2000) };
+    const va = c.verified_against;
+    if (va && typeof va === 'object') {
+      out.verified_against = { note: String(va.note ?? '').slice(0, 500), checked_at: String(va.checked_at ?? '').slice(0, 40) };
+      const url = String(va.url ?? '').trim();
+      if (isHttpUrl(url)) out.verified_against.url = url.slice(0, 2000);
+    }
+    return out;
+  }).filter((x) => x && (x.text || (x.verified_against && x.verified_against.url)));
+}
+const claimsHaveAnchor = (claimsRaw) =>
+  safeJsonArray(claimsRaw).some((c) => c && c.verified_against && isHttpUrl(c.verified_against.url));
 
-// 归一化输出（camelCase），claims 解析为数组。
 function normalizeEntry(r) {
   if (!r) return null;
   return {
-    id: r.id,
-    domain: r.domain,
-    slug: r.slug || null,
-    title: r.title,
-    state: r.state,
-    curRev: r.cur_rev ?? null,
-    curatorAgentId: r.curator_agent_id ?? null,
-    bodyMd: r.body_md || '',
+    id: r.id, domain: r.domain, slug: r.slug || null, title: r.title, state: r.state,
+    curRev: r.cur_rev ?? null, curatorAgentId: r.curator_agent_id ?? null, bodyMd: r.body_md || '',
     excerpt: String(r.body_md || '').replace(/[#>*_`~]/g, '').replace(/\s+/g, ' ').trim().slice(0, 140),
-    claims: safeJsonArray(r.cur_claims),
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
+    claims: safeJsonArray(r.cur_claims), createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
 
-// 建条目 + 落首版修订（署名=提案 Agent）。domain 必须白名单，title 必填。
+// 当日写计数（建条目 + 提修订），跨 dialect。
+async function agentWritesToday(agentId) {
+  const dayEq = isMaria ? 'DATE(created_at) = CURDATE()' : "date(created_at) = date('now')";
+  const r = await db.get(
+    `SELECT (SELECT COUNT(*) FROM entries WHERE curator_agent_id = ? AND ${dayEq})
+          + (SELECT COUNT(*) FROM entry_revisions WHERE agent_id = ? AND ${dayEq}) AS c`,
+    [Number(agentId), Number(agentId)],
+  );
+  return Number(r?.c || 0);
+}
+const overCap = async (agentId) => (await agentWritesToday(agentId)) >= ENTRY_WRITE_CAP;
+
+// 建条目 + 落首版修订（署名=提案 Agent）。domain 白名单，title 必填，限流，claims 清洗。
 export async function createEntry({ agentId, domain, title, bodyMd = '', slug = null, claims = [] }) {
   const dom = String(domain || '').trim();
   const t = String(title || '').trim();
   if (!ENTRY_DOMAINS.has(dom)) return { error: 'bad_domain', message: `domain 必须是 ${[...ENTRY_DOMAINS].join(' / ')}` };
   if (!t) return { error: 'title_required' };
-  const sl = slug ? String(slug).trim() : slugify(t);
+  if (await overCap(agentId)) return { error: 'rate_limited', message: `每 Agent 每日写上限 ${ENTRY_WRITE_CAP} 条` };
 
-  let entryId;
-  let revId;
+  let sl = slug ? String(slug).trim().slice(0, 200) : slugify(t);
+  if (sl && await db.get(`SELECT 1 FROM entries WHERE domain = ? AND slug = ?`, [dom, sl])) {
+    sl = `${sl}-${Date.now().toString(36)}`; // 同域同 slug 冲突 → 加后缀，避免裸 500
+  }
+
+  let entryId, revId;
   await db.transaction(async (tx) => {
     const r = await tx.run(
       `INSERT INTO entries (domain, slug, title, body_md, state, curator_agent_id, status, created_at, updated_at)
        VALUES (@domain, @slug, @title, @body_md, 'proposed', @agent, 1, ${fn.now()}, ${fn.now()})`,
-      { domain: dom, slug: sl || null, title: t, body_md: String(bodyMd || ''), agent: agentId },
+      { domain: dom, slug: sl || null, title: t.slice(0, 500), body_md: String(bodyMd || ''), agent: agentId },
     );
     entryId = r.lastInsertRowid;
     const rev = await tx.run(
       `INSERT INTO entry_revisions (entry_id, agent_id, body_md, claims, state, created_at)
        VALUES (@entry, @agent, @body_md, @claims, 'proposed', ${fn.now()})`,
-      { entry: entryId, agent: agentId, body_md: String(bodyMd || ''), claims: JSON.stringify(claims) },
+      { entry: entryId, agent: agentId, body_md: String(bodyMd || ''), claims: JSON.stringify(sanitizeClaims(claims)) },
     );
     revId = rev.lastInsertRowid;
-    await tx.run(
-      `UPDATE entries SET cur_rev = @rev, updated_at = ${fn.now()} WHERE id = @entry`,
-      { rev: revId, entry: entryId },
-    );
+    await tx.run(`UPDATE entries SET cur_rev = @rev, updated_at = ${fn.now()} WHERE id = @entry`, { rev: revId, entry: entryId });
   });
-  const ev = await evaluateAndApply(entryId, revId); // 带可回链来源的初始版即标 sourced
+  const ev = await evaluateAndApply(entryId, revId);
   return { id: entryId, slug: sl || null, state: ev?.revisionState || 'proposed' };
 }
 
-// 提交一版修订（异步、不自动合并）：写 entry_revisions，state=proposed。
-// 合并到 cur_rev / 升 sourced·corroborated 是 M2 的评审环节。
+// 提交一版修订（异步、不自动合并；限流；claims 清洗）。
 export async function proposeRevision({ agentId, entryId, bodyMd = '', claims = [] }) {
-  const entry = await db.get(`SELECT id FROM entries WHERE id = ? AND status = 1`, [Number(entryId)]);
+  const entry = await db.get(`SELECT id, domain FROM entries WHERE id = ? AND status = 1`, [Number(entryId)]);
   if (!entry) return { error: 'entry_not_found' };
+  if (await overCap(agentId)) return { error: 'rate_limited', message: `每 Agent 每日写上限 ${ENTRY_WRITE_CAP} 条` };
   const rev = await db.run(
     `INSERT INTO entry_revisions (entry_id, agent_id, body_md, claims, state, created_at)
      VALUES (@entry, @agent, @body_md, @claims, 'proposed', ${fn.now()})`,
-    { entry: entry.id, agent: agentId, body_md: String(bodyMd || ''), claims: JSON.stringify(claims) },
+    { entry: entry.id, agent: agentId, body_md: String(bodyMd || ''), claims: JSON.stringify(sanitizeClaims(claims)) },
   );
   const revId = rev.lastInsertRowid;
   const ev = await evaluateAndApply(entry.id, revId);
   return { revisionId: revId, revisionState: ev?.revisionState || 'proposed', merged: !!ev?.merged };
 }
 
-// 只读 lookup：按域/关键词检索活跃条目，可信的排前（喂 Agent 答题前的引用）。
-export async function lookupEntries({ domain = null, q = '', limit = 10, offset = 0 } = {}) {
+// 只读 lookup。scope='answer'（默认，飞轮安全）→ 仅可引用态(sourced/corroborated)；
+// scope='all'（人浏览）→ 全部活跃态（含 proposed/stub/contested，供补充/透明）。
+export async function lookupEntries({ domain = null, q = '', limit = 10, offset = 0, scope = 'answer' } = {}) {
   const L = Math.max(1, Math.min(50, Number(limit) || 10));
   const O = Math.max(0, Number(offset) || 0);
   const where = [`e.status = 1`];
   const args = [];
+  if (scope === 'answer') {
+    where.push(`e.state IN (${CITABLE_STATES.map(() => '?').join(',')})`);
+    args.push(...CITABLE_STATES);
+  } else {
+    where.push(`e.state <> 'stub'`); // 浏览态：含 proposed/contested，但空缺口不在列表（缺口走广场悬赏）
+  }
   if (domain && ENTRY_DOMAINS.has(domain)) { where.push(`e.domain = ?`); args.push(domain); }
   if (q && q.trim()) { where.push(`(e.title LIKE ? OR e.body_md LIKE ?)`); const like = `%${q.trim()}%`; args.push(like, like); }
   const order = `ORDER BY CASE e.state WHEN 'corroborated' THEN 0 WHEN 'sourced' THEN 1 WHEN 'proposed' THEN 2 ELSE 3 END, e.updated_at DESC`;
@@ -103,28 +141,23 @@ export async function lookupEntries({ domain = null, q = '', limit = 10, offset 
   return { entries: rows.map(normalizeEntry), total: Number(total?.c || 0) };
 }
 
-// 单条详情（按 id 或 domain+slug）。公开只读。
+// 单条详情（按 id 或 slug；公开只读）。slug 跨域可能重名 → 取最早一条，确定性。
 export async function getEntry(idOrSlug, { domain = null } = {}) {
   const key = String(idOrSlug || '').trim();
   if (!key) return null;
   const byId = /^\d+$/.test(key);
+  const args = [];
+  let where = `e.status = 1`;
+  if (byId) { where += ` AND e.id = ?`; args.push(Number(key)); }
+  else { where += ` AND e.slug = ?`; args.push(key); if (domain && ENTRY_DOMAINS.has(domain)) { where += ` AND e.domain = ?`; args.push(domain); } }
   const sql = `SELECT e.*, rv.claims AS cur_claims FROM entries e
     LEFT JOIN entry_revisions rv ON rv.id = e.cur_rev
-    WHERE e.status = 1 AND ${byId ? 'e.id = ?' : 'e.slug = ?'}`;
-  const args = byId ? [Number(key)] : [key];
-  if (!byId && domain) return null; // slug 需配 domain 才唯一定位（M1 简化：只按 slug 取）
+    WHERE ${where} ORDER BY e.id ASC LIMIT 1`;
   return normalizeEntry(await db.get(sql, args));
 }
 
-export function validState(s) { return ENTRY_STATES.has(String(s || '').trim()); }
-
-// ── M2a 可信阶梯 ──────────────────────────────────────────────────────
-import { enqueueReview } from './moderationService.js';
-import { notifySystem } from './notificationService.js';
-
-// Agent 的「模型血统」——两档：外部 BYOB 用自带 ai_model；内部居民（ai_model 空）退化到
-// 各自独立的 preset（每个居民是独立运行、不共享记忆的写手，endorse 又必须附来源，
-// 故不同 preset 视作独立声音；同一 Agent 自评仍同血统，不算独立）。都取不到 → ''（未知，不计独立）。
+// ── 可信阶梯 ──────────────────────────────────────────────────────────
+// 模型血统两档：外部 BYOB 用 ai_model；居民 ai_model 空退化 preset:<id>（各自独立、不共享记忆）。
 export async function getUserModel(agentId) {
   const r = await db.get(`SELECT ai_model, preset_id FROM agent_profiles WHERE user_id = ?`, [Number(agentId)]);
   const m = String(r?.ai_model || '').trim().toLowerCase();
@@ -132,35 +165,28 @@ export async function getUserModel(agentId) {
   const p = String(r?.preset_id || '').trim().toLowerCase();
   return p ? `preset:${p}` : '';
 }
-
-// 是否「不同模型血统」——单一策略点，将来要改（如按厂商家族归并）只动这里。
-// 保守：任一方未知（空）都不算独立；两者都非空且不同才算。
+// 独立性=不同血统；任一方未知（空）都不算独立。单一策略点。
 export function isIndependentLineage(proposerModel, reviewerModel) {
   const a = (proposerModel || '').trim().toLowerCase();
   const b = (reviewerModel || '').trim().toLowerCase();
   return !!a && !!b && a !== b;
 }
 
-function claimsHaveAnchor(claimsRaw) {
-  return safeJsonArray(claimsRaw).some(
-    (c) => c && c.verified_against && /https?:\/\//i.test(String(c.verified_against.url || '')),
-  );
-}
-
-// 重算某修订版 state 并回写；corroborated 才把该版并入条目。返回评估摘要。
+// 重算某修订版 state 并回写；corroborated 才并入条目。含跃迁计分 + 争议入队 + 主人高光。
 export async function evaluateAndApply(entryId, revisionId) {
   const rev = await db.get(`SELECT * FROM entry_revisions WHERE id = ? AND entry_id = ?`, [Number(revisionId), Number(entryId)]);
   const entry = await db.get(`SELECT * FROM entries WHERE id = ? AND status = 1`, [Number(entryId)]);
   if (!rev || !entry) return { error: 'not_found' };
 
   const proposerModel = await getUserModel(rev.agent_id);
-  const reviews = await db.all(`SELECT agent_id, verdict FROM entry_reviews WHERE revision_id = ?`, [rev.id]);
+  const reviews = await db.all(`SELECT agent_id, verdict, evidence FROM entry_reviews WHERE revision_id = ?`, [rev.id]);
 
   let challenged = false;
   let independentEndorses = 0;
   for (const rv of reviews) {
-    if (rv.verdict === 'challenge') challenged = true;
-    else if (rv.verdict === 'endorse') {
+    const hasEvidence = isHttpUrl(rv.evidence);
+    if (rv.verdict === 'challenge') { if (rv.evidence && rv.evidence.trim()) challenged = true; }
+    else if (rv.verdict === 'endorse' && hasEvidence) {
       const m = await getUserModel(rv.agent_id);
       if (isIndependentLineage(proposerModel, m)) independentEndorses++;
     }
@@ -171,34 +197,27 @@ export async function evaluateAndApply(entryId, revisionId) {
   else if (independentEndorses >= 1) revState = 'corroborated';
   else if (claimsHaveAnchor(rev.claims)) revState = 'sourced';
   else revState = 'proposed';
-  const prevRevState = rev.state; // 跃迁检测基线
+  const prevRevState = rev.state;
 
   await db.run(`UPDATE entry_revisions SET state = ?, reviewed_at = ${fn.now()} WHERE id = ?`, [revState, rev.id]);
 
   let merged = false;
   if (revState === 'corroborated') {
-    // 合并：把该版提升为条目当前版
-    await db.run(
-      `UPDATE entries SET cur_rev = ?, body_md = ?, state = 'corroborated', updated_at = ${fn.now()} WHERE id = ?`,
-      [rev.id, rev.body_md || '', entry.id],
-    );
+    await db.run(`UPDATE entries SET cur_rev = ?, body_md = ?, state = 'corroborated', updated_at = ${fn.now()} WHERE id = ?`, [rev.id, rev.body_md || '', entry.id]);
     merged = true;
   } else if (Number(entry.cur_rev) === Number(rev.id)) {
-    // 未合并但正是当前版（如初始版有来源 → sourced）：条目 state 跟随
     await db.run(`UPDATE entries SET state = ?, updated_at = ${fn.now()} WHERE id = ?`, [revState, entry.id]);
   }
 
-  if (revState === 'contested') {
-    // 争议 → 进现有审核队列（人工/LLM 复扫）；不阻断，失败忽略
+  if (revState === 'contested' && prevRevState !== 'contested') {
     try { await enqueueReview({ targetType: 'entry', targetId: entry.id, agentId: rev.agent_id, source: 'entry_contested', reason: 'entry revision challenged' }); }
-    catch { /* 审核队列表若缺列等异常，不影响评审记录落库 */ }
+    catch { /* 审核队列表异常不影响评审落库 */ }
   }
 
-  // ── 贡献分（跃迁感知，防刷：进/出某态各只记一次，被推翻则回吐 promoted）──
   try {
     if (prevRevState !== 'corroborated' && revState === 'corroborated') {
       await adjustContrib(rev.agent_id, entry.domain, 'promoted', +1);
-      await notifyOwnerOnPromotion(rev.agent_id, entry);
+      await notifyOwnerOnPromotion(rev.agent_id, entry, rev.id);
     } else if (prevRevState === 'corroborated' && revState !== 'corroborated') {
       await adjustContrib(rev.agent_id, entry.domain, 'promoted', -1);
     }
@@ -207,94 +226,92 @@ export async function evaluateAndApply(entryId, revisionId) {
   } catch (e) { console.warn('[entry] contrib score/notify failed (ignored):', e?.message || e); }
 
   return {
-    revisionId: rev.id, entryId: entry.id,
-    revisionState: revState, merged,
+    revisionId: rev.id, entryId: entry.id, revisionState: revState, merged,
     challenged, independentEndorses,
     entryState: revState === 'corroborated' ? 'corroborated'
       : (Number(entry.cur_rev) === Number(rev.id) ? revState : entry.state),
   };
 }
 
-// upsert 每域贡献分（read-then-write，低量足够；避免方言化 ON CONFLICT/ODKU 差异）。
+// upsert 每域贡献分（UPDATE 用原子自增，减少并发丢更新；下限夹 0）。
 export async function adjustContrib(agentId, domain, field, delta) {
   const a = Number(agentId), d = String(domain || '').trim();
   if (!a || !d) return;
-  const cur = await db.get(`SELECT agent_id, domain, promoted, contested FROM entry_contrib_score WHERE agent_id = ? AND domain = ?`, [a, d]);
-  const promoted = Number(cur?.promoted || 0), contested = Number(cur?.contested || 0);
-  const nextP = Math.max(0, promoted + (field === 'promoted' ? delta : 0));
-  const nextC = Math.max(0, contested + (field === 'contested' ? delta : 0));
-  if (cur) {
-    await db.run(`UPDATE entry_contrib_score SET promoted = ?, contested = ?, updated_at = ${fn.now()} WHERE agent_id = ? AND domain = ?`, [nextP, nextC, a, d]);
-  } else {
-    await db.run(`INSERT INTO entry_contrib_score (agent_id, domain, promoted, contested, updated_at) VALUES (?, ?, ?, ?, ${fn.now()})`, [a, d, nextP, nextC]);
-  }
-}
-
-// 知识缺口 → 立一张 stub 条目 + 尽力发一条广场悬赏帖（发帖受反灌水/限额约束，失败不影响建缺口）。
-export async function raiseGap({ agentId, domain, question }) {
-  const dom = String(domain || '').trim();
-  const q = String(question || '').trim();
-  if (!ENTRY_DOMAINS.has(dom)) return { error: 'bad_domain' };
-  if (!q) return { error: 'question_required' };
-  const r = await db.run(
-    `INSERT INTO entries (domain, slug, title, body_md, state, curator_agent_id, status, created_at, updated_at)
-     VALUES (@domain, NULL, @title, '', 'stub', @agent, 1, ${fn.now()}, ${fn.now()})`,
-    { domain: dom, title: q.slice(0, 490), agent: Number(agentId) },
+  const col = field === 'contested' ? 'contested' : 'promoted';
+  const upd = await db.run(
+    `UPDATE entry_contrib_score SET ${col} = MAX(0, ${col} + ?), updated_at = ${fn.now()} WHERE agent_id = ? AND domain = ?`,
+    [delta, a, d],
   );
-  const entryId = r.lastInsertRowid;
-
-  let bountyPosted = false, bountyTopicId = null, bountyError = null;
-  try {
-    const { createTopic, PLAZA_TAGS } = await import('./plazaService.js');
-    const tag = (PLAZA_TAGS && PLAZA_TAGS[PLAZA_TAGS.length - 1]) || '吐槽大会';
-    const t = await createTopic({
-      agentId: Number(agentId),
-      tag,
-      content: `【知识悬赏】有人问「${q.slice(0, 120)}」，社区还没有带出处的靠谱条目。若你有可回链的官方来源，欢迎在 AI 圈建/补这个知识条目。`,
-    });
-    bountyPosted = !!t?.id; bountyTopicId = t?.id ?? null;
-  } catch (e) {
-    bountyError = e?.message || String(e);
+  if (!upd || Number(upd.changes ?? 0) === 0) {
+    await db.run(
+      `INSERT INTO entry_contrib_score (agent_id, domain, promoted, contested, updated_at) VALUES (?, ?, ?, ?, ${fn.now()})`,
+      [a, d, field === 'promoted' ? Math.max(0, delta) : 0, field === 'contested' ? Math.max(0, delta) : 0],
+    );
   }
-  return { id: entryId, state: 'stub', bountyPosted, bountyTopicId, bountyError };
 }
 
-// 对外：某 Agent 在某域的信度（净采纳数 + 被推翻数）。
 export async function getDomainScore(agentId, domain) {
   const r = await db.get(`SELECT promoted, contested FROM entry_contrib_score WHERE agent_id = ? AND domain = ?`, [Number(agentId), String(domain || '').trim()]);
   const promoted = Number(r?.promoted || 0), contested = Number(r?.contested || 0);
   return { agentId: Number(agentId), domain, promoted, contested, net: promoted - contested };
 }
 
-// 主人高光：修订被采纳 → 给 Agent 归属主人发一条系统站内信（须传 dedupeScope，防与摘要/家书互吞）。
-async function notifyOwnerOnPromotion(agentId, entry) {
+// 主人高光（dedupeScope 用 revisionId，非旧 cur_rev）；内部居民无 owner → 跳过。
+async function notifyOwnerOnPromotion(agentId, entry, revisionId) {
   const owner = await db.get(`SELECT owner_id FROM users WHERE id = ?`, [Number(agentId)]);
-  if (!owner || !owner.owner_id) return; // 内部居民无主人 → 跳过
+  if (!owner || !owner.owner_id) return;
   await notifySystem({
     userId: Number(owner.owner_id),
     type: 'entry_promoted',
-    dedupeScope: `entry_promoted:rev:${entry.cur_rev ?? 'x'}`,
+    dedupeScope: `entry_promoted:rev:${revisionId}`,
     extra: { entryId: entry.id, title: entry.title, domain: entry.domain, snippet: '你家 AI 的一条知识修订被采纳，成了社区当前版' },
   });
 }
 
-// 评审一版（endorse/challenge）。一人一版只评一次（UNIQUE）。
+// 评审一版（endorse/challenge）。一人一版只评一次；必须有证据（endorse 要可回链来源、challenge 要写理由）。
 export async function reviewRevision({ agentId, revisionId, verdict, evidence = '' }) {
   const v = String(verdict || '').trim().toLowerCase();
   if (v !== 'endorse' && v !== 'challenge') return { error: 'bad_verdict', message: 'verdict 仅 endorse / challenge' };
+  const ev = String(evidence || '').trim();
+  if (v === 'endorse' && !isHttpUrl(ev)) return { error: 'evidence_required', message: '背书必须附可回链来源 URL（防无据共识）' };
+  if (v === 'challenge' && !ev) return { error: 'evidence_required', message: '质疑必须写明理由/反证（防刷 contested）' };
+  if (await overCap(agentId)) return { error: 'rate_limited', message: `每 Agent 每日写上限 ${ENTRY_WRITE_CAP} 条` };
+
   const rev = await db.get(`SELECT id, entry_id FROM entry_revisions WHERE id = ?`, [Number(revisionId)]);
   if (!rev) return { error: 'revision_not_found' };
 
-  // 方言可移植的幂等插入：SQLite INSERT OR IGNORE / MariaDB INSERT IGNORE（命中 UNIQUE(revision_id,agent_id) 即跳过）
   const res = await db.insertIgnore('entry_reviews', {
-    revision_id: rev.id,
-    entry_id: rev.entry_id,
-    agent_id: Number(agentId),
-    verdict: v,
-    evidence: String(evidence || ''),
+    revision_id: rev.id, entry_id: rev.entry_id, agent_id: Number(agentId), verdict: v,
+    evidence: v === 'endorse' ? ev.slice(0, 2000) : ev.slice(0, 1000),
   });
-
   const alreadyReviewed = !res || Number(res.changes ?? 0) === 0;
   const evaluated = await evaluateAndApply(rev.entry_id, rev.id);
   return { ...evaluated, alreadyReviewed };
+}
+
+export function validState(s) { return ENTRY_STATES.has(String(s || '').trim()); }
+
+// 知识缺口 → 立 stub 条目 + 尽力发广场悬赏帖（tag 专用，发帖失败不影响建缺口；限流）。
+export async function raiseGap({ agentId, domain, question }) {
+  const dom = String(domain || '').trim();
+  const q = String(question || '').trim();
+  if (!ENTRY_DOMAINS.has(dom)) return { error: 'bad_domain' };
+  if (!q) return { error: 'question_required' };
+  if (await overCap(agentId)) return { error: 'rate_limited', message: `每 Agent 每日写上限 ${ENTRY_WRITE_CAP} 条` };
+  const r = await db.run(
+    `INSERT INTO entries (domain, slug, title, body_md, state, curator_agent_id, status, created_at, updated_at)
+     VALUES (@domain, NULL, @title, '', 'stub', @agent, 1, ${fn.now()}, ${fn.now()})`,
+    { domain: dom, title: q.slice(0, 490), agent: Number(agentId) },
+  );
+  const entryId = r.lastInsertRowid;
+  let bountyPosted = false, bountyTopicId = null, bountyError = null;
+  try {
+    const { createTopic } = await import('./plazaService.js');
+    const t = await createTopic({
+      agentId: Number(agentId), tag: '知识悬赏',
+      content: `【知识悬赏】有人问「${q.slice(0, 120)}」，社区还没有带出处的靠谱条目。若你有可回链的官方来源，欢迎在 AI 圈建/补这个知识条目。`,
+    });
+    bountyPosted = !!t?.id; bountyTopicId = t?.id ?? null;
+  } catch (e) { bountyError = e?.message || String(e); }
+  return { id: entryId, state: 'stub', bountyPosted, bountyTopicId, bountyError };
 }

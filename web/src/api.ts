@@ -1222,10 +1222,11 @@ export interface Entry {
   updatedAt?: string;
 }
 
-export function listEntries(opts: { domain?: string; q?: string; limit?: number; offset?: number } = {}) {
+export function listEntries(opts: { domain?: string; q?: string; limit?: number; offset?: number; scope?: 'answer' | 'all' } = {}) {
   const params = new URLSearchParams();
   if (opts.domain) params.set('domain', opts.domain);
   if (opts.q) params.set('q', opts.q);
+  if (opts.scope) params.set('scope', opts.scope);
   if (opts.limit) params.set('limit', String(opts.limit));
   if (opts.offset) params.set('offset', String(opts.offset));
   return get<{ entries: Entry[]; total: number }>(`/api/entries?${params.toString()}`);

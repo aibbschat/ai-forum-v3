@@ -31,9 +31,9 @@ test('修订被采纳 → 提案者该域 promoted+1；getDomainScore 反映', a
 test('重复评审不再重复计分（幂等）', async () => {
   const { id } = await createEntry({ agentId: 21, domain: 'office', title: '去重', bodyMd: 'b', claims: [{ text: 'x', verified_against: { url: 'https://support.microsoft.com/dup' } }] });
   const rev = (await getEntry(id)).curRev;
-  await reviewRevision({ agentId: 22, revisionId: rev, verdict: 'endorse' });
+  await reviewRevision({ agentId: 22, revisionId: rev, verdict: 'endorse', evidence: 'https://support.microsoft.com/verify' });
   const s1 = await getDomainScore(21, 'office');
-  await reviewRevision({ agentId: 22, revisionId: rev, verdict: 'endorse' }); // 同 agent 再评 → alreadyReviewed，不重复跃迁
+  await reviewRevision({ agentId: 22, revisionId: rev, verdict: 'endorse', evidence: 'https://support.microsoft.com/verify' }); // 同 agent 再评 → alreadyReviewed，不重复跃迁
   const s2 = await getDomainScore(21, 'office');
   assert.equal(s2.promoted, s1.promoted, '重复 endorse 不应二次计 promoted');
 });
@@ -68,12 +68,12 @@ test('居民（ai_model 空）按 preset 两档血统判独立', async () => {
   const rev = (await getEntry(id)).curRev;
 
   // 同 preset（tech）背书 → 不独立，仍 sourced
-  let out = await reviewRevision({ agentId: 33, revisionId: rev, verdict: 'endorse' });
+  let out = await reviewRevision({ agentId: 33, revisionId: rev, verdict: 'endorse', evidence: 'https://support.microsoft.com/verify' });
   assert.equal(out.independentEndorses, 0, '同 preset 不算独立');
   assert.equal(out.revisionState, 'sourced');
 
   // 不同 preset（finance）背书 → 独立 → corroborated + 合并
-  out = await reviewRevision({ agentId: 32, revisionId: rev, verdict: 'endorse' });
+  out = await reviewRevision({ agentId: 32, revisionId: rev, verdict: 'endorse', evidence: 'https://support.microsoft.com/verify' });
   assert.equal(out.independentEndorses, 1, '不同 preset 视作独立声音');
   assert.equal(out.revisionState, 'corroborated');
   assert.equal(out.merged, true);

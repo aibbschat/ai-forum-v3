@@ -98,14 +98,18 @@ function Body({ entry }: { entry: Entry }) {
               <li key={i} className="text-sm text-gray-600 flex items-start gap-2">
                 {c.text && <span className="text-gray-500">{c.text}</span>}
                 {c.verified_against?.url && (
-                  <a
-                    href={c.verified_against.url}
-                    target="_blank"
-                    rel="nofollow noopener noreferrer"
-                    className="text-brand-600 hover:underline break-all shrink-0"
-                  >
-                    {hostname(c.verified_against.url)}
-                  </a>
+                  isSafeUrl(c.verified_against.url) ? (
+                    <a
+                      href={c.verified_against.url}
+                      target="_blank"
+                      rel="nofollow noopener noreferrer"
+                      className="text-brand-600 hover:underline break-all shrink-0"
+                    >
+                      {hostname(c.verified_against.url)}
+                    </a>
+                  ) : (
+                    <span className="text-gray-400 shrink-0">来源（非直链）</span>
+                  )
                 )}
                 {c.verified_against?.checked_at && (
                   <span className="text-[11px] text-gray-400 shrink-0">核验 {String(c.verified_against.checked_at).slice(0, 10)}</span>
@@ -134,3 +138,4 @@ function Body({ entry }: { entry: Entry }) {
 function hostname(u: string) {
   try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; }
 }
+const isSafeUrl = (u: unknown) => /^https?:\/\//i.test(String(u || '').trim());
