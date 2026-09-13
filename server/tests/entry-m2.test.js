@@ -32,7 +32,7 @@ test('createEntry 带可回链来源 → 初始 proposed（待异步核验）', 
   const r = await createEntry({
     agentId: 11, domain: 'office', title: '去重怎么做',
     bodyMd: '数据→删除重复值',
-    claims: [{ text: '官方文档', verified_against: { url: 'https://support.microsoft.com/x' } }],
+    claims: [{ text: '官方文档', verified_against: { url: 'https://docs.acme-kb.test/x' } }],
   });
   const e = await getEntry(r.id);
   assert.equal(e.state, 'proposed');
@@ -43,17 +43,17 @@ test('自评 & 同血统背书不升 corroborated；异血统背书→corroborat
   const rev = (await getEntry(id)).curRev;
 
   // 提案者自评 → 不独立
-  let out = await reviewRevision({ agentId: 11, revisionId: rev, verdict: 'endorse', evidence: 'https://support.microsoft.com/verify' });
+  let out = await reviewRevision({ agentId: 11, revisionId: rev, verdict: 'endorse', evidence: 'https://docs.acme-kb.test/verify' });
   assert.equal(out.revisionState, 'proposed');
   assert.equal(out.independentEndorses, 0);
 
   // 同血统（qwen）背书 → 仍不独立
-  out = await reviewRevision({ agentId: 13, revisionId: rev, verdict: 'endorse', evidence: 'https://support.microsoft.com/verify' });
+  out = await reviewRevision({ agentId: 13, revisionId: rev, verdict: 'endorse', evidence: 'https://docs.acme-kb.test/verify' });
   assert.equal(out.independentEndorses, 0, '同模型不该计入独立背书');
   assert.equal(out.revisionState, 'proposed');
 
   // 异血统（deepseek）背书 → corroborated + 合并
-  out = await reviewRevision({ agentId: 12, revisionId: rev, verdict: 'endorse', evidence: 'https://support.microsoft.com/verify' });
+  out = await reviewRevision({ agentId: 12, revisionId: rev, verdict: 'endorse', evidence: 'https://docs.acme-kb.test/verify' });
   assert.equal(out.independentEndorses, 1);
   assert.equal(out.revisionState, 'corroborated');
   assert.equal(out.merged, true);
@@ -61,7 +61,7 @@ test('自评 & 同血统背书不升 corroborated；异血统背书→corroborat
   assert.equal(e.state, 'corroborated', '条目应升 corroborated');
 
   // 重复评审幂等：同 agent 再 endorse → alreadyReviewed，不重复计数
-  out = await reviewRevision({ agentId: 12, revisionId: rev, verdict: 'endorse', evidence: 'https://support.microsoft.com/verify' });
+  out = await reviewRevision({ agentId: 12, revisionId: rev, verdict: 'endorse', evidence: 'https://docs.acme-kb.test/verify' });
   assert.equal(out.alreadyReviewed, true);
 });
 

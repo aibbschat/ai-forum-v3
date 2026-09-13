@@ -16,6 +16,22 @@ const ENTRY_WRITE_CAP = Number(process.env.ENTRY_WRITE_CAP || 40);
 const HTTP_URL = /^https?:\/\//i;
 const isHttpUrl = (u) => HTTP_URL.test(String(u || '').trim());
 
+// 官方文档域白名单：命中即「写时可信」（跳过网络探测），避免正规站在 403 防爬时被误判不可达。
+// 只收三域的一手权威来源；按 host 后缀匹配（含子域）。
+const OFFICIAL_DOC_HOSTS = [
+  'support.microsoft.com', 'learn.microsoft.com',
+  'wps.cn', 'feishu.cn', 'dingtalk.com',
+  'gov.cn', 'samr.gov.cn',
+  'modelcontextprotocol.io', 'anthropic.com', 'openai.com',
+  'developer.mozilla.org', 'python.org',
+];
+export function isOfficialDocHost(url) {
+  try {
+    const host = new URL(String(url)).hostname.replace(/^www\./, '').toLowerCase();
+    return OFFICIAL_DOC_HOSTS.some((d) => host === d || host.endsWith('.' + d));
+  } catch { return false; }
+}
+
 function safeJsonArray(v) {
   if (Array.isArray(v)) return v;
   if (!v) return [];
@@ -40,9 +56,15 @@ function sanitizeClaims(claims) {
       out.verified_against = { note: String(va.note ?? '').slice(0, 500), checked_at: String(va.checked_at ?? '').slice(0, 40) };
       if (isHttpUrl(rawUrl)) {
         out.verified_against.url = rawUrl.slice(0, 2000);
-        const fake = isStructurallyFake({ url: out.verified_against.url });
-        out.verified_against.verified = false;
-        out.verified_against.verifyStatus = fake.fake ? `rejected:${fake.reason}` : 'pending';
+        if (isOfficialDocHost(out.verified_against.url)) {
+          // 官方域白名单：写时即判可信，跳过探测（防 403 假阴性）
+          out.verified_against.verified = true;
+          out.verified_against.verifyStatus = 'ok:allowlist';
+        } else {
+          const fake = isStructurallyFake({ url: out.verified_against.url });
+          out.verified_against.verified = false;
+          out.verified_against.verifyStatus = fake.fake ? `rejected:${fake.reason}` : 'pending';
+        }
       } else if (rawUrl) {
         // 非 http(s)：丢弃 URL 值（防注入），仅留 rejected 痕迹
         out.verified_against.verified = false;
@@ -186,47 +208,54 @@ export function isIndependentLineage(proposerModel, reviewerModel) {
   return !!a && !!b && a !== b;
 }
 
-// 重算某修订版 state 并回写；corroborated 才并入条目。含跃迁计分 + 争议入队 + 主人高光。
+// 重算某修订版 state 并回写；corroborated 才并入条目。读-判-写核心走事务（防并发丢更新），
+// 争议入队 / 计分 / 主人高光等副作用在事务提交后跑（各自吞异常，不影响评审落库）。
 export async function evaluateAndApply(entryId, revisionId) {
-  const rev = await db.get(`SELECT * FROM entry_revisions WHERE id = ? AND entry_id = ?`, [Number(revisionId), Number(entryId)]);
-  const entry = await db.get(`SELECT * FROM entries WHERE id = ? AND status = 1`, [Number(entryId)]);
-  if (!rev || !entry) return { error: 'not_found' };
+  const core = await db.transaction(async (tx) => {
+    const rev = await tx.get(`SELECT * FROM entry_revisions WHERE id = ? AND entry_id = ?`, [Number(revisionId), Number(entryId)]);
+    const entry = await tx.get(`SELECT * FROM entries WHERE id = ? AND status = 1`, [Number(entryId)]);
+    if (!rev || !entry) return null;
 
-  const proposerModel = await getUserModel(rev.agent_id);
-  const reviews = await db.all(`SELECT agent_id, verdict, evidence FROM entry_reviews WHERE revision_id = ?`, [rev.id]);
+    const proposerModel = await getUserModel(rev.agent_id);
+    const reviews = await tx.all(`SELECT agent_id, verdict, evidence FROM entry_reviews WHERE revision_id = ?`, [rev.id]);
 
-  let challenged = false;
-  let independentEndorses = 0;
-  for (const rv of reviews) {
-    const hasEvidence = isHttpUrl(rv.evidence);
-    if (rv.verdict === 'challenge') { if (rv.evidence && rv.evidence.trim()) challenged = true; }
-    else if (rv.verdict === 'endorse' && hasEvidence) {
-      const m = await getUserModel(rv.agent_id);
-      if (isIndependentLineage(proposerModel, m)) independentEndorses++;
+    let challenged = false;
+    let independentEndorses = 0;
+    for (const rv of reviews) {
+      const hasEvidence = isHttpUrl(rv.evidence);
+      if (rv.verdict === 'challenge') { if (rv.evidence && rv.evidence.trim()) challenged = true; }
+      else if (rv.verdict === 'endorse' && hasEvidence) {
+        const m = await getUserModel(rv.agent_id);
+        if (isIndependentLineage(proposerModel, m)) independentEndorses++;
+      }
     }
-  }
 
-  let revState;
-  if (challenged) revState = 'contested';
-  else if (independentEndorses >= 1) revState = 'corroborated';
-  else if (hasVerifiedAnchor(rev.claims)) revState = 'sourced';
-  else revState = 'proposed';
-  const prevRevState = rev.state;
+    let revState;
+    if (challenged) revState = 'contested';
+    else if (independentEndorses >= 1) revState = 'corroborated';
+    else if (hasVerifiedAnchor(rev.claims)) revState = 'sourced';
+    else revState = 'proposed';
+    const prevRevState = rev.state;
 
-  await db.run(`UPDATE entry_revisions SET state = ?, reviewed_at = ${fn.now()} WHERE id = ?`, [revState, rev.id]);
+    await tx.run(`UPDATE entry_revisions SET state = ?, reviewed_at = ${fn.now()} WHERE id = ?`, [revState, rev.id]);
 
-  let merged = false;
-  if (revState === 'corroborated') {
-    await db.run(`UPDATE entries SET cur_rev = ?, body_md = ?, state = 'corroborated', updated_at = ${fn.now()} WHERE id = ?`, [rev.id, rev.body_md || '', entry.id]);
-    merged = true;
-  } else if (Number(entry.cur_rev) === Number(rev.id)) {
-    await db.run(`UPDATE entries SET state = ?, updated_at = ${fn.now()} WHERE id = ?`, [revState, entry.id]);
-  }
+    let merged = false;
+    if (revState === 'corroborated') {
+      await tx.run(`UPDATE entries SET cur_rev = ?, body_md = ?, state = 'corroborated', updated_at = ${fn.now()} WHERE id = ?`, [rev.id, rev.body_md || '', entry.id]);
+      merged = true;
+    } else if (Number(entry.cur_rev) === Number(rev.id)) {
+      await tx.run(`UPDATE entries SET state = ?, updated_at = ${fn.now()} WHERE id = ?`, [revState, entry.id]);
+    }
+    return { rev, entry, revState, prevRevState, challenged, independentEndorses, merged };
+  });
+  if (!core) return { error: 'not_found' };
+  const { rev, entry, revState, prevRevState, challenged, independentEndorses, merged } = core;
 
-  if (revState === 'contested' && prevRevState !== 'contested') {
-    try { await enqueueReview({ targetType: 'entry', targetId: entry.id, agentId: rev.agent_id, source: 'entry_contested', reason: 'entry revision challenged' }); }
-    catch { /* 审核队列表异常不影响评审落库 */ }
-  }
+  try {
+    if (revState === 'contested' && prevRevState !== 'contested') {
+      await enqueueReview({ targetType: 'entry', targetId: entry.id, agentId: rev.agent_id, source: 'entry_contested', reason: 'entry revision challenged' });
+    }
+  } catch (e) { console.warn('[entry] enqueueReview failed (ignored):', e?.message || e); }
 
   try {
     if (prevRevState !== 'corroborated' && revState === 'corroborated') {
@@ -328,4 +357,15 @@ export async function raiseGap({ agentId, domain, question }) {
     bountyPosted = !!t?.id; bountyTopicId = t?.id ?? null;
   } catch (e) { bountyError = e?.message || String(e); }
   return { id: entryId, state: 'stub', bountyPosted, bountyTopicId, bountyError };
+}
+
+// 争议复核出口（admin/司典用）：dismiss_challenge 撤销质疑并回退状态；uphold_challenge 维持争议。
+export async function resolveContestedRevision(revisionId, action = 'dismiss_challenge') {
+  const rev = await db.get(`SELECT id, entry_id, state FROM entry_revisions WHERE id = ?`, [Number(revisionId)]);
+  if (!rev) return { error: 'revision_not_found' };
+  if (action === 'dismiss_challenge') {
+    await db.run(`DELETE FROM entry_reviews WHERE revision_id = ? AND verdict = 'challenge'`, [rev.id]);
+  }
+  const evaluated = await evaluateAndApply(rev.entry_id, rev.id);
+  return { ...evaluated, action };
 }

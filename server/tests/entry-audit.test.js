@@ -11,6 +11,7 @@ const { db } = await import('../database/db.js');
 await db.ensureEntriesTables();
 const {
   createEntry, reviewRevision, getEntry, lookupEntries, raiseGap, evaluateAndApply,
+  isOfficialDocHost, resolveContestedRevision,
 } = await import('../services/entryService.js');
 
 async function seedAgent(id, model) {
@@ -70,14 +71,40 @@ test('contested 条目不进 answer 引用（被质疑的不当答案）', async
 
 test('异步核验回填 verified → proposed 升 sourced 并进 answer', async () => {
   const tok = 'AUDVEROK';
-  const { id } = await createEntry({ agentId: 41, domain: 'office', title: `核源 ${tok}`, bodyMd: `${tok} 正文`, claims: [{ text: 'x', verified_against: { url: 'https://support.microsoft.com/help/pivot' } }] });
+  const { id } = await createEntry({ agentId: 41, domain: 'office', title: `核源 ${tok}`, bodyMd: `${tok} 正文`, claims: [{ text: 'x', verified_against: { url: 'https://docs.acme-kb.test/help/pivot' } }] });
   const rev = (await getEntry(id)).curRev;
   assert.equal((await getEntry(id)).state, 'proposed', '未核验前是 proposed');
   // 模拟 verify tick 回填：把该 claim 标 verified 并触发重算
   await db.run(`UPDATE entry_revisions SET claims = ? WHERE id = ?`,
-    [JSON.stringify([{ text: 'x', verified_against: { url: 'https://support.microsoft.com/help/pivot', verified: true, verifyStatus: 'ok:200' } }]), rev]);
+    [JSON.stringify([{ text: 'x', verified_against: { url: 'https://docs.acme-kb.test/help/pivot', verified: true, verifyStatus: 'ok:200' } }]), rev]);
   await evaluateAndApply(id, rev);
   assert.equal((await getEntry(id)).state, 'sourced', '来源可达核验后升 sourced');
   const ans = await lookupEntries({ domain: 'office', q: tok, scope: 'answer' });
   assert.ok(ans.entries.some((e) => e.id === id), 'sourced 后才进 answer 引用');
+});
+
+test('官方域白名单：命中即 sourced（跳过探测）', async () => {
+  assert.equal(isOfficialDocHost('https://openai.com/x'), true);
+  assert.equal(isOfficialDocHost('https://kb.acme-kb.test/x'), false);
+  const { id } = await createEntry({
+    agentId: 41, domain: 'agents', title: '函数调用 Function Calling', bodyMd: 'b',
+    claims: [{ text: 'OpenAI 工具调用文档', verified_against: { url: 'https://platform.openai.com/docs/guides/function-calling' } }],
+  });
+  const e = await getEntry(id);
+  assert.equal(e.state, 'sourced', '白名单域写时即可引用');
+  assert.equal(e.claims[0].verified_against.verifyStatus, 'ok:allowlist');
+});
+
+test('争议复核：dismiss_challenge 解除 contested', async () => {
+  // 白名单锚 → 初始 sourced；被异血统带证据质疑 → contested 掉出 answer
+  const { id } = await createEntry({ agentId: 41, domain: 'agents', title: '被复核的条目', bodyMd: 'b', claims: [{ text: 'x', verified_against: { url: 'https://modelcontextprotocol.io/introduction' } }] });
+  const rev = (await getEntry(id)).curRev;
+  await reviewRevision({ agentId: 42, revisionId: rev, verdict: 'challenge', evidence: '该说法已过时，反证见链接' });
+  assert.equal((await getEntry(id)).state, 'contested');
+  const ans = await lookupEntries({ domain: 'agents', q: '被复核的条目', scope: 'answer' });
+  assert.ok(!ans.entries.some((e) => e.id === id), 'contested 不该在 answer 池');
+  // 复核撤销质疑 → 回到 sourced
+  const r = await resolveContestedRevision(rev, 'dismiss_challenge');
+  assert.equal(r.revisionState, 'sourced');
+  assert.equal((await getEntry(id)).state, 'sourced');
 });

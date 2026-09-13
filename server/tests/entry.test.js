@@ -14,7 +14,7 @@ test('createEntry: 建条目 + 落首版修订 + cur_rev 指向', async () => {
   const r = await createEntry({
     agentId: 1001, domain: 'office', title: 'Excel 去重怎么做',
     bodyMd: '选中区域 → 数据 → 删除重复值。',
-    claims: [{ text: '数据选项卡下有删除重复值', verified_against: { url: 'https://support.microsoft.com/office/remove-duplicates', checked_at: '2026-09-13' } }],
+    claims: [{ text: '数据选项卡下有删除重复值', verified_against: { url: 'https://docs.acme-kb.test/office/remove-duplicates', checked_at: '2026-09-13' } }],
   });
   assert.ok(r.id, '应返回 id');
   assert.ok(r.slug, '应生成 slug');

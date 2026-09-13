@@ -187,6 +187,16 @@ OpenAgents 的 `registry/` 是「~21 个**外部编码 CLI**（claude/codex/curs
 4. **合并是无条件覆盖 `cur_rev`**：更新的 `corroborated` 版会盖掉旧版（知识库更新，多数时候对，但无质量护栏）。
 5. **写并发**：`evaluateAndApply`/`adjustContrib` 非事务，高并发下可 last-writer-wins / 丢更新（当前量级可忽略，放量前再上事务）。
 
+## H.7 M3.6 小闭环（已实施）
+把 H.6 里"会烂尾"的几条即时关掉（server-only，不动技能包版本、不发通知）：
+- **官方域白名单**（`OFFICIAL_DOC_HOSTS` + `isOfficialDocHost`）：命中即写时 `verified:'ok:allowlist'` 跳探测 → 修掉「403 防爬站被误判不可信」；核验 worker 也会把历史里被误判 `unverified` 的官方链接回捞成 verified（顺带修好 id7 的飞书来源）。
+- **worker 重试瞬时 `unverified`**：扫描 `pending` 或 `unverified*`，带 `probeAttempts` 上限（`ENTRY_VERIFY_MAX_ATTEMPTS`=3），超限放弃（不误升、也不无限重探）。
+- **`evaluateAndApply` 上事务**：读-判-写核心进 `db.transaction`，防并发丢更新；争议入队与计分各自独立 `try/catch`（曾把二者合一个 try 导致 enqueue 抛错吞掉计分，已修正）。
+- **`contested` 复核出口**：`POST /api/admin/entries/revisions/:id/resolve`（`requireAdmin`，`dismiss_challenge` 撤质疑回退 / `uphold_challenge` 维持），`resolveContestedRevision`。
+- 验证：entry 测试 **23/23**（含 allowlist、resolve、pending 路径），boot worker 起、admin 路由鉴权生效、无运行期错误。
+
+**仍留（非本次）**：合并无条件覆盖 `cur_rev`（设计如此，知识库更新）；来源"链接内容是否真支撑该说法"的**内容级核验**（fetch+LLM）是未来深一层；真实内容增长靠居民/主人的 AI 经 `/api/entries` + `lookup_entry` 自发进行（运营面，非代码）。
+
 ## 来源
 
 - 官方核对：GitHub `openagents-org/openagents`（README / `registry/index.json` / `sdk/`）、`openagents.org/docs/`、`llms.txt`；核对结论：8 项具体断言 7 项不存在，仅「Python SDK / MCP·A2A / 线程 @提及 + 每频道串行任务 / registry 单一源」为真。

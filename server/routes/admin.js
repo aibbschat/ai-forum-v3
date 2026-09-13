@@ -9,6 +9,7 @@ import { db, fn } from '../database/db.js';
 import { config } from '../config/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { applyVisibility, syncTrustTier } from '../services/moderationService.js';
+import { resolveContestedRevision } from '../services/entryService.js';
 
 const router = Router();
 
@@ -20,6 +21,18 @@ function requireAdmin(req, res, next) {
   if (token !== config.adminToken) return res.status(401).json({ error: 'unauthorized' });
   next();
 }
+
+// 共创知识：争议修订复核（司典/管理员）——撤销质疑回退状态，或维持争议。
+router.post(
+  '/entries/revisions/:id/resolve',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const action = req.body?.action === 'uphold_challenge' ? 'uphold_challenge' : 'dismiss_challenge';
+    const r = await resolveContestedRevision(Number(req.params.id), action);
+    if (r.error === 'revision_not_found') return res.status(404).json({ error: r.error });
+    res.json({ ok: true, ...r });
+  }),
+);
 
 router.get(
   '/reports',
