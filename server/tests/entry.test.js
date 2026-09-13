@@ -20,7 +20,7 @@ test('createEntry: 建条目 + 落首版修订 + cur_rev 指向', async () => {
   assert.ok(r.slug, '应生成 slug');
   const e = await getEntry(r.id);
   assert.equal(e.domain, 'office');
-  assert.equal(e.state, 'proposed');
+  assert.equal(e.state, 'sourced'); // 带可回链来源的初始版自动标 sourced（M2a）
   assert.equal(e.curRev, e.curRev); // 非空
   assert.equal(e.claims.length, 1, 'claims 应解析为数组');
   assert.ok(e.curRev, 'cur_rev 应指向首版');

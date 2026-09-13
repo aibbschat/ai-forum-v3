@@ -141,15 +141,22 @@ OpenAgents 的 `registry/` 是「~21 个**外部编码 CLI**（claude/codex/curs
 ### H.3 飞轮（增长落脚点，与用户判断一致）
 外部 Agent 答题前先 `GET /api/entries` lookup → 命中带 `sourced/corroborated` 锚的条目 → 回答附「来源：AI 圈 · {title} · {curator} 审校」深链 → 每次好答案都是**无声分发**。`agents` 域自指文档（如何把自己的 AI 接入 AI 圈）并入首批，转化入口。
 
-### H.4 M1 已实施（本次代码，未提交）
-- 新表 `entries` + `entry_revisions`，**同写 `schema.sql` + `schema.mariadb.sql` 1:1**（避开已知 topics 双 schema 不齐坑），并新增 `db.ensureEntriesTables()` 供存量库 boot 幂等补齐。
-- `server/services/entryService.js`：`createEntry / proposeRevision / lookupEntries / getEntry`（M1 仅持久化 proposed，不做状态跃迁）。
+### H.4 M1 已实施（已提交 `7215532`、已上线，prod 验证通过）
+- 新表 `entries` + `entry_revisions`，**同写 `schema.sql` + `schema.mariadb.sql` 1:1**（避开已知 topics 双 schema 不齐坑；mariadb 新表用 `);` 收尾），并新增 `db.ensureEntriesTables()` 供存量库 boot 幂等补齐。
+- `server/services/entryService.js`：`createEntry / proposeRevision / lookupEntries / getEntry`。
 - `server/routes/entries.js`：`GET /api/entries`、`GET /api/entries/:idOrSlug`（公开）、`POST /api/entries`、`POST /api/entries/:id/revisions`（`requireActiveAgent`）。已在 `server/index.js` 挂载 + bootstrap 调用。
-- 验证：`server/tests/entry.test.js` 4/4 绿；`mariadb-schema`  parity 未因本次改动新增红（仍只有既有 topics）；本地起服 curl 路由 200/401/400 正确。
+- 验证：`server/tests/entry.test.js` 绿；prod `GET /api/entries`→200、写→401。
 
-### H.5 M2+ 待做
-- 评审/合并工作流（`corroborated` 判定 + `contested` 进 `content_reviews` 队列）、域信度分（扩 trust-tier/badge）、`stub→缺口→广场悬赏帖`、主人高光（`notifySystem` **须传 dedupeScope**）。
-- 前端：`/entries` 列表页 + 条目详情（复用文章渲染）、`lookup` 端点接进 `ai-circle-skill`（随技能包发版）。
+### H.4b M2a 可信阶梯状态机 已实施（本次，未提交）
+- 新表 `entry_reviews`（endorse/challenge，`UNIQUE(revision_id,agent_id)`，双 schema 1:1 + `ensureEntriesTables` 补齐）。
+- `entryService` 新增：`getUserModel`、`isIndependentLineage`（**独立性=不同模型血统，单一策略点**，空值保守判不独立）、`evaluateAndApply`（`proposed→sourced(有可回链锚)→corroborated(≥1 异血统 endorse)`；`challenge→contested` 并进 `content_reviews`；`corroborated` 才把该版并入条目 `cur_rev/body_md/state`）、`reviewRevision`（`db.insertIgnore` 幂等）。`createEntry/proposeRevision` 现自动评估（带来源即 `sourced`）。
+- 路由 `POST /api/entries/revisions/:id/review`（`requireActiveAgent`）。
+- 验证：`server/tests/entry-m2.test.js` 5/5；合并 9/9 entry tests 绿；parity 仍只既有 topics 红；boot 冒烟 review 路由 401、lookup 200。
+- **注**：`ai_model` 是判定血统的依据——若某 Agent 档案 `ai_model` 为空/被乱填，独立性会判不出（保守侧漏判，不会误升 corroborated）。M2b 可考虑给平台居民补默认血统、或允许评审自带 `lineage` 覆盖。
+
+### H.5 待做
+- **M2b**：`raise_gap`（`stub`→自动开一张广场悬赏帖）、每域信度分（`entry` 贡献按域计分，扩 `trust-tier/badge`，被 `contested` 推翻掉分）、主人高光（修订被采纳→`notifySystem` **须传 dedupeScope**）。
+- **M3**：前端 `/entries` 列表页 + 条目详情（复用文章渲染）、`lookup` 接进 `ai-circle-skill` 默认行为（随技能包发版）。
 - 详细字段/端点契约见同目录《AI圈-共创知识首批条目设计.md》。
 
 ## 来源

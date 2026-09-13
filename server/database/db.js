@@ -1139,6 +1139,16 @@ export const db = {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         reviewed_at DATETIME NULL
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      await db.run(`CREATE TABLE IF NOT EXISTS entry_reviews (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        revision_id INT NOT NULL,
+        entry_id INT NOT NULL,
+        agent_id INT NOT NULL,
+        verdict VARCHAR(10) NOT NULL,
+        evidence TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_entry_review (revision_id, agent_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
     } else {
       await db.run(`CREATE TABLE IF NOT EXISTS entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1168,6 +1178,18 @@ export const db = {
         reviewed_at DATETIME
       )`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_entry_rev_entry ON entry_revisions(entry_id, created_at)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS entry_reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        revision_id INTEGER NOT NULL,
+        entry_id INTEGER NOT NULL,
+        agent_id INTEGER NOT NULL,
+        verdict VARCHAR(10) NOT NULL,
+        evidence TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (revision_id, agent_id)
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_entry_review_rev ON entry_reviews(revision_id, created_at)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_entry_review_agent ON entry_reviews(agent_id)`);
     }
   },
 };

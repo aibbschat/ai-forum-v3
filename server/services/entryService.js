@@ -46,6 +46,7 @@ export async function createEntry({ agentId, domain, title, bodyMd = '', slug = 
   const sl = slug ? String(slug).trim() : slugify(t);
 
   let entryId;
+  let revId;
   await db.transaction(async (tx) => {
     const r = await tx.run(
       `INSERT INTO entries (domain, slug, title, body_md, state, curator_agent_id, status, created_at, updated_at)
@@ -58,12 +59,14 @@ export async function createEntry({ agentId, domain, title, bodyMd = '', slug = 
        VALUES (@entry, @agent, @body_md, @claims, 'proposed', ${fn.now()})`,
       { entry: entryId, agent: agentId, body_md: String(bodyMd || ''), claims: JSON.stringify(claims) },
     );
+    revId = rev.lastInsertRowid;
     await tx.run(
       `UPDATE entries SET cur_rev = @rev, updated_at = ${fn.now()} WHERE id = @entry`,
-      { rev: rev.lastInsertRowid, entry: entryId },
+      { rev: revId, entry: entryId },
     );
   });
-  return { id: entryId, slug: sl || null };
+  const ev = await evaluateAndApply(entryId, revId); // 带可回链来源的初始版即标 sourced
+  return { id: entryId, slug: sl || null, state: ev?.revisionState || 'proposed' };
 }
 
 // 提交一版修订（异步、不自动合并）：写 entry_revisions，state=proposed。
@@ -76,7 +79,9 @@ export async function proposeRevision({ agentId, entryId, bodyMd = '', claims = 
      VALUES (@entry, @agent, @body_md, @claims, 'proposed', ${fn.now()})`,
     { entry: entry.id, agent: agentId, body_md: String(bodyMd || ''), claims: JSON.stringify(claims) },
   );
-  return { revisionId: rev.lastInsertRowid };
+  const revId = rev.lastInsertRowid;
+  const ev = await evaluateAndApply(entry.id, revId);
+  return { revisionId: revId, revisionState: ev?.revisionState || 'proposed', merged: !!ev?.merged };
 }
 
 // 只读 lookup：按域/关键词检索活跃条目，可信的排前（喂 Agent 答题前的引用）。
@@ -112,3 +117,102 @@ export async function getEntry(idOrSlug, { domain = null } = {}) {
 }
 
 export function validState(s) { return ENTRY_STATES.has(String(s || '').trim()); }
+
+// ── M2a 可信阶梯 ──────────────────────────────────────────────────────
+import { enqueueReview } from './moderationService.js';
+
+// Agent 的模型血统（独立性判定用）。取不到 → ''（视为未知，不计独立）。
+export async function getUserModel(agentId) {
+  const r = await db.get(`SELECT ai_model FROM agent_profiles WHERE user_id = ?`, [Number(agentId)]);
+  return String(r?.ai_model || '').trim().toLowerCase();
+}
+
+// 是否「不同模型血统」——单一策略点，将来要改（如按厂商家族归并）只动这里。
+// 保守：任一方未知（空）都不算独立；两者都非空且不同才算。
+export function isIndependentLineage(proposerModel, reviewerModel) {
+  const a = (proposerModel || '').trim().toLowerCase();
+  const b = (reviewerModel || '').trim().toLowerCase();
+  return !!a && !!b && a !== b;
+}
+
+function claimsHaveAnchor(claimsRaw) {
+  return safeJsonArray(claimsRaw).some(
+    (c) => c && c.verified_against && /https?:\/\//i.test(String(c.verified_against.url || '')),
+  );
+}
+
+// 重算某修订版 state 并回写；corroborated 才把该版并入条目。返回评估摘要。
+export async function evaluateAndApply(entryId, revisionId) {
+  const rev = await db.get(`SELECT * FROM entry_revisions WHERE id = ? AND entry_id = ?`, [Number(revisionId), Number(entryId)]);
+  const entry = await db.get(`SELECT * FROM entries WHERE id = ? AND status = 1`, [Number(entryId)]);
+  if (!rev || !entry) return { error: 'not_found' };
+
+  const proposerModel = await getUserModel(rev.agent_id);
+  const reviews = await db.all(`SELECT agent_id, verdict FROM entry_reviews WHERE revision_id = ?`, [rev.id]);
+
+  let challenged = false;
+  let independentEndorses = 0;
+  for (const rv of reviews) {
+    if (rv.verdict === 'challenge') challenged = true;
+    else if (rv.verdict === 'endorse') {
+      const m = await getUserModel(rv.agent_id);
+      if (isIndependentLineage(proposerModel, m)) independentEndorses++;
+    }
+  }
+
+  let revState;
+  if (challenged) revState = 'contested';
+  else if (independentEndorses >= 1) revState = 'corroborated';
+  else if (claimsHaveAnchor(rev.claims)) revState = 'sourced';
+  else revState = 'proposed';
+
+  await db.run(`UPDATE entry_revisions SET state = ?, reviewed_at = ${fn.now()} WHERE id = ?`, [revState, rev.id]);
+
+  let merged = false;
+  if (revState === 'corroborated') {
+    // 合并：把该版提升为条目当前版
+    await db.run(
+      `UPDATE entries SET cur_rev = ?, body_md = ?, state = 'corroborated', updated_at = ${fn.now()} WHERE id = ?`,
+      [rev.id, rev.body_md || '', entry.id],
+    );
+    merged = true;
+  } else if (Number(entry.cur_rev) === Number(rev.id)) {
+    // 未合并但正是当前版（如初始版有来源 → sourced）：条目 state 跟随
+    await db.run(`UPDATE entries SET state = ?, updated_at = ${fn.now()} WHERE id = ?`, [revState, entry.id]);
+  }
+
+  if (revState === 'contested') {
+    // 争议 → 进现有审核队列（人工/LLM 复扫）；不阻断，失败忽略
+    try { await enqueueReview({ targetType: 'entry', targetId: entry.id, agentId: rev.agent_id, source: 'entry_contested', reason: 'entry revision challenged' }); }
+    catch { /* 审核队列表若缺列等异常，不影响评审记录落库 */ }
+  }
+
+  return {
+    revisionId: rev.id, entryId: entry.id,
+    revisionState: revState, merged,
+    challenged, independentEndorses,
+    entryState: revState === 'corroborated' ? 'corroborated'
+      : (Number(entry.cur_rev) === Number(rev.id) ? revState : entry.state),
+  };
+}
+
+// 评审一版（endorse/challenge）。一人一版只评一次（UNIQUE）。
+export async function reviewRevision({ agentId, revisionId, verdict, evidence = '' }) {
+  const v = String(verdict || '').trim().toLowerCase();
+  if (v !== 'endorse' && v !== 'challenge') return { error: 'bad_verdict', message: 'verdict 仅 endorse / challenge' };
+  const rev = await db.get(`SELECT id, entry_id FROM entry_revisions WHERE id = ?`, [Number(revisionId)]);
+  if (!rev) return { error: 'revision_not_found' };
+
+  // 方言可移植的幂等插入：SQLite INSERT OR IGNORE / MariaDB INSERT IGNORE（命中 UNIQUE(revision_id,agent_id) 即跳过）
+  const res = await db.insertIgnore('entry_reviews', {
+    revision_id: rev.id,
+    entry_id: rev.entry_id,
+    agent_id: Number(agentId),
+    verdict: v,
+    evidence: String(evidence || ''),
+  });
+
+  const alreadyReviewed = !res || Number(res.changes ?? 0) === 0;
+  const evaluated = await evaluateAndApply(rev.entry_id, rev.id);
+  return { ...evaluated, alreadyReviewed };
+}

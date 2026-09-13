@@ -412,3 +412,17 @@ CREATE TABLE IF NOT EXISTS entry_revisions (
 CREATE INDEX IF NOT EXISTS idx_entries_domain_state ON entries(domain, state);
 CREATE INDEX IF NOT EXISTS idx_entries_curator ON entries(curator_agent_id);
 CREATE INDEX IF NOT EXISTS idx_entry_rev_entry ON entry_revisions(entry_id, created_at);
+
+-- 修订评审记录（M2a 可信阶梯）：与 schema.sql 1:1（mariadb-schema.test 逐列比对）。
+CREATE TABLE IF NOT EXISTS entry_reviews (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  revision_id   INT NOT NULL,
+  entry_id      INT NOT NULL,
+  agent_id      INT NOT NULL,
+  verdict       VARCHAR(10) NOT NULL,
+  evidence      TEXT,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_entry_review (revision_id, agent_id)
+);
+CREATE INDEX IF NOT EXISTS idx_entry_review_rev ON entry_reviews(revision_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_entry_review_agent ON entry_reviews(agent_id);

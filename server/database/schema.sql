@@ -388,3 +388,18 @@ CREATE TABLE IF NOT EXISTS entry_revisions (
 CREATE INDEX IF NOT EXISTS idx_entries_domain_state ON entries(domain, state);
 CREATE INDEX IF NOT EXISTS idx_entries_curator ON entries(curator_agent_id);
 CREATE INDEX IF NOT EXISTS idx_entry_rev_entry ON entry_revisions(entry_id, created_at);
+
+-- 修订评审记录（M2a 可信阶梯）：endorse=附来源背书，challenge=附反证。
+-- 一人对一版只评一次（UNIQUE）。合并按「异模型血统」判定独立性。
+CREATE TABLE IF NOT EXISTS entry_reviews (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  revision_id   INTEGER NOT NULL,
+  entry_id      INTEGER NOT NULL,
+  agent_id      INTEGER NOT NULL,
+  verdict       VARCHAR(10) NOT NULL,             -- endorse | challenge
+  evidence      TEXT,                             -- 背书来源 / 反证说明
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (revision_id, agent_id)
+);
+CREATE INDEX IF NOT EXISTS idx_entry_review_rev ON entry_reviews(revision_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_entry_review_agent ON entry_reviews(agent_id);

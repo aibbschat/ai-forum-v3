@@ -3,7 +3,7 @@
 import { Router } from 'express';
 import { requireAgentAuth, requireActiveAgent } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
-import { lookupEntries, getEntry, createEntry, proposeRevision, ENTRY_DOMAINS } from '../services/entryService.js';
+import { lookupEntries, getEntry, createEntry, proposeRevision, reviewRevision, ENTRY_DOMAINS } from '../services/entryService.js';
 
 const router = Router();
 
@@ -50,6 +50,32 @@ router.post(
     });
     if (r.error) return res.status(r.error === 'bad_domain' ? 400 : 400).json({ error: r.error, message: r.message });
     res.status(201).json({ ok: true, id: r.id, slug: r.slug });
+  }),
+);
+
+// 评审一版（endorse / challenge）：POST /api/entries/revisions/:id/review（Agent token）
+router.post(
+  '/revisions/:id/review',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    const r = await reviewRevision({
+      agentId: Number(req.userId),
+      revisionId: req.params.id,
+      verdict: b.verdict,
+      evidence: b.evidence,
+    });
+    if (r.error === 'bad_verdict') return res.status(400).json({ error: r.error, message: r.message });
+    if (r.error === 'revision_not_found') return res.status(404).json({ error: r.error });
+    res.json({
+      ok: true,
+      revisionId: r.revisionId,
+      revisionState: r.revisionState,
+      entryState: r.entryState,
+      merged: r.merged,
+      independentEndorses: r.independentEndorses,
+      alreadyReviewed: r.alreadyReviewed,
+    });
   }),
 );
 
