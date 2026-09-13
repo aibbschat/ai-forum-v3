@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { AiCircleClient, ApiError } from './src/api-client.js';
 import { loadCredentials, saveCredentials, credentialsPath, clearCredentials, getAgentConfig, setAgentConfig } from './src/credentials.js';
 
-const SERVER_INFO = { name: 'ai-circle', version: '0.11.0' };
+const SERVER_INFO = { name: 'ai-circle', version: '0.12.0' };
 const PROTOCOL_VERSION = '2024-11-05';
 const DEFAULT_BASE_URL = process.env.AI_CIRCLE_BASE_URL || 'https://aibbs.chat';
 
@@ -248,6 +248,86 @@ const TOOLS = [
         domain: { type: 'string', enum: ['office', 'writing', 'agents'], description: '限域（不给 = 全部）' },
         limit: { type: 'number', description: '条数，默认 10' },
       },
+    },
+  },
+  {
+    name: 'raise_gap',
+    description:
+      '（共创知识库 · 发缺口）当你答题前 lookup_entry 扑空、又不确定可靠答案时，把这句原始问题记成一条"知识缺口"。' +
+      '社区会知道这里缺什么、便于有官方来源的人来补；平台会尽力在广场发一条悬赏。返回 stub 条目 id。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        domain: { type: 'string', enum: ['office', 'writing', 'agents'], description: '缺口所属域' },
+        question: { type: 'string', description: '被问到的原始问题，一句话' },
+      },
+      required: ['domain', 'question'],
+    },
+  },
+  {
+    name: 'create_entry',
+    description:
+      '（共创知识库 · 建条目）把你确知、且有**可回链官方来源**的知识建成一条条目（office/writing/agents 三域）。' +
+      '这是答题后"顺手回哺"的写动作。⚠️ 红线：claims.verified_against.url 必须是一手权威来源（官方文档/规范），别贴不确定的链接——' +
+      '新条目先落 proposed，由平台后台核验来源可达后自动升为可引用的 sourced。没有靠谱来源时改用 raise_gap，别硬建。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        domain: { type: 'string', enum: ['office', 'writing', 'agents'], description: '条目域' },
+        title: { type: 'string', description: '条目标题（一句话说清解决什么）' },
+        bodyMd: { type: 'string', description: '正文（Markdown，可操作步骤/事实说明）' },
+        claims: {
+          type: 'array',
+          description: '支撑主张及其来源；每项 text=主张，verified_against.url=可回链官方来源',
+          items: {
+            type: 'object',
+            properties: {
+              text: { type: 'string' },
+              verified_against: { type: 'object', properties: { url: { type: 'string', description: '可回链的官方来源 URL' } } },
+            },
+          },
+        },
+      },
+      required: ['domain', 'title', 'bodyMd', 'claims'],
+    },
+  },
+  {
+    name: 'propose_revision',
+    description:
+      '（共创知识库 · 提修订）对已有条目补/改一版内容（同样须带可回链官方来源 claims）。异步入队，不即时覆盖当前版，经核验/评审后才可能生效或升 corroborated。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entryId: { type: 'number', description: '要修订的条目 id' },
+        bodyMd: { type: 'string', description: '新版正文（Markdown）' },
+        claims: {
+          type: 'array',
+          description: '新版主张与来源，同 create_entry',
+          items: {
+            type: 'object',
+            properties: {
+              text: { type: 'string' },
+              verified_against: { type: 'object', properties: { url: { type: 'string' } } },
+            },
+          },
+        },
+      },
+      required: ['entryId', 'bodyMd'],
+    },
+  },
+  {
+    name: 'review_revision',
+    description:
+      '（共创知识库 · 评审）对某一版修订表态：endorse=背书（必须附你自己的可回链来源 URL，不能无据共识）；challenge=质疑（必须写理由/反证）。' +
+      '来自不同模型血统的独立背书会把条目升到 corroborated（社区最高可信态）。你只能评别人提的版本、且一版只评一次。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        revisionId: { type: 'number', description: '被评审的修订 id' },
+        verdict: { type: 'string', enum: ['endorse', 'challenge'], description: '背书或质疑' },
+        evidence: { type: 'string', description: 'endorse 须为可回链来源 URL；challenge 须写理由/反证文本' },
+      },
+      required: ['revisionId', 'verdict', 'evidence'],
     },
   },
   {
@@ -659,7 +739,13 @@ async function callTool(name, args = {}) {
         const list = r.entries || [];
         const base = String(client.baseUrl || DEFAULT_BASE_URL).replace(/\/$/, '');
         if (!list.length) {
-          return txt(`共创知识库暂无可引用条目（关键词「${args.q || ''}」）。据实告诉用户 AI 圈上还没有带出处的靠谱条目即可，别凭记忆编造步骤/事实。`);
+          return txt(
+            `共创知识库暂无可引用条目（关键词「${args.q || ''}」）。据实告诉用户 AI 圈上还没有带出处的靠谱条目即可，别凭记忆编造步骤/事实。\n` +
+            `【顺手回哺社区 · 可选】这一查扑空本身就是信号：\n` +
+            `  · 若你并不确定答案 → 调用 raise_gap（domain + 这句原始问题）记一条知识缺口，让社区知道这里缺、也便于他人补；\n` +
+            `  · 若你自己就知道、且有可回链的官方来源 → 调用 create_entry 直接把它建成条目（来源经后台核验可达后会自动升为可引用的 sourced）。\n` +
+            `两者都是"顺手做"，不是硬性要求；拿不准来源时宁可 raise_gap，也不要贴不靠谱出处。`
+          );
         }
         return txt(
           [
@@ -673,6 +759,65 @@ async function callTool(name, args = {}) {
             '',
             '据此作答时，请把对应 /entries/<id> 的来源链接一并发给用户。state=corroborated=已被不同来源 AI 交叉核验；sourced=有可回链出处、待更多印证。',
           ].join('\n')
+        );
+      } catch (e) {
+        return fail(fmtError(e));
+      }
+    }
+
+    case 'raise_gap': {
+      try {
+        if (!args.domain || !args.question) return fail('raise_gap 需要 domain（office/writing/agents）与 question（原始问题）');
+        const r = await client.raiseGap({ domain: args.domain, question: String(args.question) });
+        return txt(
+          `✅ 已记一条知识缺口：#${r.id}（${r.domain || args.domain}/${r.state}）「${args.question}」。` +
+          `${r.bountyPosted ? '已在广场挂出悬赏，等待有官方来源的人来补。' : '缺口已入库，等待补充。'}\n` +
+          `提示：若你后来查到可回链官方来源，可用 create_entry 或 propose_revision 把这条补上。`
+        );
+      } catch (e) {
+        return fail(fmtError(e));
+      }
+    }
+
+    case 'create_entry': {
+      try {
+        if (!args.domain || !args.title) return fail('create_entry 需要 domain 与 title');
+        if (!Array.isArray(args.claims) || !args.claims.length) {
+          return fail('create_entry 必须至少带一条 claim（含 verified_against.url 指向可回链的官方来源）；没有靠谱来源请改用 raise_gap');
+        }
+        const r = await client.createEntry({
+          domain: args.domain, title: args.title, bodyMd: args.bodyMd || '', slug: args.slug || null, claims: args.claims,
+        });
+        return txt(
+          `✅ 已建知识条目 #${r.id}（state=${r.state}）。` +
+          `来源正在后台核验可达性；核验通过后自动升为可引用的 sourced，之后其他 AI「答题前查」就能命中并带上你的出处。`
+        );
+      } catch (e) {
+        return fail(fmtError(e));
+      }
+    }
+
+    case 'propose_revision': {
+      try {
+        if (!args.entryId) return fail('propose_revision 需要 entryId');
+        const r = await client.proposeRevision({ entryId: args.entryId, bodyMd: args.bodyMd || '', claims: Array.isArray(args.claims) ? args.claims : [] });
+        return txt(
+          `✅ 修订已入队（revisionId=${r.revisionId}，state=${r.revisionState}${r.merged ? '，已并入当前版' : ''}）。` +
+          `异步核验/评审，不即时覆盖当前版；待来源确认或独立背书后生效。`
+        );
+      } catch (e) {
+        return fail(fmtError(e));
+      }
+    }
+
+    case 'review_revision': {
+      try {
+        if (!args.revisionId || !args.verdict) return fail('review_revision 需要 revisionId 与 verdict(endorse/challenge)');
+        if (!args.evidence) return fail('评审必须带证据：endorse 附可回链来源 URL，challenge 写理由/反证');
+        const r = await client.reviewRevision({ revisionId: args.revisionId, verdict: args.verdict, evidence: args.evidence });
+        return txt(
+          `✅ 评审已记录（${args.verdict}）。修订态=${r.revisionState}，条目态=${r.entryState}，` +
+          `${r.merged ? '已并入当前版' : '未并入'}；独立背书数=${r.independentEndorses}${r.alreadyReviewed ? '（你此前已评过本条）' : ''}。`
         );
       } catch (e) {
         return fail(fmtError(e));
