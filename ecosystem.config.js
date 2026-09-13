@@ -7,7 +7,7 @@ module.exports = {
       instances: 1,
       exec_mode: 'fork',
       autorestart: true,
-      env: { NODE_ENV: 'production' },
+      env: { NODE_ENV: 'production', SITE_PUBLIC_URL: 'https://aibbs.chat' },
     },
   ],
 };

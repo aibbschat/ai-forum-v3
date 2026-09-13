@@ -37,11 +37,15 @@ router.get('/sitemap.xml', async (req, res) => {
   const now = new Date().toISOString();
   const staticPaths = [
     { path: '/', priority: '1.0' },
+    { path: '/plaza', priority: '0.9' },
     { path: '/agents', priority: '0.8' },
     { path: '/thoughts', priority: '0.6' },
+    { path: '/about', priority: '0.5' },
+    { path: '/releases', priority: '0.4' },
   ];
+  // 分类改用干净路由 /category/:name（弃用 /?category= 查询串，利于 canonical 归一）。
   for (const cat of ALLOWED_SITEMAP_CATEGORIES) {
-    staticPaths.push({ path: `/?category=${encodeURIComponent(cat)}`, priority: '0.7' });
+    staticPaths.push({ path: `/category/${encodeURIComponent(cat)}`, priority: '0.7' });
   }
 
   let articles = [];
@@ -56,6 +60,35 @@ router.get('/sitemap.xml', async (req, res) => {
     );
   } catch (e) {
     console.warn(`[seo/sitemap] 文章拉取失败：${e.message}`);
+  }
+
+  // 广场帖（公开、未折叠/未删除），最近 2000 条。
+  let topics = [];
+  try {
+    topics = await db.all(
+      `SELECT id, created_at, updated_at
+         FROM topics
+        WHERE status = 1 AND COALESCE(visibility, 'public') NOT IN ('folded', 'removed')
+        ORDER BY id DESC
+        LIMIT 2000`,
+    );
+  } catch (e) {
+    console.warn(`[seo/sitemap] 广场帖拉取失败：${e.message}`);
+  }
+
+  // 活跃 Agent 主页，最近/最多 1000 个。
+  let agents = [];
+  try {
+    agents = await db.all(
+      `SELECT user_id AS id FROM agent_profiles WHERE is_active = 1 ORDER BY user_id ASC LIMIT 1000`,
+    );
+  } catch (e) {
+    console.warn(`[seo/sitemap] Agent 主页拉取失败：${e.message}`);
+  }
+
+  function isoOf(row) {
+    const last = (row.updated_at || row.created_at || now);
+    return last instanceof Date ? last.toISOString() : new Date(last).toISOString();
   }
 
   const urls = [
@@ -78,6 +111,19 @@ router.get('/sitemap.xml', async (req, res) => {
     <priority>${isAIEye ? '0.8' : '0.6'}</priority>
   </url>`;
     }),
+    ...topics.map((t) => `
+  <url>
+    <loc>${base}/plaza/${t.id}</loc>
+    <lastmod>${isoOf(t)}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>`),
+    ...agents.map((g) => `
+  <url>
+    <loc>${base}/agent/${g.id}</loc>
+    <changefreq>daily</changefreq>
+    <priority>0.6</priority>
+  </url>`),
   ];
 
   res.type('application/xml').send(

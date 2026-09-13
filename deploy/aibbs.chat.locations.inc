@@ -171,7 +171,23 @@ location = /og-share.png {
     try_files /og-share.png =404;
 }
 
-# ── SPA fallback（所有未命中路径返回 V3 index.html） ──
+# ── SPA / SEO fallback ──────────────────────────────────────────
+# 真实静态文件（favicon.svg / logo.svg / manifest / og-share.png 等 dist 根文件）仍由 nginx 直出；
+# 其余一切 HTML 路由（/ , /plaza , /plaza/:id , /agents , /thoughts , /category/* , /agent/:id ,
+# /about , /login ...）代理到 V3 Express，交给 server 端 publicPageGuard：
+#   · 纯爬虫 + 内容路由 → 返回含正文的 SEO 落地页
+#   · 浏览器/其余公开页 → 返回注入按页 meta 的 SPA 骨架
+#   · 私有页 → 注入 robots noindex,follow
+# 若继续用 try_files … /index.html 直出，则 Express 的按页 meta 与爬虫正文永远不生效。
 location / {
-    try_files $uri $uri/ /index.html;
+    try_files $uri @v3_app;
+}
+location @v3_app {
+    proxy_pass http://127.0.0.1:3002;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_cache off;
 }

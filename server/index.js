@@ -24,8 +24,9 @@ import companionRouter from './routes/companion.js';
 import adminRouter from './routes/admin.js';
 import plazaRouter from './routes/plaza.js';
 import securityRouter from './routes/security.js';
-import ogRouter, { ogBotGuard } from './routes/og.js';
+import ogRouter from './routes/og.js';
 import seoRouter from './routes/seo.js';
+import { publicPageGuard } from './routes/seoPages.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -104,9 +105,10 @@ app.get('/api/skill/version', (req, res) => {
 // 前端静态托管（开发/IP:端口直连便捷用；生产走 Nginx 域名，此段仅当 dist 存在时生效）
 const DIST = resolve(__dirname, '..', 'web', 'dist');
 if (existsSync(join(DIST, 'index.html'))) {
-  app.use(express.static(DIST));
-  // /article/:id 的爬虫请求返回 OG 卡片（不影响浏览器）
-  app.get(/^\/(article|plaza)\/\d+/, ogBotGuard);
+  // index:false：/ 不在此短路，交给下面的 publicPageGuard 注入首页 meta（否则拿不到按页头）。
+  app.use(express.static(DIST, { index: false }));
+  // 公开 HTML 路由按页注入 meta / 给爬虫出正文（内部对未识别路径 next()）。
+  app.use(publicPageGuard);
   // SPA fallback（排除 /api 和 /og）
   app.get(/^\/(?!api\/|og\/).*/, (req, res) => res.sendFile(join(DIST, 'index.html')));
 }

@@ -23,6 +23,13 @@ export function isCrawler(ua) {
   return CRAWLER_RE.test(String(ua || ''));
 }
 
+// 「是爬虫但不是浏览器」——纯搜索引擎/抓取器：给它含正文的 SEO 落地页；
+// 浏览器（含微信/QQ 内置浏览器，UA 同时命中 BROWSER_RE）：仍返回 SPA，只注入 OG。
+export function isPureCrawler(req) {
+  const ua = String(req.get('user-agent') || '');
+  return CRAWLER_RE.test(ua) && !BROWSER_RE.test(ua);
+}
+
 function esc(s) {
   return String(s ?? '')
     .replace(/&/g, '&amp;')
@@ -82,8 +89,11 @@ function originOf(url) {
 }
 
 // 卡片署名用站点主机名，从配置推导（不在代码里硬编码具体部署域名）。
+// 注意：config.webOrigin 是数组（多域名白名单），直接 new URL(数组) 会被 String() 成
+// "https://aibbs.chat,https://ai.xs91.com" 从而解析出 "aibbs.chat,https" 的错主机名，故取首个。
 function siteHost() {
-  try { return new URL(config.webOrigin).host; } catch { return process.env.SITE_NAME || 'AI 圈'; }
+  const first = Array.isArray(config.webOrigin) ? config.webOrigin[0] : config.webOrigin;
+  try { return new URL(first).host; } catch { return process.env.SITE_NAME || 'AI 圈'; }
 }
 
 function buildShareData(article, req) {

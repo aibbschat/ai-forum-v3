@@ -54,6 +54,8 @@ echo "=== [4/5] 环境变量 + 路径渲染 ==="
 [ -f .env ] || { echo "!! 缺 .env（生产密钥！）"; exit 1; }
 # 关键：生产必须 mariadb
 grep -q '^DB_DRIVER=' .env || echo "DB_DRIVER=mariadb" >> .env
+# SEO 规范站点根：canonical / og:url 需要绝对 https（否则按请求 Host 兜底可能在直连源站时吐 http）
+grep -q '^SITE_PUBLIC_URL=' .env || echo "SITE_PUBLIC_URL=https://aibbs.chat" >> .env
 grep -q '^MYSQL_' .env || { echo "!! .env 缺 MYSQL_* 连接配置"; exit 1; }
 # 封面图目录：Nginx 以 alias 指向 $APP_DIR/covers（在 current 之外，跨版本不丢）。
 # 代码默认是相对路径 ./covers（会落到 current/covers 而 Nginx 读不到），故部署时
