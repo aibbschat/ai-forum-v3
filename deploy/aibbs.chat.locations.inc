@@ -65,8 +65,27 @@ location /writing-camp/       { rewrite ^/writing-camp/?(.*)$ /$1 break; proxy_p
 #   1. 先 try_files 找真实静态文件（favicon、dist/download/aizhiji.apk 等）
 #   2. 三个已知 SSR 路径反代到 V2 后端，拿带 og:* 的 HTML
 #   3. 其他子路径返回 V2 的 index.html，让客户端 React Router 接管
+# V2 知己下载页短链（返回 V2 index.html，React Router 渲染 /d）
+location = /d {
+    root /var/www/aiforum-v2-download;
+    try_files /index.html =404;
+    default_type text/html;
+    add_header Cache-Control "no-cache";
+}
+
+# V2 花园/知己形象图片（8种形象 webp 等），必须命中真实文件而非 V3 SPA fallback
+location ^~ /garden/ {
+    root /var/www/aiforum-v2-download;
+    try_files $uri @v2_garden;
+}
+location @v2_garden {
+    # 无真实文件时回落 V2 index.html（V2 SPA 有 /garden 页面路由）
+    root /var/www/aiforum-v2-download;
+    try_files /index.html =404;
+}
+
 location ^~ /download {
-    root /var/www/ai-forum/prod/frontend/dist;
+    root /var/www/aiforum-v2-download;
     default_type text/html;
 
     # V2 后端已停运，SSR（OG 卡片）不可用，直接走 SPA fallback
@@ -74,17 +93,17 @@ location ^~ /download {
 }
 # 其他 /download/* 路径回落到 V2 SPA 的 index.html（前端 React Router 渲染）
 location @v2_spa_index {
-    root /var/www/ai-forum/prod/frontend/dist;
+    root /var/www/aiforum-v2-download;
     try_files /index.html =404;
 }
 
 # V2 根目录引用的小图标（V3 没有，但 /download/shubao 等 V2 页面会用到）
-location = /shubao-logo.png { alias /var/www/ai-forum/prod/frontend/dist/shubao-logo.png; }
-location = /aiqlogo.png     { alias /var/www/ai-forum/prod/frontend/dist/aiqlogo.png; }
-location = /wechat-qr.png   { alias /var/www/ai-forum/prod/frontend/dist/wechat-qr.png; }
-location = /zfb-qr.png      { alias /var/www/ai-forum/prod/frontend/dist/zfb-qr.png; }
-location = /logo.png        { alias /var/www/ai-forum/prod/frontend/dist/logo.png; }
-location = /default-avatar.png { alias /var/www/ai-forum/prod/frontend/dist/default-avatar.png; }
+location = /shubao-logo.png { alias /var/www/aiforum-v2-download/shubao-logo.png; }
+location = /aiqlogo.png     { alias /var/www/aiforum-v2-download/aiqlogo.png; }
+location = /wechat-qr.png   { alias /var/www/aiforum-v2-download/wechat-qr.png; }
+location = /zfb-qr.png      { alias /var/www/aiforum-v2-download/zfb-qr.png; }
+location = /logo.png        { alias /var/www/aiforum-v2-download/logo.png; }
+location = /default-avatar.png { alias /var/www/aiforum-v2-download/default-avatar.png; }
 
 # ── V2 老链接 SEO 兜底 ─────────────────────────────────────────
 # V2 已停运（ai-forum-prod 进程已从 pm2 移除），不再反代到 3001。
@@ -113,6 +132,18 @@ location /updates/ {
     add_header Access-Control-Allow-Origin "*" always;
 }
 
+# ── 外部 Agent 技能包自助下载（3002 静态托管）────────────────────
+# 用 ^~ 是必须的：上面的「禁止 .md/.sh/.env 等扩展名」是正则 location，
+# 优先级高于普通前缀匹配，不加 ^~ 会把 /skill/.../SKILL.md 直接 404 掉。
+location ^~ /skill/ {
+    proxy_pass http://127.0.0.1:3002;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    add_header Access-Control-Allow-Origin "*" always;
+}
+
 # ── V3 自己的接口（3002） ──
 location /api/ {
     proxy_pass http://127.0.0.1:3002;
@@ -138,6 +169,27 @@ location /article/ {
 }
 
 # ── SEO 文件走 V3（robots.txt 动态、sitemap.xml 动态）──
+# V3 plaza topic OG (share to social, 2026-09-10)
+location /plaza/ {
+    proxy_pass http://127.0.0.1:3002;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_cache off;
+}
+# V3 OG card endpoint /og/:id and /og/topic/:id
+location /og/ {
+    proxy_pass http://127.0.0.1:3002;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_cache off;
+}
+
 location = /robots.txt  { proxy_pass http://127.0.0.1:3002; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto $scheme; }
 location = /sitemap.xml { proxy_pass http://127.0.0.1:3002; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto $scheme; }
 
@@ -153,7 +205,7 @@ location /assets/ {
     add_header Cache-Control "public, immutable";
 }
 location @v2_assets {
-    root /var/www/ai-forum/prod/frontend/dist;
+    root /var/www/aiforum-v2-download;
     try_files $uri =404;
     expires 30d;
     add_header Cache-Control "public, immutable";
@@ -171,14 +223,7 @@ location = /og-share.png {
     try_files /og-share.png =404;
 }
 
-# ── SPA / SEO fallback ──────────────────────────────────────────
-# 真实静态文件（favicon.svg / logo.svg / manifest / og-share.png 等 dist 根文件）仍由 nginx 直出；
-# 其余一切 HTML 路由（/ , /plaza , /plaza/:id , /agents , /thoughts , /category/* , /agent/:id ,
-# /about , /login ...）代理到 V3 Express，交给 server 端 publicPageGuard：
-#   · 纯爬虫 + 内容路由 → 返回含正文的 SEO 落地页
-#   · 浏览器/其余公开页 → 返回注入按页 meta 的 SPA 骨架
-#   · 私有页 → 注入 robots noindex,follow
-# 若继续用 try_files … /index.html 直出，则 Express 的按页 meta 与爬虫正文永远不生效。
+# ── SPA fallback（所有未命中路径返回 V3 index.html） ──
 location / {
     try_files $uri @v3_app;
 }
