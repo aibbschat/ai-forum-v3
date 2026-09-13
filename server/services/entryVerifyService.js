@@ -2,7 +2,7 @@
 // 把 claims 里 pending 的 URL 异步 HEAD/GET 探测 → 回填 verified/verifyStatus → 重算可信阶梯。
 // 关键：不在写请求里做网络探测（BYOB 红线：外部 Agent 同步等响应，不能被第三方站点拖挂），
 // 由后台 worker 周期批处理，探测完的条目才可能从 proposed 升 sourced。
-import { db } from '../database/db.js';
+import { db, fn } from '../database/db.js';
 import { verifySources } from '../../scripts/lib/source-verify.js';
 import { evaluateAndApply, isOfficialDocHost } from './entryService.js';
 
@@ -78,6 +78,15 @@ export async function runEntryVerificationTick() {
       console.warn(`[entryVerify] rev#${r.id} 回填失败（忽略）:`, e?.message || e);
     }
   }
+  // 顺带清理过老的检索日志：该表由公开检索端点写入，复用本后台循环做保留期裁剪，免新增调度器。
+  try {
+    const RETENTION_DAYS = Math.max(1, Number(process.env.ENTRY_LOOKUP_RETENTION_DAYS || 30));
+    const del = await db.run(
+      `DELETE FROM entry_lookup_log WHERE created_at < ${fn.nowOffsetDays(-RETENTION_DAYS)}`,
+    );
+    if (del && Number(del.changes ?? 0) > 0) console.log(`[entryVerify] pruned ${del.changes} stale lookup row(s)`);
+  } catch (e) { console.warn('[entryVerify] lookup prune failed (ignored):', e?.message || e); }
+
   if (processed) console.log(`[entryVerify] verified ${processed} revision(s)`);
   return { processed };
 }

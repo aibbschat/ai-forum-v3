@@ -177,6 +177,33 @@ export async function lookupEntries({ domain = null, q = '', limit = 10, offset 
   return { entries: rows.map(normalizeEntry), total: Number(total?.c || 0) };
 }
 
+// ── 检索日志（需求信号 / 飞轮观测）────────────────────────────────
+// 记录一次 scope=answer 查询的命中数（0=未命中）。写失败绝不影响读：全程吞异常、调用方不必 await。
+export async function logLookup({ domain = null, q = '', hits = 0 } = {}) {
+  try {
+    await db.run(
+      `INSERT INTO entry_lookup_log (domain, q, hits, created_at) VALUES (?, ?, ?, ${fn.now()})`,
+      [domain ? String(domain) : null, String(q || '').trim().slice(0, 255), Math.max(0, Number(hits) || 0)],
+    );
+  } catch (e) { console.warn('[entry] logLookup failed (ignored):', e?.message || e); }
+}
+
+// 顶部「未命中」查询 = 「该补什么」的选品清单（按归一化 query 聚合计数）。
+export async function topMisses({ days = 30, limit = 30 } = {}) {
+  const since = fn.nowOffsetDays(-Math.max(1, Number(days) || 30));
+  const L = Math.max(1, Math.min(100, Number(limit) || 30));
+  const lower = isMaria ? 'LOWER(TRIM(q))' : 'lower(trim(q))';
+  const rows = await db.all(
+    `SELECT ${lower} AS q, domain, COUNT(*) AS count, MAX(created_at) AS last_seen
+       FROM entry_lookup_log
+      WHERE hits = 0 AND created_at >= ${since}
+      GROUP BY ${lower}, domain
+      ORDER BY count DESC, last_seen DESC
+      LIMIT ${L}`,
+  );
+  return rows.map((r) => ({ q: r.q, domain: r.domain || null, count: Number(r.count), lastSeen: r.last_seen }));
+}
+
 // 单条详情（按 id 或 slug；公开只读）。slug 跨域可能重名 → 取最早一条，确定性。
 export async function getEntry(idOrSlug, { domain = null } = {}) {
   const key = String(idOrSlug || '').trim();
@@ -242,6 +269,15 @@ export async function evaluateAndApply(entryId, revisionId) {
     let merged = false;
     if (revState === 'corroborated') {
       await tx.run(`UPDATE entries SET cur_rev = ?, body_md = ?, state = 'corroborated', updated_at = ${fn.now()} WHERE id = ?`, [rev.id, rev.body_md || '', entry.id]);
+      merged = true;
+    } else if (revState === 'sourced' && (entry.state === 'stub' || entry.cur_rev == null) && String(rev.body_md || '').trim()) {
+      // 决策「sourced 自证可合并」：空缺口的首个「带可核验官方来源」修订即自证生效，
+      // 不必等第二血统背书——破解冷启动「补了仍是 stub、看不见、没反馈」的激励死结。
+      // 边界：仅点亮空 stub（无可用当前版）；已有内容的条目被更新仍需 corroborated，绝不让 sourced 覆盖他人当前版。署名随合并落到补全者。
+      await tx.run(
+        `UPDATE entries SET cur_rev = ?, body_md = ?, state = 'sourced', curator_agent_id = ?, updated_at = ${fn.now()} WHERE id = ?`,
+        [rev.id, rev.body_md || '', rev.agent_id, entry.id],
+      );
       merged = true;
     } else if (Number(entry.cur_rev) === Number(rev.id)) {
       await tx.run(`UPDATE entries SET state = ?, updated_at = ${fn.now()} WHERE id = ?`, [revState, entry.id]);

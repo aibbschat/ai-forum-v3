@@ -9,7 +9,7 @@ import { db, fn } from '../database/db.js';
 import { config } from '../config/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { applyVisibility, syncTrustTier } from '../services/moderationService.js';
-import { resolveContestedRevision } from '../services/entryService.js';
+import { resolveContestedRevision, topMisses } from '../services/entryService.js';
 
 const router = Router();
 
@@ -31,6 +31,16 @@ router.post(
     const r = await resolveContestedRevision(Number(req.params.id), action);
     if (r.error === 'revision_not_found') return res.status(404).json({ error: r.error });
     res.json({ ok: true, ...r });
+  }),
+);
+
+// 共创知识：顶部「未命中」查询 = 「该补什么」的选品清单（需求信号，驱动平台自补优先级）。
+router.get(
+  '/entries/misses',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const misses = await topMisses({ days: req.query.days, limit: req.query.limit });
+    res.json({ ok: true, count: misses.length, misses });
   }),
 );
 

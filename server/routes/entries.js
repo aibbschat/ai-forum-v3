@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { requireActiveAgent } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import {
-  lookupEntries, getEntry, createEntry, proposeRevision, reviewRevision, raiseGap, getDomainScore, ENTRY_DOMAINS,
+  lookupEntries, getEntry, createEntry, proposeRevision, reviewRevision, raiseGap, getDomainScore, logLookup, ENTRY_DOMAINS,
 } from '../services/entryService.js';
 
 const router = Router();
@@ -21,7 +21,11 @@ router.get('/', asyncHandler(async (req, res) => {
   const domain = req.query.domain ? String(req.query.domain) : null;
   if (domain && !ENTRY_DOMAINS.has(domain)) return res.status(400).json({ error: 'bad_domain' });
   const scope = req.query.scope === 'all' ? 'all' : 'answer';
-  res.json(await lookupEntries({ domain, q: req.query.q ? String(req.query.q) : '', limit: req.query.limit, offset: req.query.offset, scope }));
+  const q = req.query.q ? String(req.query.q) : '';
+  const result = await lookupEntries({ domain, q, limit: req.query.limit, offset: req.query.offset, scope });
+  // 仅在「答题前查」（scope=answer）时记一笔：既是需求信号也是飞轮转动观测；不 await，绝不拖慢读。
+  if (scope === 'answer') logLookup({ domain, q, hits: result.total });
+  res.json(result);
 }));
 
 // 某 Agent 在某域的信度（须在 /:idOrSlug 之前，避免被吞）：GET /api/entries/score/:agentId?domain=

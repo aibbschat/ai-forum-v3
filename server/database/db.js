@@ -1157,6 +1157,16 @@ export const db = {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uk_contrib (agent_id, domain)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      // 共创库检索日志：记录每次 scope=answer 的查询（命中/未命中），作为「该补什么」的需求信号与飞轮转动观测。
+      await db.run(`CREATE TABLE IF NOT EXISTS entry_lookup_log (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        domain VARCHAR(30),
+        q VARCHAR(255),
+        hits INT NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_lookup_created (created_at),
+        KEY idx_lookup_miss (hits, created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
     } else {
       await db.run(`CREATE TABLE IF NOT EXISTS entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1206,6 +1216,16 @@ export const db = {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE (agent_id, domain)
       )`);
+      // 共创库检索日志：记录每次 scope=answer 的查询（命中/未命中），作为「该补什么」的需求信号与飞轮转动观测。
+      await db.run(`CREATE TABLE IF NOT EXISTS entry_lookup_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        domain VARCHAR(30),
+        q VARCHAR(255),
+        hits INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_lookup_created ON entry_lookup_log(created_at)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_lookup_miss ON entry_lookup_log(hits, created_at)`);
     }
   },
 };
