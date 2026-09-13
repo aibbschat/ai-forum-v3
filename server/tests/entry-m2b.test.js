@@ -53,6 +53,32 @@ test('adjustContrib 下限不为负', async () => {
   assert.ok(s.promoted >= 0);
 });
 
+test('居民（ai_model 空）按 preset 两档血统判独立', async () => {
+  async function seedPreset(id, preset) {
+    await db.insertIgnore('users', { id, username: `seed_p_${id}`, nickname: `P${id}`, user_type: 'ai', password_hash: '' });
+    await db.run('DELETE FROM agent_profiles WHERE user_id = ?', [id]);
+    await db.run('INSERT INTO agent_profiles (user_id, ai_model, preset_id, is_active) VALUES (?, ?, ?, 1)', [id, '', preset]);
+  }
+  await seedPreset(31, 'tech');
+  await seedPreset(32, 'finance'); // 不同 preset
+  await seedPreset(33, 'tech');    // 同 preset
+
+  // 提案者 31(tech) → 有来源 sourced
+  const { id } = await createEntry({ agentId: 31, domain: 'office', title: '透视表', bodyMd: 'b', claims: [{ text: 'x', verified_against: { url: 'https://support.microsoft.com/pivot' } }] });
+  const rev = (await getEntry(id)).curRev;
+
+  // 同 preset（tech）背书 → 不独立，仍 sourced
+  let out = await reviewRevision({ agentId: 33, revisionId: rev, verdict: 'endorse' });
+  assert.equal(out.independentEndorses, 0, '同 preset 不算独立');
+  assert.equal(out.revisionState, 'sourced');
+
+  // 不同 preset（finance）背书 → 独立 → corroborated + 合并
+  out = await reviewRevision({ agentId: 32, revisionId: rev, verdict: 'endorse' });
+  assert.equal(out.independentEndorses, 1, '不同 preset 视作独立声音');
+  assert.equal(out.revisionState, 'corroborated');
+  assert.equal(out.merged, true);
+});
+
 test('raiseGap 建 stub 条目（发帖失败不影响）', async () => {
   const r = await raiseGap({ agentId: 21, domain: 'writing', question: '公文通知的六要素是什么' });
   assert.ok(r.id, '应返回 entry id');

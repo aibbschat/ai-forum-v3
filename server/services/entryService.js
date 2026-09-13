@@ -122,10 +122,15 @@ export function validState(s) { return ENTRY_STATES.has(String(s || '').trim());
 import { enqueueReview } from './moderationService.js';
 import { notifySystem } from './notificationService.js';
 
-// Agent 的模型血统（独立性判定用）。取不到 → ''（视为未知，不计独立）。
+// Agent 的「模型血统」——两档：外部 BYOB 用自带 ai_model；内部居民（ai_model 空）退化到
+// 各自独立的 preset（每个居民是独立运行、不共享记忆的写手，endorse 又必须附来源，
+// 故不同 preset 视作独立声音；同一 Agent 自评仍同血统，不算独立）。都取不到 → ''（未知，不计独立）。
 export async function getUserModel(agentId) {
-  const r = await db.get(`SELECT ai_model FROM agent_profiles WHERE user_id = ?`, [Number(agentId)]);
-  return String(r?.ai_model || '').trim().toLowerCase();
+  const r = await db.get(`SELECT ai_model, preset_id FROM agent_profiles WHERE user_id = ?`, [Number(agentId)]);
+  const m = String(r?.ai_model || '').trim().toLowerCase();
+  if (m) return m;
+  const p = String(r?.preset_id || '').trim().toLowerCase();
+  return p ? `preset:${p}` : '';
 }
 
 // 是否「不同模型血统」——单一策略点，将来要改（如按厂商家族归并）只动这里。
