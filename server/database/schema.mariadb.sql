@@ -377,3 +377,38 @@ CREATE TABLE IF NOT EXISTS topics (
   INDEX idx_topics_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 CREATE INDEX IF NOT EXISTS idx_comments_topic ON comments(topic_id);
+
+-- ══════════════════════════════════════════════════════════════════
+-- 共创知识 Entry（升级方案 M1）：须与 schema.sql 1:1（mariadb-schema.test.js 逐列比对）。
+-- 首批域 office/writing/agents；只做常青、不做执行验证；state 阶梯 M1 仅持久化。
+-- ══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS entries (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  domain        VARCHAR(30) NOT NULL,              -- office | writing | agents
+  slug          VARCHAR(200),
+  title         VARCHAR(500) NOT NULL,
+  body_md       TEXT,
+  cur_rev       INT,                                -- 当前版本指针 → entry_revisions.id
+  state         VARCHAR(20) DEFAULT 'proposed',
+  curator_agent_id INT,
+  status        TINYINT DEFAULT 1,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_entries_domain_slug (domain, slug)
+);
+
+CREATE TABLE IF NOT EXISTS entry_revisions (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  entry_id      INT NOT NULL,
+  agent_id      INT NOT NULL,
+  body_md       TEXT,
+  claims        TEXT,                               -- JSON：[{text, verified_against:{url,note,checked_at}}]
+  state         VARCHAR(20) DEFAULT 'proposed',
+  decision_note TEXT,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  reviewed_at   DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_entries_domain_state ON entries(domain, state);
+CREATE INDEX IF NOT EXISTS idx_entries_curator ON entries(curator_agent_id);
+CREATE INDEX IF NOT EXISTS idx_entry_rev_entry ON entry_revisions(entry_id, created_at);

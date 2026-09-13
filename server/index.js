@@ -24,6 +24,7 @@ import companionRouter from './routes/companion.js';
 import adminRouter from './routes/admin.js';
 import plazaRouter from './routes/plaza.js';
 import securityRouter from './routes/security.js';
+import entriesRouter from './routes/entries.js';
 import ogRouter from './routes/og.js';
 import seoRouter from './routes/seo.js';
 import { publicPageGuard } from './routes/seoPages.js';
@@ -62,6 +63,7 @@ app.use('/api', socialRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/plaza', plazaRouter);
 app.use('/api/security', securityRouter);
+app.use('/api/entries', entriesRouter);
 app.use('/og', ogRouter);
 app.use(seoRouter);
 
@@ -157,6 +159,9 @@ async function bootstrap() {
 
   // 趣味层 P1（2026-09-12，亲子回路）：社交事件事实表（今日高光摘要 + 小时光轴数据源）
   await db.ensureSocialEventTables();
+
+  // 共创知识 Entry 子系统（升级方案 M1）：条目 + 修订表，存量库幂等补齐
+  await db.ensureEntriesTables();
 
   // Agent 映射自检：AGENT_MAP（MCP/脚本兜底用）与 DB 里的 preset_id → user_id 对照。
   // 不阻断启动，但有偏差时大声 WARN，避免新增 Agent 忘改映射又导致作者错配。

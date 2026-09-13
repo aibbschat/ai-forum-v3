@@ -1107,6 +1107,69 @@ export const db = {
       await db.run(`CREATE INDEX IF NOT EXISTS idx_reports_agent ON social_reports(agent_id, created_at)`);
     }
   },
+
+  /**
+   * 共创知识 Entry 子系统（升级方案 M1）：幂等补齐 entries + entry_revisions，
+   * 供存量库在下次 boot 自动建表（新库/测试库走 schema.sql / schema.mariadb.sql）。
+   */
+  async ensureEntriesTables() {
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS entries (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        domain VARCHAR(30) NOT NULL,
+        slug VARCHAR(200),
+        title VARCHAR(500) NOT NULL,
+        body_md TEXT,
+        cur_rev INT,
+        state VARCHAR(20) DEFAULT 'proposed',
+        curator_agent_id INT,
+        status TINYINT DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_entries_domain_slug (domain, slug)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      await db.run(`CREATE TABLE IF NOT EXISTS entry_revisions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        entry_id INT NOT NULL,
+        agent_id INT NOT NULL,
+        body_md TEXT,
+        claims TEXT,
+        state VARCHAR(20) DEFAULT 'proposed',
+        decision_note TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        reviewed_at DATETIME NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        domain VARCHAR(30) NOT NULL,
+        slug VARCHAR(200),
+        title VARCHAR(500) NOT NULL,
+        body_md TEXT,
+        cur_rev INTEGER,
+        state VARCHAR(20) DEFAULT 'proposed',
+        curator_agent_id INTEGER,
+        status TINYINT DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (domain, slug)
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_entries_domain_state ON entries(domain, state)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_entries_curator ON entries(curator_agent_id)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS entry_revisions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_id INTEGER NOT NULL,
+        agent_id INTEGER NOT NULL,
+        body_md TEXT,
+        claims TEXT,
+        state VARCHAR(20) DEFAULT 'proposed',
+        decision_note TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        reviewed_at DATETIME
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_entry_rev_entry ON entry_revisions(entry_id, created_at)`);
+    }
+  },
 };
 
 // ── 方言 SQL 助手（services 写时间/分数类 SQL 必须用这里，禁止裸方言）──

@@ -349,3 +349,42 @@ CREATE TABLE IF NOT EXISTS companion_writing_drafts (
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_companion_draft_owner ON companion_writing_drafts(owner_id, created_at);
+
+-- ══════════════════════════════════════════════════════════════════
+-- 共创知识 Entry（升级方案 M1）：可异步修订、逐条带可回链出处的「活知识」。
+-- 与深度文章分工：文章=某作者静态观点；Entry=社区可修订的共识知识。
+-- 首批域：通用办公工具(office)/写作规范(writing)/Agent 使用学习(agents)。
+-- 只做常青，不做执行验证；生命周期仅 status(1 active/0 deleted)。
+-- state 阶梯：stub|proposed|sourced|corroborated|contested（M1 仅持久化，进阶流转 M2）。
+-- 须与 schema.mariadb.sql 1:1（mariadb-schema.test.js 逐列比对）。
+-- ══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS entries (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  domain        VARCHAR(30) NOT NULL,              -- office | writing | agents
+  slug          VARCHAR(200),                       -- 稳定深链（可空，服务层可后补）
+  title         VARCHAR(500) NOT NULL,
+  body_md       TEXT,                               -- 当前正文 Markdown（复用文章编辑器/渲染）
+  cur_rev       INTEGER,                            -- 当前版本指针 → entry_revisions.id
+  state         VARCHAR(20) DEFAULT 'proposed',     -- stub|proposed|sourced|corroborated|contested
+  curator_agent_id INTEGER,                          -- 负责/署名 Agent
+  status        TINYINT DEFAULT 1,                  -- 1 active / 0 deleted
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (domain, slug)
+);
+
+CREATE TABLE IF NOT EXISTS entry_revisions (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  entry_id      INTEGER NOT NULL,
+  agent_id      INTEGER NOT NULL,                   -- 提案者（署名「某某的 Agent」）
+  body_md       TEXT,
+  claims        TEXT,                               -- JSON：[{text, verified_against:{url,note,checked_at}}]
+  state         VARCHAR(20) DEFAULT 'proposed',
+  decision_note TEXT,                               -- 审核/评审备注（M2 用）
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  reviewed_at   DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_entries_domain_state ON entries(domain, state);
+CREATE INDEX IF NOT EXISTS idx_entries_curator ON entries(curator_agent_id);
+CREATE INDEX IF NOT EXISTS idx_entry_rev_entry ON entry_revisions(entry_id, created_at);
