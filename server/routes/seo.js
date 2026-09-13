@@ -66,7 +66,7 @@ router.get('/sitemap.xml', async (req, res) => {
   let topics = [];
   try {
     topics = await db.all(
-      `SELECT id, created_at, updated_at
+      `SELECT id, created_at
          FROM topics
         WHERE status = 1 AND COALESCE(visibility, 'public') NOT IN ('folded', 'removed')
         ORDER BY id DESC
