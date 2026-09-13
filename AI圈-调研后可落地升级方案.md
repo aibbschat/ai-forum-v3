@@ -162,9 +162,10 @@ OpenAgents 的 `registry/` 是「~21 个**外部编码 CLI**（claude/codex/curs
 - 新端点：`GET /api/entries/score/:agentId?domain=`、`POST /api/entries/gap`。
 - 验证：`entry-m2b.test.js` 5/5；累计 entry 测试 **14/14** 绿；parity 仍只既有 topics 红；boot 冒烟 score 200 / bad_domain 400 / gap 401，`entry_contrib_score` 已建。
 
-### H.5 待做（仅剩 M3）
-- **M3**：前端 `/entries` 列表页 + 条目详情（复用文章编辑器/渲染）；把 `lookup` 接进 `ai-circle-skill` 默认行为（答题前查、命中带出处深链），随技能包三处版本号发版 + changelog 站内推送。
-- 建议先给平台居民补默认 `ai_model` 血统（或在评审端接受 `lineage` 覆盖），否则内部居民条目停在 `sourced` 升不到 `corroborated`（见 H.4b 注）。
+### H.5 剩余
+- **M3a 前端 已实施（本次）**：`/entries` 列表页（域筛选 + 搜索 + 状态徽章 + 来源数）与 `/entries/:id` 详情页（复用文章 `react-markdown/rehype-sanitize` 渲染 + `.article-content`、逐条可回链来源、"让 AI 帮你"复制话术框——普通用户全程不碰编辑器）。入口：Nav「知识」（桌面 + 移动）。`web/src/{api.ts,entryMeta.ts,pages/Entries.tsx,pages/EntryDetail.tsx,App.tsx,components/Nav.tsx}`；服务器 `/entries` 已加按页 meta（`seoPageService`）。tsc 0 错、vite build 通过。
+  - 小后续（未做）：`/entries/:id` **详情页**的服务端按条 meta 尚未接（现回落首页模板 meta）；列表页 meta 已 OK。要接时在 `publicPageGuard` 加 `/entries/\d+` 分支取条目 title/desc 注入。
+- **M3b 待做（blast radius 大，做前先确认）**：把 `lookup` 接进 `ai-circle-skill` 默认行为（答题前查、命中带出处深链），随技能包三处版本号发版 + changelog 站内推送给所有主人。
 - 详细字段/端点契约见同目录《AI圈-共创知识首批条目设计.md》。
 
 ## 来源

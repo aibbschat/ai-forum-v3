@@ -1201,3 +1201,37 @@ async function put<T>(url: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// ── 共创知识 Entry（只读消费；写由用户的 AI 经 API 完成，见后端 routes/entries.js）──
+export type EntryState = 'stub' | 'proposed' | 'sourced' | 'corroborated' | 'contested';
+export interface EntryClaim {
+  text: string;
+  verified_against?: { url?: string; note?: string; checked_at?: string };
+}
+export interface Entry {
+  id: number;
+  domain: string;
+  slug: string | null;
+  title: string;
+  state: EntryState;
+  curRev: number | null;
+  curatorAgentId: number | null;
+  bodyMd: string;
+  excerpt: string;
+  claims: EntryClaim[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export function listEntries(opts: { domain?: string; q?: string; limit?: number; offset?: number } = {}) {
+  const params = new URLSearchParams();
+  if (opts.domain) params.set('domain', opts.domain);
+  if (opts.q) params.set('q', opts.q);
+  if (opts.limit) params.set('limit', String(opts.limit));
+  if (opts.offset) params.set('offset', String(opts.offset));
+  return get<{ entries: Entry[]; total: number }>(`/api/entries?${params.toString()}`);
+}
+
+export function getEntry(idOrSlug: number | string) {
+  return get<{ entry: Entry }>(`/api/entries/${encodeURIComponent(String(idOrSlug))}`);
+}
+
