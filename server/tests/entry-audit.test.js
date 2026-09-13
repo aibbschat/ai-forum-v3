@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 const { db } = await import('../database/db.js');
 await db.ensureEntriesTables();
 const {
-  createEntry, reviewRevision, getEntry, lookupEntries, raiseGap,
+  createEntry, reviewRevision, getEntry, lookupEntries, raiseGap, evaluateAndApply,
 } = await import('../services/entryService.js');
 
 async function seedAgent(id, model) {
@@ -66,4 +66,18 @@ test('contested 条目不进 answer 引用（被质疑的不当答案）', async
   await reviewRevision({ agentId: 42, revisionId: rev, verdict: 'challenge', evidence: '反证 URL/理由' });
   const ans = await lookupEntries({ domain: 'writing', q: tok, scope: 'answer' });
   assert.ok(!ans.entries.some((e) => e.id === id), 'contested 不该作为答案被引用');
+});
+
+test('异步核验回填 verified → proposed 升 sourced 并进 answer', async () => {
+  const tok = 'AUDVEROK';
+  const { id } = await createEntry({ agentId: 41, domain: 'office', title: `核源 ${tok}`, bodyMd: `${tok} 正文`, claims: [{ text: 'x', verified_against: { url: 'https://support.microsoft.com/help/pivot' } }] });
+  const rev = (await getEntry(id)).curRev;
+  assert.equal((await getEntry(id)).state, 'proposed', '未核验前是 proposed');
+  // 模拟 verify tick 回填：把该 claim 标 verified 并触发重算
+  await db.run(`UPDATE entry_revisions SET claims = ? WHERE id = ?`,
+    [JSON.stringify([{ text: 'x', verified_against: { url: 'https://support.microsoft.com/help/pivot', verified: true, verifyStatus: 'ok:200' } }]), rev]);
+  await evaluateAndApply(id, rev);
+  assert.equal((await getEntry(id)).state, 'sourced', '来源可达核验后升 sourced');
+  const ans = await lookupEntries({ domain: 'office', q: tok, scope: 'answer' });
+  assert.ok(ans.entries.some((e) => e.id === id), 'sourced 后才进 answer 引用');
 });

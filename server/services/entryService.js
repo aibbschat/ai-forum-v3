@@ -3,6 +3,7 @@
 import { db, fn, isMaria } from '../database/db.js';
 import { enqueueReview } from './moderationService.js';
 import { notifySystem } from './notificationService.js';
+import { isStructurallyFake } from '../../scripts/lib/source-verify.js';
 
 export const ENTRY_DOMAINS = new Set(['office', 'writing', 'agents']);
 const ENTRY_STATES = new Set(['stub', 'proposed', 'sourced', 'corroborated', 'contested']);
@@ -27,7 +28,7 @@ function slugify(s) {
     .slice(0, 120);
 }
 // 清洗 Agent 提交的 claims：只保留 http/https 的 verified_against.url（防 javascript:/data: 注入），
-// 文本截断，非对象丢弃。
+// 并对可疑 URL 做同步结构判假；能过结构关的标 'pending'，由 entryVerifyService 异步可达性探测回填。
 function sanitizeClaims(claims) {
   if (!Array.isArray(claims)) return [];
   return claims.map((c) => {
@@ -35,15 +36,28 @@ function sanitizeClaims(claims) {
     const out = { text: String(c.text ?? '').slice(0, 2000) };
     const va = c.verified_against;
     if (va && typeof va === 'object') {
+      const rawUrl = String(va.url ?? '').trim();
       out.verified_against = { note: String(va.note ?? '').slice(0, 500), checked_at: String(va.checked_at ?? '').slice(0, 40) };
-      const url = String(va.url ?? '').trim();
-      if (isHttpUrl(url)) out.verified_against.url = url.slice(0, 2000);
+      if (isHttpUrl(rawUrl)) {
+        out.verified_against.url = rawUrl.slice(0, 2000);
+        const fake = isStructurallyFake({ url: out.verified_against.url });
+        out.verified_against.verified = false;
+        out.verified_against.verifyStatus = fake.fake ? `rejected:${fake.reason}` : 'pending';
+      } else if (rawUrl) {
+        // 非 http(s)：丢弃 URL 值（防注入），仅留 rejected 痕迹
+        out.verified_against.verified = false;
+        out.verified_against.verifyStatus = 'rejected:非 http(s) 协议';
+      }
     }
     return out;
   }).filter((x) => x && (x.text || (x.verified_against && x.verified_against.url)));
 }
-const claimsHaveAnchor = (claimsRaw) =>
-  safeJsonArray(claimsRaw).some((c) => c && c.verified_against && isHttpUrl(c.verified_against.url));
+// 「可引用来源」= 至少一条 claim 的 verified_against 既是被异步探测确认可达(verified:true)、又是 http(s)。
+// 仅"贴了个 URL"（verifyStatus pending/rejected/unverified/dead）不算锚，条目停在 proposed，杜绝随手贴链接即 sourced。
+const hasVerifiedAnchor = (claimsRaw) =>
+  safeJsonArray(claimsRaw).some(
+    (c) => c && c.verified_against && c.verified_against.verified === true && isHttpUrl(c.verified_against.url),
+  );
 
 function normalizeEntry(r) {
   if (!r) return null;
@@ -195,7 +209,7 @@ export async function evaluateAndApply(entryId, revisionId) {
   let revState;
   if (challenged) revState = 'contested';
   else if (independentEndorses >= 1) revState = 'corroborated';
-  else if (claimsHaveAnchor(rev.claims)) revState = 'sourced';
+  else if (hasVerifiedAnchor(rev.claims)) revState = 'sourced';
   else revState = 'proposed';
   const prevRevState = rev.state;
 

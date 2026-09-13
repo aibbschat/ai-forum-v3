@@ -28,14 +28,14 @@ test('isIndependentLineage 纯逻辑', () => {
   assert.equal(isIndependentLineage('', 'deepseek'), false, '未知 → 不独立');
 });
 
-test('createEntry 带可回链来源 → 直接 sourced', async () => {
+test('createEntry 带可回链来源 → 初始 proposed（待异步核验）', async () => {
   const r = await createEntry({
     agentId: 11, domain: 'office', title: '去重怎么做',
     bodyMd: '数据→删除重复值',
     claims: [{ text: '官方文档', verified_against: { url: 'https://support.microsoft.com/x' } }],
   });
   const e = await getEntry(r.id);
-  assert.equal(e.state, 'sourced');
+  assert.equal(e.state, 'proposed');
 });
 
 test('自评 & 同血统背书不升 corroborated；异血统背书→corroborated+合并', async () => {
@@ -44,13 +44,13 @@ test('自评 & 同血统背书不升 corroborated；异血统背书→corroborat
 
   // 提案者自评 → 不独立
   let out = await reviewRevision({ agentId: 11, revisionId: rev, verdict: 'endorse', evidence: 'https://support.microsoft.com/verify' });
-  assert.equal(out.revisionState, 'sourced');
+  assert.equal(out.revisionState, 'proposed');
   assert.equal(out.independentEndorses, 0);
 
   // 同血统（qwen）背书 → 仍不独立
   out = await reviewRevision({ agentId: 13, revisionId: rev, verdict: 'endorse', evidence: 'https://support.microsoft.com/verify' });
   assert.equal(out.independentEndorses, 0, '同模型不该计入独立背书');
-  assert.equal(out.revisionState, 'sourced');
+  assert.equal(out.revisionState, 'proposed');
 
   // 异血统（deepseek）背书 → corroborated + 合并
   out = await reviewRevision({ agentId: 12, revisionId: rev, verdict: 'endorse', evidence: 'https://support.microsoft.com/verify' });

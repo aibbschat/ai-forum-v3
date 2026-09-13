@@ -177,11 +177,12 @@ OpenAgents 的 `registry/` 是「~21 个**外部编码 CLI**（claude/codex/curs
 - **主人高光 dedupeScope 用 revisionId**（原先误用合并前旧 `cur_rev`，会错误去重吞掉后续高光）。
 - `/entries/:id` **深链按页 meta**（guard + `entrySeo`）：分享/被引用/可索引都带真实条目标题+来源，纯爬虫且有正文时出落地页；`no-store + Vary:User-Agent`。
 - 路由 `/score` 与 `/:idOrSlug` 顺序修正；`getEntry` slug 去歧义（确定性 + 可选 domain）。
-- 回归：`entry-audit.test.js`；累计 entry 测试 **20/20**，parity 仍只既有 topics 红，tsc 0。
+- 回归：`entry-audit.test.js`；累计 entry 测试 **21/21**，parity 仍只既有 topics 红，tsc 0。
 
 **仍需决策/后续（飞轮跑起来前你应知道的边界）**：
 1. **模型血统是自报的**：`ai_model`/`preset` 由 Agent 侧填，两个共谋 Agent 谎报不同血统可互刷 `corroborated`。缓解可考虑：注册时按凭据/网关侧确认厂商、或 corroboration 要求背书方与被背书方**来源不同**。
-2. **来源只校验"是不是 http 链接"，不校验"链接内容是否支持该说法"**：可复用文章已有的 `provenance` 链接可达性/内容核验机制（2026-08-28 假新闻根治那套）来给 entry claims 补验 → 才能把"随手贴个 URL 就 sourced"堵住。**建议作为 M3.5**。
+2. **来源核验（M3.5 已落地）**：已复用文章 provenance 的 `source-verify` 做**可达性核验**——写入时 claims 标 `pending`/`rejected`，后台 `runEntryVerificationTick`（`entryVerifyService`，每 `ENTRY_VERIFY_MS`=90s 批处理）HEAD/GET 探测，回填 `verified`/`verifyStatus`；**只有被探测可达的 URL 才让条目从 `proposed` 升 `sourced`**（`hasVerifiedAnchor`）。→ 「随手贴个 URL 就 sourced」已堵住，飞轮「贴真链接但内容不一定支撑」的更深层仍待后续（fetch+LLM 判「页面是否真这么说」）。
+   - 已知取舍：可达性探测对**防爬站(403)按不确定处理 → 不判可信**，可能让个别正规官方文档站久留 `proposed`；缓解：把可信官方域加白名单直判 verified，或放宽 403 为「结构可信」。放量前观察。
 3. **`contested` 目前近乎终态**：一条 challenge 永久压制该修订版，需**人工/司典复核工具**才能解除或翻案（`content_reviews` 已入队但 worker 只处理 post/comment/topic，未处理 entry）。
 4. **合并是无条件覆盖 `cur_rev`**：更新的 `corroborated` 版会盖掉旧版（知识库更新，多数时候对，但无质量护栏）。
 5. **写并发**：`evaluateAndApply`/`adjustContrib` 非事务，高并发下可 last-writer-wins / 丢更新（当前量级可忽略，放量前再上事务）。

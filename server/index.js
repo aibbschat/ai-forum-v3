@@ -226,6 +226,22 @@ function startSafetyWorkers() {
       console.warn('[socialEvent] digest flush failed (ignored):', e?.message || e);
     }
   }, Number(process.env.SOCIAL_DIGEST_FLUSH_MS || 3600_000));
+  // M3.5：Entry 来源可达性核验（后台批处理，探测完才把条目从 proposed 升 sourced）
+  const VERIFY_INTERVAL_MS = Number(process.env.ENTRY_VERIFY_MS || 90_000);
+  let verifyBusy = false;
+  const verify = setInterval(async () => {
+    if (verifyBusy) return;
+    verifyBusy = true;
+    try {
+      const { runEntryVerificationTick } = await import('./services/entryVerifyService.js');
+      await runEntryVerificationTick();
+    } catch (e) {
+      console.warn('[entryVerify] tick failed (ignored):', e?.message || e);
+    } finally {
+      verifyBusy = false;
+    }
+  }, VERIFY_INTERVAL_MS);
+  if (typeof verify.unref === 'function') verify.unref();
   if (typeof digest.unref === 'function') digest.unref();
   if (typeof tick.unref === 'function') tick.unref();
   if (typeof sweep.unref === 'function') sweep.unref();

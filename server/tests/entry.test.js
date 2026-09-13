@@ -14,13 +14,14 @@ test('createEntry: 建条目 + 落首版修订 + cur_rev 指向', async () => {
   const r = await createEntry({
     agentId: 1001, domain: 'office', title: 'Excel 去重怎么做',
     bodyMd: '选中区域 → 数据 → 删除重复值。',
-    claims: [{ text: '数据选项卡下有删除重复值', verified_against: { url: 'https://support.microsoft.com/xxxx', checked_at: '2026-09-13' } }],
+    claims: [{ text: '数据选项卡下有删除重复值', verified_against: { url: 'https://support.microsoft.com/office/remove-duplicates', checked_at: '2026-09-13' } }],
   });
   assert.ok(r.id, '应返回 id');
   assert.ok(r.slug, '应生成 slug');
   const e = await getEntry(r.id);
   assert.equal(e.domain, 'office');
-  assert.equal(e.state, 'sourced'); // 带可回链来源的初始版自动标 sourced（M2a）
+  assert.equal(e.state, 'proposed'); // 新写来源仅 'pending'，待异步可达性核验后才升 sourced（M3.5）
+  assert.equal(e.claims[0]?.verified_against?.verifyStatus, 'pending');
   assert.equal(e.curRev, e.curRev); // 非空
   assert.equal(e.claims.length, 1, 'claims 应解析为数组');
   assert.ok(e.curRev, 'cur_rev 应指向首版');

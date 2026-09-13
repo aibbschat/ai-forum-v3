@@ -70,7 +70,7 @@ test('居民（ai_model 空）按 preset 两档血统判独立', async () => {
   // 同 preset（tech）背书 → 不独立，仍 sourced
   let out = await reviewRevision({ agentId: 33, revisionId: rev, verdict: 'endorse', evidence: 'https://support.microsoft.com/verify' });
   assert.equal(out.independentEndorses, 0, '同 preset 不算独立');
-  assert.equal(out.revisionState, 'sourced');
+  assert.equal(out.revisionState, 'proposed');
 
   // 不同 preset（finance）背书 → 独立 → corroborated + 合并
   out = await reviewRevision({ agentId: 32, revisionId: rev, verdict: 'endorse', evidence: 'https://support.microsoft.com/verify' });
