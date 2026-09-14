@@ -17,6 +17,8 @@ import request from 'supertest';
 import './env.js';
 import app from './app.js';
 import db from '../database/db.js';
+import { createNotification } from '../services/notificationService.js';
+import { extractMentionedIds } from '../services/commentService.js';
 import { config } from '../config/index.js';
 
 const humanToken = (uid) => jwt.sign({ uid, username: 'owner' }, config.jwtSecret, { expiresIn: '1d' });
@@ -264,4 +266,56 @@ test('评论入参校验：缺 postId / 空内容 / 超长都按 400 处理', as
     .set('Authorization', `Bearer ${agent.token}`)
     .send({ postId, content: 'x'.repeat(2001) })
     .expect(400);
+});
+
+// ── 回归：@ 投递「写对也漏」（CJK 贪婪过匹配）修复；直接单测解析，绕开 :memory: 下存量红的
+//    外部 Agent 注册/发文 HTTP 链路 ──
+test('extractMentionedIds：中文昵称后紧跟文字（无分隔）仍能精确命中', async () => {
+  const a = await makeHuman({ nickname: `桔翁${uniq()}` });
+  const b = await makeHuman({ nickname: `山长水远${uniq()}` });
+
+  // @ 昵称后直接粘中文：旧贪婪正则会吞成不存在的名字 → 漏投
+  assert.deepEqual(await extractMentionedIds(`@${a.nickname}帮我看看这个`), [a.id], '昵称+中文粘连应命中');
+  // 「的 Agent」后缀粘连
+  assert.deepEqual(await extractMentionedIds(`@${a.nickname}的 Agent 说得好`), [a.id], '昵称+「的 Agent」应切出昵称');
+  // 一句多 @，各自命中、按出现顺序去重
+  assert.deepEqual(
+    (await extractMentionedIds(`先@${a.nickname}再@${b.nickname}一起讨论`)).sort((x, y) => x - y),
+    [a.id, b.id].sort((x, y) => x - y),
+    '多 @ 应全部命中'
+  );
+  // 正常带分隔仍命中
+  assert.deepEqual(await extractMentionedIds(`@${a.nickname} 这条你看看`), [a.id]);
+  // 不存在的名字不误命中
+  assert.deepEqual(await extractMentionedIds('@压根不存在的人 你好'), [], '无此名不应命中');
+});
+
+// ── 回归：广场互动通知跨帖去重塌缩（postId 恒 null）──
+test('广场通知 postId 为 null 时不跨帖塌缩（同 actor 不同帖各自落库）', async () => {
+  const actor = await makeHuman({ nickname: `哨兵甲${uniq()}` });
+  const recipient = await makeHuman({ nickname: `哨兵乙${uniq()}` });
+
+  await createNotification({ userId: recipient.id, actorId: actor.id, type: 'mention', postId: null, commentId: 1, extra: { topicId: 11 } });
+  await createNotification({ userId: recipient.id, actorId: actor.id, type: 'mention', postId: null, commentId: 2, extra: { topicId: 22 } });
+
+  const rows = await db.all(
+    `SELECT id FROM notifications WHERE user_id = ? AND actor_id = ? AND type = 'mention'`,
+    [recipient.id, actor.id]
+  );
+  assert.equal(rows.length, 2, '不同广场帖的提及通知不应被 5 分钟去重吞成一条');
+});
+
+test('带真实 postId 的同类通知仍保留 5 分钟去重（未过度放宽）', async () => {
+  const author = await makeHuman({ nickname: `作者${uniq()}` });
+  const postId = await publishHumanPost(author.id, `去重回归 ${uniq()}`);
+  const actor = await makeHuman({ nickname: `读者${uniq()}` });
+
+  await createNotification({ userId: author.id, actorId: actor.id, type: 'comment', postId, commentId: 1 });
+  await createNotification({ userId: author.id, actorId: actor.id, type: 'comment', postId, commentId: 2 });
+
+  const rows = await db.all(
+    `SELECT id FROM notifications WHERE user_id = ? AND actor_id = ? AND type = 'comment' AND post_id = ?`,
+    [author.id, actor.id, postId]
+  );
+  assert.equal(rows.length, 1, '同一篇文章的重复评论通知应仍被去重');
 });

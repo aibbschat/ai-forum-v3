@@ -1,20 +1,55 @@
 import { db } from '../database/db.js';
 import { createNotification } from './notificationService.js';
 
-// ── @{nickname} 解析：从评论内容里抓 @xxx，返回用户 id 列表（已验证存在）──
-const MENTION_RE = /@([\u4e00-\u9fa5A-Za-z0-9_\-]{1,30})/g;
-async function extractMentionedIds(content) {
+// ── @提及解析：站内已知名「最长前缀匹配」 ──
+// 旧实现用贪婪字符类 /@([中文…]{1,30})/ 抓名字，但中文没有词边界：昵称后一旦紧跟中文
+// （如「@小桔帮我看看」），整串会被吞成不存在的名字再精确查库 → 静默漏投（写对也收不到）。
+// 改为拿站内真实存在的 nickname/username 做最长前缀匹配：从 @ 之后尽量匹配最长的那个已知名，
+// 命中即登记，从而正确切出「@小桔帮我看看」→ 小桔、「@小沃的 Agent」→ 小沃。
+// 名字集合每次现查 users（表很小、写频率低，且规避改名后的缓存不一致）。
+async function loadMentionableNameMap() {
+  const rows = await db.all(`SELECT id, nickname, username FROM users WHERE status = 1`);
+  const map = new Map(); // lowerName -> Set<id>（nickname 与 username 都可被 @）
+  let maxLen = 0;
+  for (const r of rows) {
+    for (const raw of [r.nickname, r.username]) {
+      const key = String(raw || '').trim().toLowerCase();
+      if (!key) continue;
+      if (!map.has(key)) map.set(key, new Set());
+      map.get(key).add(r.id);
+      if (key.length > maxLen) maxLen = key.length;
+    }
+  }
+  return { map, maxLen };
+}
+
+const AT_RE = /@/g;
+export async function extractMentionedIds(content) {
   if (!content || typeof content !== 'string') return [];
-  const names = new Set();
+  const { map, maxLen } = await loadMentionableNameMap();
+  if (!map.size || !maxLen) return [];
+  const ids = [];
+  const seen = new Set();
+  const addId = (id) => {
+    if (!seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  };
   let m;
-  while ((m = MENTION_RE.exec(content)) !== null) names.add(m[1]);
-  if (names.size === 0) return [];
-  const placeholders = [...names].map(() => '?').join(',');
-  const rows = await db.all(
-    `SELECT id FROM users WHERE nickname IN (${placeholders}) OR username IN (${placeholders})`,
-    [...names, ...names]
-  );
-  return rows.map((r) => r.id);
+  AT_RE.lastIndex = 0;
+  while ((m = AT_RE.exec(content)) !== null) {
+    const rest = content.slice(m.index + 1).toLowerCase();
+    const upper = Math.min(maxLen, rest.length);
+    for (let len = upper; len >= 1; len--) {
+      const hit = map.get(rest.slice(0, len));
+      if (hit) {
+        for (const id of hit) addId(id);
+        break; // 最长优先，命中即止
+      }
+    }
+  }
+  return ids;
 }
 
 // 评论列表：顶层 + 顶层下的回复（楼中楼，二维）。
