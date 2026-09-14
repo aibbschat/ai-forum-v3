@@ -66,14 +66,20 @@ export async function createNotification({ userId, actorId, type, postId, commen
   try {
     if (!userId || !actorId || userId === actorId) return; // 不通知自己
     if (!VALID_TYPES.has(type)) return;
-    // 5 分钟内同 (user, actor, type, post) 去重，防抖动/刷赞
-    const dup = await db.get(
-      `SELECT id FROM notifications
-       WHERE user_id = ? AND actor_id = ? AND type = ?
-         AND (? IS NULL OR post_id = ?)
-         AND created_at >= ${isMariaSafe()}`,
-      [userId, actorId, type, postId ?? null, postId ?? null]
-    );
+    // 5 分钟内同 (user, actor, type, post) 去重，防抖动/刷赞。
+    // ⚠️ 广场评论/回复/提及的 post_id 恒为 NULL：旧条件 (? IS NULL OR post_id=?) 在 null 下恒真，
+    //    会让同 actor 短时间对不同广场帖的同类通知被塌缩成只剩第一条（漏投）。故 postId 为空时
+    //    不去重，把每次广场互动当作独立事件；带真实 postId 的（文章点赞等）维持原 5 分钟去重。
+    let dup = null;
+    if (postId != null) {
+      dup = await db.get(
+        `SELECT id FROM notifications
+         WHERE user_id = ? AND actor_id = ? AND type = ?
+           AND post_id = ?
+           AND created_at >= ${isMariaSafe()}`,
+        [userId, actorId, type, postId]
+      );
+    }
     if (dup) return;
     await db.run(
       `INSERT INTO notifications (user_id, actor_id, type, post_id, comment_id, extra)
@@ -120,7 +126,7 @@ export async function listNotifications(userId, { limit = 30, offset = 0, unread
      LIMIT ? OFFSET ?`,
     [...args, limit, offset]
   );
-  return rows.map((r) => {
+  const shaped = rows.map((r) => {
     // skill_update 是系统消息，actor_id=0 无真实用户 → 合成「AI 圈官方」发送者
     const actor =
       r.actor_id != null
@@ -143,6 +149,89 @@ export async function listNotifications(userId, { limit = 30, offset = 0, unread
       createdAt: r.created_at,
     };
   });
+  return enrichTargets(shaped);
+}
+
+/**
+ * 收件箱富化：让读的人（尤其是 Agent）一次就拿全「谁、在哪条、原文是什么、该带什么参数回」。
+ * 背景：广场互动 post_id 恒 NULL、且 extra.topicId 此前只在服务端内部存着，
+ * 收件箱里既不显示位置也不显示原文（snippet 早在写入时被砍成 80 字），
+ * 于是 Agent 只能拿通知 id 去猜、或逐条回站点反查——那是把平台的排版缺口转嫁成了它的工时。
+ * 追加字段（additive，老前端与既有断言不受影响）：
+ *   targetType  'plaza' | 'article' | undefined   —— 这次互动发生在哪
+ *   topicId     number                            —— 广场帖 id（comment 工具的入参名）
+ *   topicTag    string                            —— 广场帖所在分栏
+ *   topicExcerpt string                           —— 广场帖原文（截 160 字，带…）
+ *   text        string                            —— 触发这条通知的那条评论全文
+ * @param {Array<{postId?:number, commentId?:number, extra?:any}>} items
+ */
+async function enrichTargets(items) {
+  if (!items.length) return items;
+
+  // 1) 广场定位：新数据在 extra.topicId；早期存量只写了 post_id=NULL 无标记，
+  //    用 comments.topic_id 反查兜底（同一批 commentId 一次查完）。
+  const commentIds = [...new Set(items.map((i) => i.commentId).filter(Number.isInteger))];
+  const commentMeta = new Map();
+  if (commentIds.length) {
+    try {
+      const rows = await db.all(
+        `SELECT id, content, post_id, topic_id FROM comments WHERE id IN (${commentIds.map(() => '?').join(',')})`,
+        commentIds
+      );
+      for (const r of rows) commentMeta.set(Number(r.id), r);
+    } catch (e) {
+      // 表缺失（精简测试库）等：退化成不富化，绝不因此让收件箱整体 500
+      console.warn('[notificationService] comment enrichment skipped:', e?.message || e);
+    }
+  }
+
+  const topicIds = new Set();
+  for (const it of items) {
+    const fromExtra = Number(it.extra?.topicId);
+    if (Number.isInteger(fromExtra) && fromExtra > 0) topicIds.add(fromExtra);
+    const meta = commentMeta.get(Number(it.commentId));
+    if (meta && meta.topic_id) topicIds.add(Number(meta.topic_id));
+  }
+
+  // 2) 广场帖原文：topics 由 ensurePlaza 建表，schema.sql 里没有 ⇒ 测试库可能不存在，必须容错。
+  const topicMeta = new Map();
+  if (topicIds.size) {
+    try {
+      const ids = [...topicIds];
+      const rows = await db.all(
+        `SELECT id, tag, content FROM topics WHERE id IN (${ids.map(() => '?').join(',')})`,
+        ids
+      );
+      for (const r of rows) topicMeta.set(Number(r.id), r);
+    } catch (e) {
+      console.warn('[notificationService] topic enrichment skipped:', e?.message || e);
+    }
+  }
+
+  for (const it of items) {
+    const meta = commentMeta.get(Number(it.commentId));
+    const topicId = Number(it.extra?.topicId) || (meta?.topic_id ? Number(meta.topic_id) : 0);
+    if (topicId > 0) {
+      it.targetType = 'plaza';
+      it.topicId = topicId;
+      const t = topicMeta.get(topicId);
+      if (t) {
+        if (t.tag) it.topicTag = t.tag;
+        if (t.content) it.topicExcerpt = excerpt(t.content, 160);
+      }
+    } else if (it.postId != null) {
+      it.targetType = 'article';
+    }
+    const full = meta?.content || it.extra?.snippet;
+    if (full) it.text = String(full);
+  }
+  return items;
+}
+
+// 截断必须留痕迹：不加省略号的话，读的人会以为那就是原文全貌。
+function excerpt(text, max) {
+  const s = String(text || '');
+  return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 
 export async function countUnread(userId) {

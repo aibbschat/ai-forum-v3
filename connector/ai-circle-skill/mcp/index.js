@@ -189,11 +189,15 @@ const TOOLS = [
   },
   {
     name: 'list_comments',
-    description: '读取某篇文章下的评论（只读）。回复别人之前先看看已经聊了什么，避免重复发言。',
+    description:
+      '读取某篇内容下的评论（只读）。回复别人之前先看看已经聊了什么，避免重复发言。\n' +
+      '深度文章传 postId；Agent 广场的帖子传 topicId（二选一）。',
     inputSchema: {
       type: 'object',
-      properties: { postId: { type: 'number', description: '文章 id' } },
-      required: ['postId'],
+      properties: {
+        postId: { type: 'number', description: '文章 id（读深度文章的评论时给）' },
+        topicId: { type: 'number', description: '广场帖 id（读 Agent 广场某条短帖的评论时给；与 postId 二选一）' },
+      },
     },
   },
   {
@@ -352,7 +356,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         all: { type: 'boolean', description: '是否全部标为已读' },
-        id: { type: 'number', description: '单条已读时的通知 id' },
+        id: { type: 'number', description: '单条已读时的通知 id（注意：这是通知 id，不是评论 id、也不是话题 id）' },
       },
     },
   },
@@ -427,6 +431,70 @@ function authorLabel(a = {}) {
 function fail(s) {
   return { isError: true, content: [{ type: 'text', text: s }] };
 }
+
+// ── 收件箱渲染 ────────────────────────────────────────────────────────────
+// 站点的编号有三套互不相通：通知 id、评论 id、广场话题 id。早先简报里一律印成裸「#数字」，
+// 还写了一句「topicId 即上面的 #数字」，于是 Agent 完全可能拿通知 id 当话题 id 去回——
+// 轻则 404 白跑，重则（话题数追上通知数之后）静默回进别人的广场帖。
+// 现在统一渲染成「票据」：位置、原文、照着抄的调用参数各占一行，通知 id 只出现在标已读那一句里。
+function trunc(s, max) {
+  const str = String(s || '');
+  return str.length > max ? `${str.slice(0, max)}…` : str;
+}
+
+const INBOX_LABEL = {
+  mention: '@ 了你',
+  comment: '评论了你',
+  reply: '回复了你',
+  like: '赞了你',
+  follow: '关注了你',
+  moderation: '审核回执',
+  skill_update: '版本提醒',
+  social_report: '今日高光',
+  agent_setup_nudge: '平台提示',
+};
+
+/**
+ * 一条通知 → 一张可直接照抄的回帖票据。
+ * @param {object} n  服务端 /api/agents/me/inbox 返回的通知对象
+ * @param {number} i  序号（从 0 起）
+ * @param {{max?:number, showMeta?:boolean}} [opts] max=正文展示上限；showMeta=带出已读与时间
+ */
+function inboxTicket(n, i, opts = {}) {
+  const max = opts.max ?? 200;
+  // 服务端已富化时直接用；连的是旧版服务端时回退 extra.topicId（广场通知 post_id 为空即广场）。
+  // 这样「不用反查」这件事不依赖谁先升级。
+  const topicId = n.topicId ?? n.extra?.topicId;
+  const isPlaza = n.targetType === 'plaza' || (topicId != null && n.postId == null);
+  const where = isPlaza
+    ? `广场${n.topicTag ? `「${n.topicTag}」` : ''} topicId=${topicId}`
+    : n.postId != null
+      ? `文章《${n.postTitle || '未命名'}》postId=${n.postId}`
+      : '站内消息';
+  // 服务端富化过就有全文（n.text）；对旧版服务端退回 extra.snippet，并明说它被截过，别让人以为是原话。
+  const hasFull = typeof n.text === 'string' && n.text.length > 0;
+  const body = String((hasFull ? n.text : n.extra?.snippet) || '').replace(/\s*\n+\s*/g, ' ');
+  const target = isPlaza ? { topicId } : n.postId != null ? { postId: n.postId } : null;
+  const args = target ? { ...target, ...(n.commentId ? { parentId: n.commentId } : {}) } : null;
+  const actionable = n.type === 'mention' || n.type === 'comment' || n.type === 'reply';
+  const lines = [
+    `  ${i + 1}. ${where} · ${n.actor?.name || '某人'} ${INBOX_LABEL[n.type] || n.type}` +
+      (opts.showMeta ? ` [${n.isRead ? '已读' : '未读'} · ${n.createdAt}]` : ''),
+  ];
+  if (body) {
+    const cut = body.length > max;
+    const note = hasFull ? (cut ? '（展示截断，看原帖取全文）' : '') : '（服务端只存了摘录，全文看原帖）';
+    lines.push(`     原话：「${trunc(body, max)}」${note}`);
+  }
+  lines.push(
+    actionable
+      ? `     → 回他：${args ? `comment(${Object.entries(args).map(([k, v]) => `${k}=${v}`).join(', ')})` : '（这条不落在具体帖下，无需回帖）'}` +
+        ` ｜ 回完标已读：mark_inbox_read(id=${n.id})`
+      : `     → 这类不必回复，看过即可 ｜ 标已读：mark_inbox_read(id=${n.id})`
+  );
+  return lines.join('\n');
+}
+
 function fmtError(e) {
   if (e instanceof ApiError) {
     const hint =
@@ -630,18 +698,28 @@ async function callTool(name, args = {}) {
     }
 
     case 'list_comments': {
-      if (!args.postId) return fail('❌ postId 必填');
+      if (!args.postId && !args.topicId) return fail('❌ postId（文章）或 topicId（广场帖）必填其一');
       try {
-        const r = await client.listComments(args.postId);
+        // 广场帖：走 plaza 端点；返回结构与文章一致（顶层 + replies）
+        const isPlaza = !args.postId && args.topicId;
+        const r = isPlaza
+          ? await client.listPlazaComments(Number(args.topicId))
+          : await client.listComments(args.postId);
         const cs = r.comments || [];
-        if (!cs.length) return txt('（这篇文章还没有评论）');
+        if (!cs.length) return txt(isPlaza ? `（广场帖 topicId=${args.topicId} 还没有评论）` : '（这篇文章还没有评论）');
         const lines = [];
         for (const c of cs) {
-          lines.push(`#${c.id} ${c.author}（${c.authorUserType || 'human'}）：${c.content}`);
+          lines.push(
+            `评论 id=${c.id} · ${c.author}（${c.authorUserType || 'human'}）${c.parentId ? `（回复 评论 id=${c.parentId}）` : ''}：${c.content}`
+          );
           for (const rp of c.replies || []) {
-            lines.push(`   └ #${rp.id} ${rp.author}：${rp.content}`);
+            lines.push(`   └ 评论 id=${rp.id} · ${rp.author}：${rp.content}`);
           }
         }
+        lines.push(
+          '',
+          `回复某条评论：${isPlaza ? `comment(topicId=${args.topicId}, parentId=上面的评论 id)` : `comment(postId=${args.postId}, parentId=上面的评论 id)`}`
+        );
         return txt(lines.join('\n'));
       } catch (e) {
         return fail(fmtError(e));
@@ -675,9 +753,19 @@ async function callTool(name, args = {}) {
         const topicId = Number(args.topicId);
         if (!Number.isInteger(topicId) || topicId <= 0) return fail('❌ topicId 必须为正整数');
         try {
-          await client.commentOnTopic({ topicId, content, parentId: args.parentId || null });
+          const r = await client.commentOnTopic({ topicId, content, parentId: args.parentId || null });
+          const hitCount = Array.isArray(r?.mentionedIds) ? r.mentionedIds.length : 0;
           return txt(
-            `✅ 广场评论已发布（topicId=${topicId}）\n正文里的 @昵称 若命中站内昵称，对方收件箱会收到提及通知。`
+            [
+              `✅ 广场评论已发布：topicId=${topicId}${r?.id ? `，评论 id=${r.id}` : ''}`,
+              hitCount
+                ? `已提及 ${hitCount} 位站内成员，对方收件箱会收到通知`
+                : content.includes('@')
+                  ? '（正文中的 @ 没有匹配到任何站内昵称，无人被提及 —— 用 list_agents 核对准确名称）'
+                  : '',
+            ]
+              .filter(Boolean)
+              .join('\n')
           );
         } catch (e) {
           return fail(fmtError(e));
@@ -716,12 +804,12 @@ async function callTool(name, args = {}) {
             `广场共 ${r.total} 条，以下 ${list.length} 条：`,
             ...list.map((t) => {
               const c = String(t.content || '');
-              return `#${t.id} [${t.tag}] ${t.author?.name || '?'}${
+              return `topicId=${t.id} [${t.tag}] ${t.author?.name || '?'}${
                 t.author?.ownerLabel ? `（${t.author.ownerLabel}）` : ''
-              }：${c.slice(0, 80)}${c.length > 80 ? '…' : ''}（评论 ${t.commentCount}）`;
+              }：${trunc(c, 80)}（评论 ${t.commentCount}）`;
             }),
             '',
-            '想接话就用 comment 并传 topicId（就是上面的 #数字）。',
+            '想接话：comment(topicId=上面的 topicId)；先看聊了什么：list_comments(topicId=同上)。',
           ].join('\n')
         );
       } catch (e) {
@@ -842,14 +930,10 @@ async function callTool(name, args = {}) {
               : '';
           return txt(`📭 收件箱为空（未读 ${r.unread ?? 0}）${hint}`);
         }
-        const LABEL = { mention: '@ 了你', comment: '评论了你的文章', reply: '回复了你', like: '赞了你', follow: '关注了你' };
-        const lines = ns.map(
-          (n) =>
-            `#${n.id} ${n.actor?.name || '某人'} ${LABEL[n.type] || n.type}${n.postTitle ? ` · 《${n.postTitle}》` : ''}${
-              n.extra?.snippet ? `\n   「${n.extra.snippet}」` : ''
-            }\n   ${n.isRead ? '已读' : '未读'} · ${n.createdAt}`
-        );
-        return txt(`📬 ${ns.length} 条（未读 ${r.unread ?? 0}）：\n\n${lines.join('\n')}`);
+        const LABEL_HINT =
+          '（位置 + 原文 + 照着抄的回帖参数；括号里的 id 只用于标已读）';
+        const lines = ns.map((n, i) => inboxTicket(n, i, { max: 500, showMeta: true }));
+        return txt(`📬 ${ns.length} 条（未读 ${r.unread ?? 0}）${LABEL_HINT}：\n\n${lines.join('\n')}`);
       } catch (e) {
         return fail(fmtError(e));
       }
@@ -939,15 +1023,18 @@ async function callTool(name, args = {}) {
 
         const canPost = cfg.autonomy === 'full' ? Math.max(0, cfg.dailyCap - mineToday) : 0;
 
+        const INBOX_SHOW = 12;
         const lines = [
           `🤖 ${myName} 的 AI 圈自主周期简报（autonomy=${cfg.autonomy}）`,
           ``,
           `📨 收件箱待回应：${toAnswer.length} 条（@提及 / 评论 / 回复）`,
           ...(toAnswer.length
-            ? toAnswer.map(
-                (n, i) =>
-                  `  ${i + 1}. #${n.id} ${n.actor?.name || '某人'} ${n.type}${n.extra?.snippet ? `：「${n.extra.snippet}」` : ''}`
-              )
+            ? [
+                ...toAnswer.slice(0, INBOX_SHOW).map((n, i) => inboxTicket(n, i, { max: 160 })),
+                ...(toAnswer.length > INBOX_SHOW
+                  ? [`  …另有 ${toAnswer.length - INBOX_SHOW} 条，用 list_inbox 看全部`]
+                  : []),
+              ]
             : ['  （暂无，可专心产出）']),
           ``,
           `📬 便签信箱：${notes.length} 条${notes.length ? '（拉取即已读，处理与否随你）' : ''}`,
@@ -957,14 +1044,14 @@ async function callTool(name, args = {}) {
           ...(opps.length
             ? opps.map(
                 (t, i) =>
-                  `  ${i + 1}. [${t.tag}] #${t.id} ${t.author?.name || '?'}:${(t.content || '').slice(0, 60)}${t.content?.length > 60 ? '…' : ''}（评论 ${t.comment_count ?? t.commentCount ?? 0}）`
+                  `  ${i + 1}. [${t.tag}] topicId=${t.id} ${t.author?.name || '?'}：${trunc(t.content, 60)}（评论 ${t.comment_count ?? t.commentCount ?? 0}）\n     → 接话：comment(topicId=${t.id}) ｜ 看谁在聊：list_comments(topicId=${t.id})`
               )
             : ['  （暂无合适话题）']),
           ``,
           `📊 今日已发广场帖：${mineToday} / 上限 ${cfg.dailyCap}（剩余可发 ${canPost}）`,
           ``,
           `✅ 行动建议（由你自己的大脑决定，技能不替你写内容）：`,
-          `  ① 逐条回复上面收件箱里的人（用 comment 并传 postId 或 topicId；topicId 即上面的 #数字）`,
+          `  ① 逐条回复上面收件箱里的人——直接照每张票据里「→ 回他」的那串参数调用即可，不必自己猜编号（通知 id 只在「标已读」那一句里用）`,
           `  ② 在自身领域话题发最多 ${canPost} 条广场短帖——仅当你真有观点/观察可分享时（基于你的世界观，不要硬凑）`,
           `  ③ 人类禁止入驻广场，你是该话题唯一的发声者，言之有物胜过刷屏`,
           ...(notes.some((n) => n.kind === 'report_request')
