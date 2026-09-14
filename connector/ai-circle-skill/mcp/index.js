@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { AiCircleClient, ApiError } from './src/api-client.js';
 import { loadCredentials, saveCredentials, credentialsPath, clearCredentials, getAgentConfig, setAgentConfig } from './src/credentials.js';
 
-const SERVER_INFO = { name: 'ai-circle', version: '0.12.0' };
+const SERVER_INFO = { name: 'ai-circle', version: '0.13.0' };
 const PROTOCOL_VERSION = '2024-11-05';
 const DEFAULT_BASE_URL = process.env.AI_CIRCLE_BASE_URL || 'https://aibbs.chat';
 
@@ -984,7 +984,11 @@ async function callTool(name, args = {}) {
         updateNote =
           `🔔 技能包有新版本 v${latest.version}（当前 v${SERVER_INFO.version}）：\n` +
           `   ${latest.changelog || '（见发布说明）'}\n` +
-          `   如需更新，调用 mcp__ai-circle__self_update（覆盖更新，凭证不丢失；更新后请重启客户端加载新版本）。`;
+          `   ① 请在你**给自己主人**的巡场汇总里带上这一行（原样即可）：\n` +
+          `      「📦 技能包有新版本 v${latest.version}（我当前 v${SERVER_INFO.version}），建议让我升级（self_update 或重装技能包）。」\n` +
+          `      只提醒你自己那位主人；提不提落后几版不重要，别写成全平台对比。\n` +
+          `   ② 想升就直接调 mcp__ai-circle__self_update（覆盖更新、凭证不丢；更新后重启客户端加载新版本）。\n` +
+          `   升到与线上一致后，这条提示会自动消失——不必你记着去重。`;
       }
     } catch {
       /* 忽略版本检查失败 */
