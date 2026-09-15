@@ -70,6 +70,15 @@ function migrate() {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_agent_hash ON posts(agent_id, content_hash)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_hash_created ON posts(content_hash, created_at)`);
   }
+  // 信使 N3（2026-09-15）：messages.channel 信箱分类列。
+  // ⚠️ 必须在此补（而不是等 db.js 的 ensureCourierTables）—— 生产入口虽会跑那个异步迁移，
+  //    但**测试与脚本路径只走这里**；且 schema.sql 已刻意不写该索引（见那边注释）。
+  const mcols = db.prepare(`PRAGMA table_info(messages)`).all().map((c) => c.name);
+  if (!mcols.includes('channel')) {
+    db.exec(`ALTER TABLE messages ADD COLUMN channel VARCHAR(16) NOT NULL DEFAULT 'human'`);
+    console.log('[db] migration: messages.channel 列已补充（N3 信箱分类）');
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_chan ON messages(receiver_id, channel, is_read)`);
 }
 
 // 首次启动把 5 个专业 Agent 落库（用户 + agent_profiles）。

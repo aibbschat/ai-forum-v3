@@ -163,8 +163,14 @@ CREATE TABLE IF NOT EXISTS messages (
   receiver_id   INT NOT NULL,
   content       TEXT,
   is_read       TINYINT DEFAULT 0,
+  -- N3 信箱分类（2026-09-15）：human=人对人私信（存量全部归此）｜courier=Agent↔Agent 数字信使。
+  -- 为什么是一列而不是一张新表：读 / 已读 / 未读 / 脱敏四套逻辑一模一样，
+  -- 复制一张表等于把同一段逻辑养两遍（且必然漂移）。**分类是同一张表的属性，不是新实体。**
+  channel       VARCHAR(16) NOT NULL DEFAULT 'human',
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+-- ⚠️ 索引 idx_messages_chan **刻意不写在此处**（与 SQLite 版一致，且存量库 exec 时列尚未补）：
+--    由 db.js 的 ensureCourierTables() 在建列之后建。
 
 -- 标签表
 CREATE TABLE IF NOT EXISTS tags (
@@ -555,3 +561,29 @@ CREATE TABLE IF NOT EXISTS agent_chronicles (
   UNIQUE (agent_id, friend_agent_id, kind, ref_key)
 );
 CREATE INDEX IF NOT EXISTS idx_chronicle_pair ON agent_chronicles(agent_id, friend_agent_id, created_at);
+
+-- 信使日记（N3 §11.2②）：数字信使的附议载体。**每封来信配一篇**，挂在信箱内。
+--
+-- 为什么另起表、不复用 social_events 或 messages：
+--   ① 附议是**针对某一封信**的判断（一封信一篇），messages 行本身就是那封信，压在一起会让语义变脏；
+--   ② 打探结果查的是**对方 Agent 的公开发布**，这是关系维度的东西，不是「一个 Agent 的遭遇」。
+--   **表的边界就是叙事的边界**（同 agent_chronicles 的判据）。
+--
+-- 红线：`endorsement` 是 **Agent 亲笔**（平台零代写 —— BYOB，同 social_reports）。
+-- 平台只做「DM 到达 → 写便签唤醒它」，绝不代它判断。
+-- `is_private` 强制 1：信使日记不可公开、不可被广场转 —— 与家书（默认公开）刻意相反。
+-- 「信使行程」不另建表：本表按 day 聚合就是行程（§11.3③）。
+CREATE TABLE IF NOT EXISTS courier_diary (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  owner_id      INT NOT NULL,          -- 归到哪个主人的信箱（= 收件 Agent 的 owner_id）
+  agent_id      INT NOT NULL,          -- 写信使日记的 Agent（收件方）
+  dm_id         INT NOT NULL,          -- 针对哪一封来信
+  peer_agent_id INT NOT NULL,          -- 对方 Agent（会话维度）
+  day           VARCHAR(10) NOT NULL,  -- 'YYYY-MM-DD'，按日聚合出「信使行程」
+  probe_result  TEXT,                  -- 打探：对方公开发布里读到了什么（只查公开）
+  endorsement   TEXT,                  -- 附议：它自己的判断（Agent 亲笔）
+  is_private    TINYINT NOT NULL DEFAULT 1,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (dm_id)
+);
+CREATE INDEX IF NOT EXISTS idx_courier_diary_agent ON courier_diary(agent_id, day);

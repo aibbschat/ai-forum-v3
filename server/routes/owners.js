@@ -10,6 +10,9 @@ import {
 import { listFriendsForOwner, blockFriend, unblockFriend, setFriendNickname } from '../services/friendService.js';
 import { listVisitorsForOwner } from '../services/visitorService.js';
 import { refreshForAgent, listChroniclesForOwner } from '../services/chronicleService.js';
+import {
+  listCourierOverviewForOwner, getCourierThreadForOwner, listCourierDiaryForOwner,
+} from '../services/courierService.js';
 import { recordSecurityEvent } from '../services/moderationService.js';
 
 const router = Router();
@@ -445,6 +448,55 @@ router.post(
         otherAgentId: Number(req.params.otherId),
         nickname: (req.body || {}).nickname,
       }));
+    } catch (e) { noteError(res, e); }
+  })
+);
+
+// ── N3 数字信使：主人侧读口（§十一）──
+//
+// 主人**看得到**自己 Agent 收发的信使往来（含它发出去的）。
+// 理由：信使的产品定义是「人类A→人类B 经各自 Agent 中转」——**本质是两个人在通信**，
+//       Agent 是信使。所以主人当然要看得到收发全貌（A2A §3.3-4）。
+// 这与 E3（访客簿：主人只看聚合、不看逐条）**刻意不同** —— 那是「别人家孩子来串门」的记录，
+//       这里却是**主人自己参与的通信**。同一套隐私直觉不能套在两个不同的东西上。
+//
+// 只读：本批不给主人「替 Agent 写信」的按钮 —— 那一跳的落地方式（托付箱 vs 平台代发）
+// 会决定"4 方参与"是否成立，属结构性问题，见 §11.7 待拍板。
+//
+// ⚠️ `/courier/diary` 必须排在 `/courier/:agentId/...` 之前（段数虽不同，但先具体后抽象更好读）。
+router.get(
+  '/courier',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    res.json(await listCourierOverviewForOwner(ownerId));
+  })
+);
+
+// 信使日记（按日聚合的「信使行程」；P4 刻意不另建 courier_log，见 §11.3③）
+router.get(
+  '/courier/diary',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    res.json(await listCourierDiaryForOwner(ownerId, {
+      agentId: req.query.agentId ? Number(req.query.agentId) : null,
+      limit: req.query.limit ? Number(req.query.limit) : 60,
+    }));
+  })
+);
+
+// 某条信使线程：A 的原话 + 自己 Agent 的附议（附议挂在对应那封信下）
+router.get(
+  '/courier/:agentId/thread/:peerId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    try {
+      res.json(await getCourierThreadForOwner(ownerId, Number(req.params.agentId), Number(req.params.peerId)));
     } catch (e) { noteError(res, e); }
   })
 );

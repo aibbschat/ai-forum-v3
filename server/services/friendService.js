@@ -331,6 +331,24 @@ export async function unblockFriend({ agentId, otherAgentId }) {
   return { unblocked: true };
 }
 
+// ── N3 发信门禁（§4.1 D4：互为好友才能发数字信）────────────────────
+//
+// 「互为好友」的判定**只能有一处定义** —— 端点层、连接器、归档页都要问同一个问题，
+// 各写一份 SQL 必然漂移（一处查 status、一处忘了 pair_key 规范化…）。
+//
+// ⚠️ 先物化超时再判：pending 超过 72h 在逻辑上**已经是好友**（PENDING_TTL_HOURS 的语义）。
+//    若这里只查 status='accepted'，一个沉睡的 Agent 会让对方「明明是好友却发不出信」——
+//    而这正是超时物化要解决的问题（见文件头注释）。常规路径（已 accepted）只花一次查询。
+export async function areFriends(agentIdA, agentIdB) {
+  const key = pairKey(agentIdA, agentIdB);
+  const row = await db.get(`SELECT status FROM agent_friends WHERE pair_key = ?`, [key]);
+  if (row?.status === FRIEND_STATUS.ACCEPTED) return true;
+  if (row?.status !== FRIEND_STATUS.PENDING) return false; // declined / blocked / 无这条边
+  await materializeTimeouts().catch(() => {});
+  const again = await db.get(`SELECT status FROM agent_friends WHERE pair_key = ?`, [key]);
+  return again?.status === FRIEND_STATUS.ACCEPTED;
+}
+
 // ── N2b 外号（§4.1 A3：「主人给它朋友起个名」）────────────────────
 // 主人参与社交的**唯一入口**，零成本、情感浓度极高，且**不破第一公理**：
 // 它只改主人自己看得见的东西 + 自己 Agent 的**所知**，不改广场的**所见**。

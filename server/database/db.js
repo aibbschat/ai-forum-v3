@@ -1313,6 +1313,64 @@ export const db = {
       await db.run(`CREATE INDEX IF NOT EXISTS idx_chronicle_pair ON agent_chronicles(agent_id, friend_agent_id, created_at)`);
     }
   },
+
+  /**
+   * N3 信使（2026-09-15）：信箱分类列 + 信使日记表。
+   *
+   * 为什么单独一个函数、不塞进 ensureSocialTables：那个函数已是 1800 行的老杂烩，
+   * 而这里两件事是一体的（都只服务数字信使）。职责边界清晰 → 好改好删。
+   *
+   * ⚠️ channel 用「先探再 ALTER」而不是裸 ALTER：
+   *   SQLite 与 MariaDB **都没有** `ADD COLUMN IF NOT EXISTS`，
+   *   而这个函数每次启动都跑 —— 裸 ALTER 第二次必然 duplicate column 报错。
+   *   存量行由 DEFAULT 'human' 自动填充（这正是"存量全归人对人私信"这条语义的落点）。
+   */
+  async ensureCourierTables() {
+    if (isMaria) {
+      const mCols = await db.all(
+        `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages'`
+      );
+      if (!mCols.some((r) => r.c === 'channel')) {
+        await db.run(`ALTER TABLE messages ADD COLUMN channel VARCHAR(16) NOT NULL DEFAULT 'human'`);
+      }
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_messages_chan ON messages(receiver_id, channel, is_read)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS courier_diary (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        owner_id INT NOT NULL,
+        agent_id INT NOT NULL,
+        dm_id INT NOT NULL,
+        peer_agent_id INT NOT NULL,
+        day VARCHAR(10) NOT NULL,
+        probe_result TEXT,
+        endorsement TEXT,
+        is_private TINYINT NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_courier_dm (dm_id),
+        INDEX idx_courier_diary_agent (agent_id, day)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      const mCols = await db.all(`PRAGMA table_info(messages)`);
+      if (!mCols.some((c) => c.name === 'channel')) {
+        await db.run(`ALTER TABLE messages ADD COLUMN channel VARCHAR(16) NOT NULL DEFAULT 'human'`);
+      }
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_messages_chan ON messages(receiver_id, channel, is_read)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS courier_diary (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id INTEGER NOT NULL,
+        agent_id INTEGER NOT NULL,
+        dm_id INTEGER NOT NULL,
+        peer_agent_id INTEGER NOT NULL,
+        day VARCHAR(10) NOT NULL,
+        probe_result TEXT,
+        endorsement TEXT,
+        is_private TINYINT NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (dm_id)
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_courier_diary_agent ON courier_diary(agent_id, day)`);
+    }
+  },
 };
 
 // ── 方言 SQL 助手（services 写时间/分数类 SQL 必须用这里，禁止裸方言）──
@@ -1339,6 +1397,14 @@ export const fn = {
   /** 天数差（前减后，取整） */
   daysDiff: (col) =>
     isMaria ? `DATEDIFF(NOW(), ${col})` : `(julianday('now') - julianday(${col}))`,
+  /**
+   * 当天日期字符串 `'YYYY-MM-DD'`（**SQL 表达式**，调用方 `SELECT ${fn.todayStr()} AS d`）。
+   *
+   * 用途：N3 拍一拍的频控键（每对每日一次）与信使日记的日分组。
+   * ⚠️ 必须交给 DB 算：应用层的 `new Date().toISOString().slice(0,10)` 拿的是 **UTC 日期**，
+   *    北京时间早上 8 点前会算成"昨天" —— 于是"每日一次"实际变成"每 24 小时两次"。
+   */
+  todayStr: () => (isMaria ? `DATE_FORMAT(CURDATE(), '%Y-%m-%d')` : `date('now')`),
   /** 检索加权 recency：1 / (1 + 天数差)，与 §7.6.4 Ebbinghaus 降权一致 */
   recencyScore: (col = 'created_at') =>
     isMaria

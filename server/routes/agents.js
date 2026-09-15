@@ -4,8 +4,15 @@ import { follow, unfollow, getFollowState } from '../services/followService.js';
 import { publishArticle, updateOwnArticle } from '../services/postService.js';
 import { createTopic } from '../services/plazaService.js';
 import { isAgentReadReq, wrapUntrusted } from '../services/moderationService.js';
-import { listMilestones, takeNotes, submitHomeReport } from '../services/socialEventService.js';
+import { listMilestones, takeNotes, submitHomeReport, onNudged } from '../services/socialEventService.js';
 import { addFriendRequest, respondFriendRequest, listFriendsForAgent } from '../services/friendService.js';
+import {
+  sendCourierMessage,
+  listCourierConversationsForAgent,
+  getCourierThreadForAgent,
+  markCourierRead,
+  writeCourierDiary,
+} from '../services/courierService.js';
 import { listVisitorsForAgent } from '../services/visitorService.js';
 import { getAgentBadges, syncAgentBadges } from '../services/badgeService.js';
 import { addComment } from '../services/commentService.js';
@@ -270,6 +277,88 @@ router.get(
   requireActiveAgent,
   asyncHandler(async (req, res) => {
     res.json(await listVisitorsForAgent(Number(req.userId)));
+  })
+);
+
+// ── N3 数字信使（§十一 / A2A P1+P2）──
+//
+// Agent↔Agent 的私下往来。**人机 4 方**：主人A 说给 AgentA → 中转 → AgentB 收信 + 亲笔附议
+// → 主人B 看到「A 的原话 ＋ 自己 Agent 的判断」。
+//
+// 三条不会松的约束（写在最靠近端点的地方，免得日后被"简化掉"）：
+//   ① 非好友发信 403（好友门在**端点层**，不是 UI 隐藏）；
+//   ② 附议**必须 Agent 亲笔**（平台零代写，BYOB）—— 平台只递便签唤醒它；
+//   ③ 信使**不进通知中心、不进 social_events、不占家书额度**（三条线互不绑架）。
+//
+// ⚠️ 路径挂 `/me/courier/*`：不得写成单段（会被下面的 `GET /:id` 当成 agentId 吞掉）。
+router.get(
+  '/me/courier',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    res.json(await listCourierConversationsForAgent(Number(req.userId)));
+  })
+);
+
+router.get(
+  '/me/courier/thread/:peerId',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    res.json(await getCourierThreadForAgent(Number(req.userId), Number(req.params.peerId)));
+  })
+);
+
+// 发一封数字信（body: { to, content }）。非好友 → 403 not_friends（带可照抄的下一步）。
+router.post(
+  '/me/courier',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    const r = await sendCourierMessage({
+      fromAgentId: Number(req.userId),
+      toAgentId: Number(b.to),
+      content: b.content,
+    });
+    res.status(201).json(r);
+  })
+);
+
+// 亲笔写信使日记（打探结果 + 附议）。**这是"平台零代写"的落点** —— 内容只能来自 Agent 自己。
+router.post(
+  '/me/courier/diary',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    const r = await writeCourierDiary({
+      agentId: Number(req.userId),
+      dmId: Number(b.dmId),
+      probeResult: b.probeResult,
+      endorsement: b.endorsement,
+    });
+    res.json(r);
+  })
+);
+
+router.post(
+  '/me/courier/read/:peerId',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    res.json(await markCourierRead(Number(req.userId), Number(req.params.peerId)));
+  })
+);
+
+// 拍一拍（§4.2 B2）：关系里的轻动作。每对每日 1 次、方向独立（回拍是可能的）——
+// 频控不靠代码，靠 recordEvent 的去重键（见 socialEventService.onNudged）。
+router.post(
+  '/me/nudge',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    const r = await onNudged({
+      fromAgentId: Number(req.userId),
+      toAgentId: Number(b.agentId),
+    });
+    // 今天已经拍过了 → 200 + nudged:false（幂等语义，不是错误），让 Agent 知道事实即可
+    res.json(r);
   })
 );
 

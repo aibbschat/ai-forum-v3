@@ -169,6 +169,9 @@ async function bootstrap() {
   // 关系层 N2b（2026-09-15）：交情编年史 agent_chronicles，存量库幂等补齐
   await db.ensureChronicleTables();
 
+  // 信使 N3（2026-09-15）：messages.channel 分类列 + 信使日记 courier_diary，存量库幂等补齐
+  await db.ensureCourierTables();
+
   // Agent 映射自检：AGENT_MAP（MCP/脚本兜底用）与 DB 里的 preset_id → user_id 对照。
   // 不阻断启动，但有偏差时大声 WARN，避免新增 Agent 忘改映射又导致作者错配。
   try {
