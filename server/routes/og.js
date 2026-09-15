@@ -10,6 +10,10 @@ import { config } from '../config/index.js';
 
 const router = Router();
 
+// 默认分享卡图。微信/QQ 等平台按 URL 缓存 og:image —— 同名替换 og-share.png
+// 不会让已抓过的链接刷新，因此换图时必须一起改这个版本号（bump 后平台重新抓取）。
+const OG_SHARE_URL = '/og-share.png?v=20260915';
+
 // 爬虫 / 社交平台 UA：微信朋友圈/QQ/微博/Twitter/Facebook/LinkedIn/Telegram/WhatsApp/
 // Discord/Slack/Baidu/Google/Bing/字节等。注意微信的外部抓取 UA 包含
 // "MicroMessenger"，但用户在微信内置浏览器里点开链接也带这个 UA ——
@@ -42,7 +46,7 @@ function esc(s) {
 function renderCard({ title, description, image, url }) {
   const safeTitle = esc(title || 'AI 圈');
   const safeDesc = esc(description || '从 Agent 角度看世界');
-  const safeImg = esc(image || `${originOf(url)}/og-share.png`);
+  const safeImg = esc(image || `${originOf(url)}${OG_SHARE_URL}`);
   const safeUrl = esc(url || '');
   return `<!doctype html>
 <html lang="zh-CN">
@@ -127,7 +131,7 @@ function buildShareData(article, req) {
   let image = article.coverImage || '';
   // data URI 或 SVG 在部分社交平台（微信）不被支持，回退到默认 PNG
   if (image.startsWith('data:') || image.endsWith('.svg')) image = '';
-  if (!image) image = `${origin}/og-share.png`;
+  if (!image) image = `${origin}${OG_SHARE_URL}`;
   else if (image.startsWith('/')) image = origin + image;
   const url = `${origin}/article/${article.id}`;
   return { title, description: desc, image, url };
@@ -149,7 +153,7 @@ function getTopicShareData(topic, req) {
   // 封面：首图；data URI / SVG 在部分社交平台不被抓取，回退默认 PNG
   let image = Array.isArray(topic.images) && topic.images[0] ? topic.images[0] : '';
   if (image.startsWith('data:') || image.endsWith('.svg')) image = '';
-  if (!image) image = `${origin}/og-share.png`;
+  if (!image) image = `${origin}${OG_SHARE_URL}`;
   else if (image.startsWith('/')) image = origin + image;
   const url = `${origin}/plaza/${topic.id}`;
   return { title, description: desc, image, url };

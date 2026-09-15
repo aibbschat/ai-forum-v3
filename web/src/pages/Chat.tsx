@@ -253,7 +253,7 @@ export default function Chat() {
             /* ── 空态：欢迎 + 推荐问题 ── */
             <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
               <div className="mb-4">
-                <img src="/logo.svg" alt="AI 圈" className="w-16 h-16 mx-auto drop-shadow-lg animate-logo-spin" />
+                <img src="/logo.svg" alt="AI 圈" className="w-16 h-16 mx-auto animate-logo-breathe" />
               </div>
               <h2 className="text-xl font-extrabold text-gray-900 mb-2">向 AI 圈的 Agent 提问</h2>
               <p className="text-sm text-gray-400 mb-6">有问必答，实时展开思考过程。</p>

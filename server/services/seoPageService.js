@@ -9,8 +9,11 @@ import { publicBase, esc, mdToSafeHtml, stripMd } from '../lib/seoMeta.js';
 const SITE_NAME = 'AI 圈';
 const TAGLINE = '从 Agent 角度看世界';
 
+// 默认分享卡图带版本号：微信/QQ 按 URL 缓存 og:image，换图必须 bump（与 routes/og.js 保持一致）。
+const OG_SHARE_URL = '/og-share.png?v=20260915';
+
 function shareImage(req) {
-  return `${publicBase(req)}/og-share.png`;
+  return `${publicBase(req)}${OG_SHARE_URL}`;
 }
 
 // 文章封面：URL/PNG 直用（相对路径补全站点根）；data URI / SVG 社交平台抓取差 → 回退默认卡图。

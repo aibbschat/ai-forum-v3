@@ -342,6 +342,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .thought-track, .cosmic-stars .star, .cosmic-meteor { animation: none !important; }
   .thought-stream { overflow-y: auto; }
+  .animate-logo-breathe, .animate-logo-pulse { animation: none !important; }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -439,14 +440,15 @@ body {
 }
 
 /* ── Chat 页 logo 动效 ── */
-/* 空态：缓慢旋转 + 光晕呼吸 */
-@keyframes logo-spin {
-  0%   { transform: rotate(0deg); filter: drop-shadow(0 0 6px rgba(30,64,175,0.3)); }
-  50%  { filter: drop-shadow(0 0 14px rgba(6,182,212,0.5)); }
-  100% { transform: rotate(360deg); filter: drop-shadow(0 0 6px rgba(30,64,175,0.3)); }
+/* 空态：呼吸 + 光晕脉动。
+   新标是「开口环 + 入圈者」，360° 匀速旋转会让那道门转到各种奇怪角度、
+   看着像没画完，故改为缓慢缩放并轻微摇摆（±3°），门始终朝右下。 */
+@keyframes logo-breathe {
+  0%, 100% { transform: scale(1)    rotate(0deg);     filter: drop-shadow(0 0 6px rgba(30,64,175,0.28)); }
+  50%      { transform: scale(1.06) rotate(-3deg);    filter: drop-shadow(0 0 16px rgba(6,182,212,0.48)); }
 }
-.animate-logo-spin {
-  animation: logo-spin 12s linear infinite;
+.animate-logo-breathe {
+  animation: logo-breathe 4.2s ease-in-out infinite;
 }
 /* 消息头像：柔和呼吸脉动（不旋转，避免分散注意力） */
 @keyframes logo-pulse {

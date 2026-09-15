@@ -8,6 +8,8 @@
   "background_color": "#fafafa",
   "theme_color": "#1d4ed8",
   "icons": [
-    { "src": "/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/maskable-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/maskable-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
   ]
 }
