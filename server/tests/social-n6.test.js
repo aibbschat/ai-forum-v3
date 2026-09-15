@@ -25,7 +25,7 @@ import { getDb } from '../database/connection.js';
 import { signAgentToken } from '../middleware/auth.js';
 import { fn } from '../database/db.js';
 import {
-  RARE_KINDS, PRIVATE_MILESTONE_KINDS, onFirstApology, onFirstNickname,
+  RARE_KINDS, PRIVATE_MILESTONE_KINDS, ONCE_RARE_KINDS, onFirstApology, onFirstNickname,
 } from '../services/socialEventService.js';
 import { getHarvest, getHouseholdHarvest } from '../services/harvestService.js';
 
@@ -84,6 +84,22 @@ function backdateEvent(agentId, kind, daysAgo) {
     `UPDATE social_events SET created_at = ${fn.nowOffsetDays(-daysAgo)}
       WHERE agent_id = ? AND kind = ?`
   ).run(Number(agentId), kind);
+}
+
+/**
+ * 直接 INSERT 一条 social_events —— 用来**复现 N4 之前留下的历史重复行**。
+ *
+ * ⚠️ 走 `recordEvent` 是造不出重复的（现网代码对 once 类会去重，那正是修复本身），
+ *    所以这里绕过 service 直插，模拟"旧代码写下的坏数据"。这是唯一能测出
+ *    读取侧守卫的办法 —— 否则用例只会证明"新代码不再写重复"，而库里那些行依旧会露出来。
+ */
+function rawEvent(agentId, kind, { refId = null, counterAgentId = null, line = '', daysAgo = 0 } = {}) {
+  const id = Number(dbx().prepare(
+    `INSERT INTO social_events (agent_id, owner_id, kind, ref_key, ref_type, ref_id, counter_agent_id, facts, created_at)
+     VALUES (?, ?, ?, 'global', 'topic', ?, ?, ?, ${fn.nowOffsetDays(-daysAgo)})`
+  ).run(Number(agentId), owner1, kind, refId, counterAgentId, JSON.stringify({ line })).lastInsertRowid);
+  assert.ok(id > 0, `直插 ${kind} 失败`);
+  return id;
 }
 
 function notifCount(userId) {
@@ -418,4 +434,92 @@ test('第四红线对 household 读口同样生效（小桔那条路不能漏）
   assert.ok(mine.heard.length > 0, '前置：a 应该收到了 b 的评论');
   assert.ok(mine.heard[0].excerpt.includes('<untrusted_agent_content>'),
     '🔴 小桔读到的他人正文同样要带数据标记 —— 两条读口漏一条等于没做');
+});
+
+// ════════════════════════════════════════════════════════════════
+// 7. 历史重复行：一生一次的「第一次」只能出现一次
+//
+// 背景（2026-09-15 N6 生产验收发现）：N4 之前 `recordEvent` 的去重键**错误地包含**
+// ref_id / counter_agent_id —— 于是 first_reply「每换一篇帖各记一条」、first_guest
+// 「每换一位客人各记一条」。生产库 agent 1850 的 first_reply 在 7 天窗口里躺着 **10 行**
+// （09-12×4 / 09-13×1 / 09-14×5），全部早于修复 commit 68e3d7e 的上线时间（16:08）。
+//
+// 修复只保证了"此后不再写重复"——**已经躺在库里的行不会自己消失**。
+// 收获页是它的第二张脸，若照单全收就会显示 10 条「第一次被 AI 接话」。
+// 本节三条用例把这个洞钉死（含"不许拿重复行冒充真第一次"这条最要紧的）。
+// ════════════════════════════════════════════════════════════════
+
+test('ONCE_RARE_KINDS 自检：由 RARE_KINDS ∩ ONCE_PER_AGENT 求出，且不误伤非一生一次的两位', () => {
+  // 这条不是废话：若这个集合哪天变空，收获里那道 `onceOnlyFirst` 会静默失效
+  // （`onceMarks` 为空 → 片段拼不出来 → 与没加过滤一模一样），而"重复行被折叠"的
+  // 用例会**因为别的原因**继续绿。必须先钉住它非空且内容正确。
+  assert.ok(ONCE_RARE_KINDS.length >= 5,
+    `ONCE_RARE_KINDS 不该是空的（实得 ${JSON.stringify(ONCE_RARE_KINDS)}）—— 空集合会让读取侧守卫静默失效`);
+  assert.ok(ONCE_RARE_KINDS.every((k) => RARE_KINDS.includes(k)),
+    'ONCE_RARE_KINDS 必须是 RARE_KINDS 的子集（它只用于 firsts 那一栏）');
+  assert.ok(ONCE_RARE_KINDS.includes('first_reply') && ONCE_RARE_KINDS.includes('first_guest'),
+    '生产上真正重复过的就是这两位，必须在集合里');
+
+  // ⚠️ 这两位也在 RARE_KINDS 里，但**不是**一生一次 —— 折叠它们会把真实的多条压成一条。
+  assert.ok(!ONCE_RARE_KINDS.includes('friend_rejected'),
+    'friend_rejected 按「被谁拒绝」计，可以有多个 —— 不能折叠');
+  assert.ok(!ONCE_RARE_KINDS.includes('anniversary'),
+    'anniversary 按 100/365 档位计，两条都是真的 —— 不能折叠');
+});
+
+test('⚠️ 历史重复行被折叠：库里 3 条 first_reply，收获里只出现 1 条（且是最早那条）', async () => {
+  const a = mkAgent(`重复甲${uniq}`, owner1);
+  const b = mkAgent(`重复乙${uniq}`, owner1);
+  const t1 = newTopic(a.id, { label: '被接话的帖一' });
+  const t2 = newTopic(a.id, { label: '被接话的帖二' });
+  const t3 = newTopic(a.id, { label: '被接话的帖三' });
+  // 复现旧 bug 的坏数据形态：ref_id 各不相同 → 每条各占一行
+  rawEvent(a.id, 'first_reply', { refId: t1, counterAgentId: b.id, line: '最早那次', daysAgo: 3 });
+  rawEvent(a.id, 'first_reply', { refId: t2, counterAgentId: b.id, line: '第二次的重复行', daysAgo: 2 });
+  rawEvent(a.id, 'first_reply', { refId: t3, counterAgentId: b.id, line: '第三次的重复行', daysAgo: 1 });
+
+  // 前置：库里真有 3 行 —— 否则下面的断言是空转（这是本用例的全部意义所在）
+  const raw = Number(dbx().prepare(
+    `SELECT COUNT(*) AS c FROM social_events WHERE agent_id = ? AND kind = 'first_reply'`
+  ).get(a.id).c);
+  assert.equal(raw, 3, '前置失败：没造出重复行，本用例会变成空转');
+
+  const h = await getHarvest(a.id);
+  const fr = h.firsts.filter((f) => f.kind === 'first_reply');
+  assert.equal(fr.length, 1,
+    `「第一次被 AI 接话」是一生一次，收获里只该有 1 条，实得 ${fr.length} 条 —— 生产上 1850 会显示 10 条`);
+  const dump = JSON.stringify(h.firsts);
+  assert.ok(dump.includes('最早那次'), '保留的应是最早那条（真正的第一次）');
+  assert.ok(!dump.includes('第二次的重复行') && !dump.includes('第三次的重复行'),
+    '重复行必须被挡在页外（否则同一件事被陈列多遍，本身就是错误的事实）');
+  assert.equal(h.counts.firsts, h.firsts.length, 'counts 要与折叠后的 firsts 对齐');
+});
+
+test('🔴 真第一次在窗外时整条不出现 —— 不许拿窗内的重复行冒充「这周的第一次」', async () => {
+  // 这是折叠逻辑最容易写错的地方：只按 (agent, kind) 去重、保留"窗口内最早那条"，
+  // 就会把三周前的第一次替换成两天前的重复行，于是收获说出一件**没发生的事**。
+  // 正确做法是取全局第一条，再叠窗口 —— 真第一次在窗外，这类事件这周就是没有。
+  const a = mkAgent(`窗外甲${uniq}`, owner1);
+  const b = mkAgent(`窗外乙${uniq}`, owner1);
+  const t1 = newTopic(a.id, { label: '很久以前的帖' });
+  const t2 = newTopic(a.id, { label: '最近的帖' });
+  rawEvent(a.id, 'first_reply', { refId: t1, counterAgentId: b.id, line: '三周前那次', daysAgo: 21 });
+  rawEvent(a.id, 'first_reply', { refId: t2, counterAgentId: b.id, line: '两天前的重复行', daysAgo: 2 });
+
+  const h = await getHarvest(a.id); // 默认 7 天
+  assert.equal(h.firsts.filter((f) => f.kind === 'first_reply').length, 0,
+    '🔴 真正的第一次发生在窗口外 → 这周它没有这个第一次。换成窗内的重复行＝编造事实');
+  assert.ok(!JSON.stringify(h.firsts).includes('两天前的重复行'));
+});
+
+test('折叠只作用于一生一次类：friend_rejected 的多行不被压成一条', async () => {
+  const a = mkAgent(`拒绝甲${uniq}`, owner1);
+  const b = mkAgent(`拒绝乙${uniq}`, owner1);
+  const c = mkAgent(`拒绝丙${uniq}`, owner1);
+  rawEvent(a.id, 'friend_rejected', { refId: b.id, counterAgentId: b.id, line: '被乙拒了', daysAgo: 2 });
+  rawEvent(a.id, 'friend_rejected', { refId: c.id, counterAgentId: c.id, line: '被丙拒了', daysAgo: 1 });
+
+  const h = await getHarvest(a.id);
+  assert.equal(h.firsts.filter((f) => f.kind === 'friend_rejected').length, 2,
+    'friend_rejected 按「被谁拒绝」计，两条都是真的 —— 折叠它会把两场遭遇压成一场');
 });

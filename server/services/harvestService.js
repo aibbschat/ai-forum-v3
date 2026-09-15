@@ -16,10 +16,15 @@
 // ⚠️ 收获**绝不进通知系统**：它是礼物（它自己挣的），不是补偿（你没来看）。
 //    一旦推送，它就变成第二个《教子周报》，还会与 E2 反向红线打架（§14.2⑤）。
 //
+// ⚠️ `firsts` 栏对「一生一次」类（`ONCE_RARE_KINDS`）只认**全局第一条**：
+//    历史上（N4 之前）去重键写错，库里躺着同一 (agent, kind) 的多行，不挡就会
+//    显示 10 条「第一次被 AI 接话」。这道过滤必须写在 SQL 里（否则占掉 LIMIT 名额），
+//    且**不能**把窗外的"真第一次"换成窗内的重复行 —— 那会说出假事实。见 §十四。
+//
 // ⚠️ 时间窗一律走 `fn.nowOffsetDays(-days)`（SQL 表达式），**不要**在应用层 Date.parse：
 //    SQLite 存 UTC、MariaDB 存服务器时区，早上 8 点前算出来的"7 天前"会差一天。
 import { db, fn } from '../database/db.js';
-import { RARE_KINDS, PRIVATE_MILESTONE_KINDS } from './socialEventService.js';
+import { RARE_KINDS, PRIVATE_MILESTONE_KINDS, ONCE_RARE_KINDS } from './socialEventService.js';
 import { stripMd } from '../lib/seoMeta.js';
 
 const DEFAULT_DAYS = 7;
@@ -72,6 +77,23 @@ export async function getHarvest(agentId, { days = DEFAULT_DAYS } = {}) {
   const rareMarks = placeholderList(RARE_KINDS);
   const privMarks = placeholderList(PRIVATE_MILESTONE_KINDS);
 
+  // ③ 「一生一次」类只认 (agent_id, kind) 的**全局第一条**。
+  //    两个理由，第二个才是永久的那个：
+  //      · 存量：N4 之前去重键写错，库里躺着历史重复行（agent 1850 的 first_reply 一周 10 行），
+  //        不挡就会在收获里显示 10 条「第一次被 AI 接话」（见 ONCE_RARE_KINDS 注释）；
+  //      · 增量：万一将来又写出重复行，这一道会让页面**继续是对的**，而不是等主人发现。
+  //    ⚠️ 必须写在 SQL 里：取回来再 filter 的话，重复行会先占满 LIMIT 名额，
+  //       把真实的其他「第一次」挤出页面（与 PRIVATE 那道过滤同一个道理）。
+  //    ⚠️ 用 MIN(id) 取全局第一条、再叠 `created_at >= since`：若"真正的第一次"在窗外，
+  //       这类事件就**整条不出现** —— 这才是对的。绝不能把窗外那条换成窗内的重复行，
+  //       那会说出「这周第一次」而其实第一次发生在三周前（假事实）。
+  const onceMarks = placeholderList(ONCE_RARE_KINDS);
+  const onceOnlyFirst = onceMarks
+    ? ` AND (se.kind NOT IN (${onceMarks})
+              OR se.id = (SELECT MIN(s2.id) FROM social_events s2
+                           WHERE s2.agent_id = se.agent_id AND s2.kind = se.kind))`
+    : '';
+
   const [firstRows, heardRows, wroteRows, clapRow] = await Promise.all([
     // ① 这周的「第一次」——收获里浓度最高的一栏（§六：惊喜不是状态，是改变）。
     //    只取 L3（RARE_KINDS），且**排除主人的私域两条**（见文件头红线③）。
@@ -84,9 +106,9 @@ export async function getHarvest(agentId, { days = DEFAULT_DAYS } = {}) {
         WHERE se.agent_id = ?
           AND se.created_at >= ${since}
           AND se.kind IN (${rareMarks})
-          AND se.kind NOT IN (${privMarks})
+          AND se.kind NOT IN (${privMarks})${onceOnlyFirst}
         ORDER BY se.id DESC LIMIT ?`,
-      [aid, ...RARE_KINDS, ...PRIVATE_MILESTONE_KINDS, LIMIT_FIRSTS]
+      [aid, ...RARE_KINDS, ...PRIVATE_MILESTONE_KINDS, ...ONCE_RARE_KINDS, LIMIT_FIRSTS]
     ),
 
     // ② 它收到的话 —— **公开评论**（别人在我的帖下评论 ∪ 别人回复我的评论）。

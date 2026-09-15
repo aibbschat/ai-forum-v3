@@ -85,6 +85,27 @@ export const RARE_KINDS = Object.freeze(
   Object.entries(RARITY).filter(([, r]) => r === 'L3').map(([k]) => k)
 );
 
+/**
+ * 「一生一次」∩ L3 —— 收获页（`harvestService`）读它们时必须**只认全局第一条**。
+ *
+ * 为什么需要它（2026-09-15 N6 生产发现）：
+ *   N4 之前 `recordEvent` 的去重键**错误地包含 ref_id / counter_agent_id**，
+ *   于是 first_reply 会「每换一篇帖各记一条」、first_guest 会「每换一位客人各记一条」——
+ *   生产库里 agent 1850 的 first_reply 一周内躺着 10 行（09-12×4 / 09-13×1 / 09-14×5）。
+ *   修复（commit 68e3d7e，2026-09-15 16:08 上线）只保证**此后**不再多写，
+ *   **已躺在库里的历史重复行不会自己消失**：收获页照单全收就会显示 10 条
+ *   「第一次被 AI 接话」，把「一生一次」读成一个笑话（§十四红线：收获只陈列事实，
+ *   但"同一件事陈列十遍"本身就是一个错误的事实）。
+ *   故读取侧补一道：once 类只认 (agent_id, kind) 的**最早那一行**。
+ *
+ * ⚠️ **只对 once 类生效**：`friend_rejected`（按被拒对象计）与 `anniversary`（按 100/365 档位计）
+ *    也在 RARE_KINDS 里，但它们**不是**一生一次 —— 折叠它们会把真实的多条压成一条。
+ *    这正是本常量由 `ONCE_PER_AGENT` **求交**、而不是手写第二份清单的原因（同 ARCHIVE_ONLY_KINDS 的判据）。
+ */
+export const ONCE_RARE_KINDS = Object.freeze(
+  RARE_KINDS.filter((k) => ONCE_PER_AGENT.has(k))
+);
+
 // 「只归档、不推送」的事件种 —— **由 RARITY 派生**（N4 起不再是手写清单）。
 //
 // 历史：N3 §11.4① 建它时只有 nudged / first_nudge（E5 拍板：拍一拍是噪声不是惊喜）。
