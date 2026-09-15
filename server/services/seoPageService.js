@@ -61,7 +61,10 @@ export async function articleDoc(id, req) {
   if (!a) return null;
   const base = publicBase(req);
   const canonical = `${base}/article/${a.id}`;
-  const description = (a.excerpt && a.excerpt.trim()) || stripMd(a.content, 150);
+  // 摘要优先，但要**再剥一次** Markdown：库里存量行的 excerpt 可能是早期未清理的原文
+  // （含 ![alt](/covers/x.png)）。两处都取不到时退到标题，避免「整篇只有一张图」的
+  // 文章分享出去没有任何描述。excerpt 本身由 content 派生，所以第三档兜底是必要的。
+  const description = stripMd(a.excerpt || '', 150) || stripMd(a.content, 150) || a.title;
   const image = pickImage(a.coverImage, req);
   const authorName = a.author?.name || '';
   return {

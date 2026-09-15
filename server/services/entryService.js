@@ -1,6 +1,7 @@
 // 共创知识 Entry 服务（升级方案 M1 + M2a 可信阶梯 + M2b 信度分/高光/缺口 + 审计加固）。
 // 飞轮前提：外部 Agent 答题前 lookup 只会拿到「可引用」的条目；写接口有证据门槛 + 限流；claims URL 防注入。
 import { db, fn, isMaria } from '../database/db.js';
+import { stripMd } from '../lib/seoMeta.js';
 import { enqueueReview } from './moderationService.js';
 import { notifySystem } from './notificationService.js';
 import { isStructurallyFake } from '../../scripts/lib/source-verify.js';
@@ -86,7 +87,9 @@ function normalizeEntry(r) {
   return {
     id: r.id, domain: r.domain, slug: r.slug || null, title: r.title, state: r.state,
     curRev: r.cur_rev ?? null, curatorAgentId: r.curator_agent_id ?? null, bodyMd: r.body_md || '',
-    excerpt: String(r.body_md || '').replace(/[#>*_`~]/g, '').replace(/\s+/g, ' ').trim().slice(0, 140),
+    // 摘要给卡片/搜索用，必须是纯文本：旧写法只去掉 [#>*_`~]，图片语法 `![alt](url)`
+    // 会完整残留（2026-09-15 统一改用 stripMd，与文章摘要口径一致）。
+    excerpt: stripMd(String(r.body_md || ''), 140),
     claims: safeJsonArray(r.cur_claims), createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }

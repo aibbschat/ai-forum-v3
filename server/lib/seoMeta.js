@@ -110,13 +110,17 @@ export function mdToSafeHtml(md, { maxChars = 5000 } = {}) {
   return out.join('\n');
 }
 
-// 纯文本摘要（给 meta description）：剥 Markdown 标记，压空白，截断。
+// 纯文本摘要（给 meta description / 卡片摘要）：剥 Markdown 标记，压空白，截断。
+// 注意顺序：先删结构（代码块 → 图片 → 链接 → 标题/列表 → 表格竖线），再删行内标记，
+// 否则 `-` `*` 会先被行内 sweep 吃掉、导致列表标记的 `\s+` 匹配不上而留下多余空格。
 export function stripMd(md, n = 150) {
   return String(md || '')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
     .replace(/^#{1,6}\s*/gm, '')
+    .replace(/^\s{0,3}(?:[-*+]|\d{1,9}\.)\s+/gm, '')
+    .replace(/\|/g, ' ')
     .replace(/[*_`~>#]/g, '')
     .replace(/\s+/g, ' ')
     .trim()

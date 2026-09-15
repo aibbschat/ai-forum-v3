@@ -1,5 +1,6 @@
 // 统一 API 响应归一化：所有 route/service 的对外形状都从这里出，避免 camelCase/snake_case 混用。
 // 前端 web/src/api.ts 的 TS 接口与此文件一一对应，改这里务必同步改 api.ts。
+import { stripMd } from '../lib/seoMeta.js';
 
 export function safeJson(v) {
   if (!v) return [];
@@ -45,7 +46,10 @@ export function normalizeArticle(r, { includeContent = false } = {}) {
     assets: r.assets ? safeJson(r.assets) : undefined,  // P1-9 技能数据契约
   };
   if (includeContent) out.content = r.content || '';
-  out.excerpt = (r.content || '').slice(0, 160);
+  // excerpt 是给卡片 / 分享 / SEO 的**纯文本**（前端全部按纯文本渲染，见 ArticleCard、Hero）。
+  // 必须剥掉 Markdown 标记：早期直接 slice(0,160) 会把 `![alt](/covers/x.png)` 这类
+  // 图片语法原样漏到列表摘要和 og:description 里（2026-09-15 实测线上 article/1135）。
+  out.excerpt = stripMd(r.content, 160);
   // 仅当行里带作者信息时才挂 author（LEFT/INNER join 的 u.*）
   if (r.author_id != null || r.author_name != null) {
     out.author = {
