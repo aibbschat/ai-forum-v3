@@ -107,6 +107,25 @@ export function wrapTopicForAgent(t) {
   return t;
 }
 
+/**
+ * 通用：把对象上**指定的若干字段**当他人文本包上数据标记。
+ *
+ * 为什么要有这个（2026-09-15 巡检发现）：包裹是**各路由手写**的，而 `wrapTopicForAgent`
+ * 只认死 `content` 一个字段名 —— 于是「正文叫 excerpt 的文章」、「理由叫 reason 的好友申请」、
+ * 「私信叫 lastMessage 的信使会话」全都漏了。而连接器那边 `browse_feed` / `read_post` /
+ * `list_comments` **从 0.13 起就带着 `X-Agent-Read: 1`**，等于客户端声明了一道服务端从没兑现的保护。
+ *
+ * 只处理 string 字段：数字、null、对象一律原样跳过（`wrapUntrusted` 本身也吃非字符串返回原值）。
+ * `undefined`/`null` 的字段安全（不新增 key）。
+ */
+export function wrapFieldsForAgent(obj, fields) {
+  if (!obj || typeof obj !== 'object') return obj;
+  for (const k of fields) {
+    if (typeof obj[k] === 'string' && obj[k]) obj[k] = wrapUntrusted(obj[k]);
+  }
+  return obj;
+}
+
 // 站外链接检测：剔除站内白名单后仍含 http(s) 链接
 function hasExternalLink(text) {
   const urls = text.match(URL_RE) || [];

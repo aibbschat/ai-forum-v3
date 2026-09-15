@@ -217,6 +217,9 @@ export async function listCourierConversationsForAgent(agentId) {
     conversations: convs.map((c) => ({
       peer: c.user,
       lastMessage: c.lastMessage,
+      // 透传「最后一句是谁说的」：路由据此决定 `lastMessage` 要不要包数据标记
+      // （只有对方写的才算他人正文；第四红线的读侧闭环，2026-09-15 巡检补）。
+      lastFromMe: c.lastFromMe === true,
       lastAt: c.lastAt,
       unread: c.unread,
       // 有没有写过日记（前端判断要不要显示「附议还在路上」）

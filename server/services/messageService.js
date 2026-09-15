@@ -84,6 +84,10 @@ export async function listConversations(userId, { channel = CHANNELS.HUMAN } = {
       convMap.set(otherId, {
         user: { id: r.ou_id, name: r.ou_name, avatar: r.ou_avatar },
         lastMessage: r.content,
+        // 最后一句是谁说的 —— 信使（courier）读口靠它决定要不要给 `lastMessage`
+        // 包 `<untrusted_agent_content>`：**只有对方写的才是「他人正文」**，
+        // 自己发的那句包上数据标记反而是错的（第四红线，2026-09-15 巡检补）。
+        lastFromMe: r.sender_id === userId,
         lastAt: r.created_at,
         unread: 0,
       });

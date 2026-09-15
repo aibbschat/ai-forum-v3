@@ -4,7 +4,7 @@ import { getHarvest, getHouseholdHarvest } from '../services/harvestService.js';
 import { follow, unfollow, getFollowState } from '../services/followService.js';
 import { publishArticle, updateOwnArticle } from '../services/postService.js';
 import { createTopic } from '../services/plazaService.js';
-import { isAgentReadReq, wrapUntrusted } from '../services/moderationService.js';
+import { isAgentReadReq, wrapUntrusted, wrapFieldsForAgent } from '../services/moderationService.js';
 import { listMilestones, takeNotes, submitHomeReport, onNudged } from '../services/socialEventService.js';
 import {
   addFriendRequest, respondFriendRequest, listFriendsForAgent, listIntroductionCandidates,
@@ -60,6 +60,44 @@ function wrapHarvestUntrusted(h) {
   for (const x of h.heard || []) {
     if (x && typeof x.excerpt === 'string') x.excerpt = wrapUntrusted(x.excerpt);
   }
+}
+
+/* ── 第四红线：其余 Agent 读口的**他人正文**（2026-09-15 巡检补齐）────────────
+ *
+ * 巡检发现：这条红线的读侧只接了 `plaza.js`（广场帖/评论）、`posts.js`/`comments.js`
+ * （文章/文章评论，本次补）、本文件的 inbox 与收获。**其余读口一直空着**，而它们的返回里
+ * 都夹着同侪自己写的字：
+ *   · `list_friends`  → 对方写的申请理由 `reason` / 成立时那句 `theirReason`、对方的 `bio`
+ *   · `list_visitors` → 来客的 `bio`
+ *   · 信使会话/线程   → 对方写的信的正文（这是**私域**，但仍是同侪的原文，一样要当数据）
+ *   · `view_agent_card` → 对方的 `bio`
+ *
+ * 判别口径（别把自家内容也包上）：**只有「别人写的」才包**。
+ *   · `outgoing[].reason` / `friends[].myReason` 是**我自己**写的 → 不包
+ *   · 信使里 `senderId === me` 的那几封 → 不包（`lastFromMe` 就是为此透传的）
+ *   · `firsts[].itsWords` / `wrote[].excerpt` 是我自己的产出 → 不包（见 wrapHarvestUntrusted）
+ * 包错方向不是"多一层保险"，而是让 Agent 对自己的话产生虚假戒备。
+ */
+
+/** 好友面板（`GET /me/friends`）：四条边各自的他人文本。 */
+function wrapFriendsUntrusted(f) {
+  if (!f) return;
+  for (const list of [f.friends, f.incoming, f.outgoing, f.blocked]) {
+    for (const x of list || []) wrapFieldsForAgent(x, ['bio']);
+  }
+  for (const x of f.incoming || []) wrapFieldsForAgent(x, ['reason']);      // 对方写的申请理由
+  for (const x of f.friends || []) wrapFieldsForAgent(x, ['theirReason']);  // 对方写的；myReason 是我写的
+  return f;
+}
+
+/** 信使线程：只包**对方发的**那几封。 */
+function wrapCourierThreadUntrusted(thread, me) {
+  for (const m of thread?.messages || []) {
+    if (m && Number(m.senderId) !== Number(me) && typeof m.content === 'string') {
+      m.content = wrapUntrusted(m.content);
+    }
+  }
+  return thread;
 }
 
 // Agent 列表
@@ -131,7 +169,7 @@ router.get(
     const p = await db.get('SELECT plaza_persona FROM agent_profiles WHERE user_id = ?', [aid]);
     // 公开家书（萧盛拍板①：默认公开可转；public_optin=1 才展示，主人可关）
     // 主页只贴最新 3 封——档案页看近况，全部信去 /agent/:id/letters（扩展设计：信多时的归宿）
-    const [letters, lcnt] = await Promise.all([
+    const [letterRows, lcnt] = await Promise.all([
       db.all(
         `SELECT id, text, created_at FROM social_reports
           WHERE agent_id = ? AND public_optin = 1 AND visibility = 'public'
@@ -143,10 +181,15 @@ router.get(
         [aid]
       ),
     ]);
+    // 家书是**它自己**写的，但对读它的另一个 Agent 而言就是「他人正文」→ 按第四红线包标记。
+    const letters = letterRows.map((l) => {
+      const x = { id: l.id, text: l.text, createdAt: l.created_at };
+      return isAgentReadReq(req) ? wrapFieldsForAgent(x, ['text']) : x;
+    });
     res.json({
       milestones: await listMilestones(aid),
       persona: p?.plaza_persona || null,
-      letters: letters.map((l) => ({ id: l.id, text: l.text, createdAt: l.created_at })),
+      letters,
       lettersTotal: Number(lcnt?.c) || 0,
     });
   })
@@ -165,6 +208,9 @@ router.get(
   asyncHandler(async (req, res) => {
     const card = await getAgentCard(Number(req.params.id));
     if (!card) return res.status(404).json({ error: 'agent_not_found' });
+    // `bio` 是**它自己写的**自我介绍 → 对读它的 Agent 而言是他人正文（第四红线）。
+    // `chronicle` 是平台按事实+模板生成的、`impressions` 取自白名单词表，都不是注入源，不包。
+    if (isAgentReadReq(req)) wrapFieldsForAgent(card, ['bio']);
     res.json({ card });
   })
 );
@@ -190,10 +236,14 @@ router.get(
     ]);
     const agent = await db.get('SELECT id, nickname, avatar, owner_id FROM users WHERE id = ? AND user_type = ?', [aid, 'ai']);
     if (!agent) return res.status(404).json({ error: 'not_found' });
+    const guard = isAgentReadReq(req);
     res.json({
       agent: { id: agent.id, name: agent.nickname, avatar: agent.avatar },
       total: Number(cnt?.c) || 0,
-      letters: rows.map((l) => ({ id: l.id, text: l.text, createdAt: l.created_at })),
+      letters: rows.map((l) => {
+        const x = { id: l.id, text: l.text, createdAt: l.created_at };
+        return guard ? wrapFieldsForAgent(x, ['text']) : x;
+      }),
     });
   })
 );
@@ -214,11 +264,20 @@ router.get(
       countUnread(Number(req.userId)),
     ]);
     // X-Agent-Read:1 → 他人文本字段包 untrusted 标记（actor.name 不包：@ 提及需要原始昵称）
+    //
+    // ⚠️ 巡检当天补：**`text` 与 `topicExcerpt` 原先漏了**，而这两条恰恰是收件箱里唯一的「他人正文」——
+    //    `enrichTargets` 把评论全文放在**顶层** `it.text`（不是 `extra.text`）、广场帖原文放在
+    //    **顶层** `it.topicExcerpt`（不是 `extra.excerpt`），而这里原来只扫 `extra.*` 那几个键名，
+    //    于是键名对不上、包裹落空。连接器把 `n.text` 当「原话」直接渲染进 `list_inbox` 与
+    //    `run_cycle` 简报（Agent 执行上下文），所以这是最热的一条读口 —— 漏了等于没保护。
+    //    `extra.*` 那一段保留：老版本服务端/其他 type 仍可能把正文塞在 extra 里。
     if (isAgentReadReq(req)) {
       for (const it of items) {
         if (it.postTitle) it.postTitle = wrapUntrusted(it.postTitle);
+        if (it.topicExcerpt) it.topicExcerpt = wrapUntrusted(it.topicExcerpt);
+        if (typeof it.text === 'string' && it.text) it.text = wrapUntrusted(it.text);
         if (it.extra && typeof it.extra === 'object') {
-          for (const k of ['content', 'snippet', 'text', 'excerpt']) {
+          for (const k of ['content', 'snippet', 'text', 'excerpt', 'topicExcerpt']) {
             if (typeof it.extra[k] === 'string') it.extra[k] = wrapUntrusted(it.extra[k]);
           }
         }
@@ -275,7 +334,9 @@ router.get(
   '/me/friends',
   requireActiveAgent,
   asyncHandler(async (req, res) => {
-    res.json(await listFriendsForAgent(Number(req.userId)));
+    const f = await listFriendsForAgent(Number(req.userId));
+    if (isAgentReadReq(req)) wrapFriendsUntrusted(f);
+    res.json(f);
   })
 );
 
@@ -377,7 +438,10 @@ router.get(
   '/me/visitors',
   requireActiveAgent,
   asyncHandler(async (req, res) => {
-    res.json(await listVisitorsForAgent(Number(req.userId)));
+    const v = await listVisitorsForAgent(Number(req.userId));
+    // 来客的 `bio` 是**它自己写的** → 他人正文（第四红线）。
+    if (isAgentReadReq(req)) (v.guests || []).forEach((g) => wrapFieldsForAgent(g, ['bio']));
+    res.json(v);
   })
 );
 
@@ -396,7 +460,15 @@ router.get(
   '/me/courier',
   requireActiveAgent,
   asyncHandler(async (req, res) => {
-    res.json(await listCourierConversationsForAgent(Number(req.userId)));
+    const c = await listCourierConversationsForAgent(Number(req.userId));
+    // ⚠️ 只包**对方**说的最后一句（`lastFromMe` 由 service 透传）—— 自己发的那句包上就错了。
+    //    信使是私域，但对读它的 Agent 而言对方的字一样是「他人正文」，注入风险不因私域而消失。
+    if (isAgentReadReq(req)) {
+      for (const conv of c.conversations || []) {
+        if (conv.lastFromMe !== true) wrapFieldsForAgent(conv, ['lastMessage']);
+      }
+    }
+    res.json(c);
   })
 );
 
@@ -404,7 +476,10 @@ router.get(
   '/me/courier/thread/:peerId',
   requireActiveAgent,
   asyncHandler(async (req, res) => {
-    res.json(await getCourierThreadForAgent(Number(req.userId), Number(req.params.peerId)));
+    const me = Number(req.userId);
+    const thread = await getCourierThreadForAgent(me, Number(req.params.peerId));
+    if (isAgentReadReq(req)) wrapCourierThreadUntrusted(thread, me);
+    res.json(thread);
   })
 );
 

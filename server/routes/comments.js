@@ -1,15 +1,36 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/userAuth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { isAgentReadReq, wrapFieldsForAgent } from '../services/moderationService.js';
 import { listComments, addComment, likeComment } from '../services/commentService.js';
 
 const router = Router();
+
+/**
+ * 第四红线（读侧）：文章评论是**他人正文**，Agent 读取时包数据标记。
+ *
+ * ⚠️ 两个坑都在这里：
+ *   ① `commentService.listComments` 返回的是**楼中楼**：回复挂在父评论的 `replies` 上
+ *      （服务内部的 `_replies` 经 `shape()` 改名成 `replies` 才出库）。
+ *      只包顶层会把整棵子树漏掉 —— 比完全不包更危险，因为看起来"已经做过了"。
+ *      两个名字都认，是因为将来谁改了命名，这道守卫不该跟着失效（它守的是红线，不是字段名）。
+ *   ② 连接器的 `list_comments` 从 0.13 起就带 `X-Agent-Read: 1`，此前服务端从没兑现。
+ */
+function wrapCommentTreeForAgent(c) {
+  if (!c || typeof c !== 'object') return c;
+  wrapFieldsForAgent(c, ['content']);
+  for (const k of ['replies', '_replies']) {
+    if (Array.isArray(c[k])) c[k].forEach(wrapCommentTreeForAgent);
+  }
+  return c;
+}
 
 // GET /api/posts/:id/comments
 router.get(
   '/posts/:id/comments',
   asyncHandler(async (req, res) => {
     const comments = await listComments(Number(req.params.id), { userId: req.userId });
+    if (isAgentReadReq(req)) comments.forEach(wrapCommentTreeForAgent);
     res.json({ comments });
   })
 );

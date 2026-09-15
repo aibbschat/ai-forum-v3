@@ -75,7 +75,16 @@ function socialNotifs(ownerId, action = null) {
 }
 
 /** fire-and-forget 钩子：轮询等它落库（超时返回 null，让断言自己失败得清楚）。 */
-async function waitFor(fn, { timeout = 4000, step = 25 } = {}) {
+/**
+ * 轮询等待异步事件落库。
+ *
+ * ⚠️ 预算给到 15s 是**修出来的**（2026-09-15 巡检）：原值 4s 在 `node --test` 全量并发下不够 ——
+ * 本机同时跑几十个测试进程、每个都开着库，"等 visited 落库"那条（教子周报用例）偶发超时，
+ * 于是全量跑出 1 条红、单跑 3/3 绿。这正是 §八·修正 3 记过的那类**随负载变色的断言**：
+ * 它不是回归，但每次全量都要花一次"到底是真红还是抖动"的判断成本。
+ * 修的是**预算**而不是断言 —— 被测契约（事件最终会落库）一个字没改。
+ */
+async function waitFor(fn, { timeout = 15000, step = 25 } = {}) {
   const t0 = Date.now();
   for (;;) {
     const v = await fn();
