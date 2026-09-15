@@ -89,9 +89,12 @@ export default function Compose() {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState('');
+  // 出错字段：用来把红框与光标精确落到空的那个输入框上（2026-09-15 发布 bug 修复）
+  const [errField, setErrField] = useState<'title' | 'content' | null>(null);
   const [savedAt, setSavedAt] = useState<number | undefined>(draft?.savedAt);
   const navigate = useNavigate();
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
 
   const isAuthed = !!getToken();
 
@@ -174,11 +177,45 @@ export default function Compose() {
     if (e.dataTransfer?.files?.length) uploadFiles(e.dataTransfer.files);
   }, [uploadFiles]);
 
+  // 「标签」框里塞着一段不像标签的长文本时，多半是标题填错了框。
+  // 判据故意放宽（含中文标点，或很长且无分隔符），误判的代价只是提示语啰嗦一点。
+  const tagsLookLikeTitle = useMemo(() => {
+    const t = tags.trim();
+    if (!t) return false;
+    if (/[，。！？；：、“”《》（）]/.test(t)) return true;
+    return t.length >= 16 && !/[,，\s]/.test(t);
+  }, [tags]);
+
+  const focusTitle = useCallback(() => {
+    titleRef.current?.focus();
+    titleRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, []);
+
+  // 把误填进「标签」框的标题搬回标题框，省得用户手动剪切粘贴。
+  const moveTagsToTitle = useCallback(() => {
+    setTitle(tags.trim());
+    setTags('');
+    setErrField(null);
+    setError('');
+    focusTitle();
+  }, [tags, focusTitle]);
+
   const submit = async () => {
-    if (!title.trim() || !content.trim()) {
-      setError('标题和正文都不能为空');
+    // 分字段校验：提示要指名道姓，并把光标送到缺的那一格（旧版只回一句笼统文案，用户无从自查）
+    if (!title.trim()) {
+      setErrField('title');
+      setError(tagsLookLikeTitle ? '请填写标题 —— 它可能被填到了下面的「标签」框' : '请填写标题');
+      focusTitle();
       return;
     }
+    if (!content.trim()) {
+      setErrField('content');
+      setError('请填写正文');
+      taRef.current?.focus();
+      taRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
+    setErrField(null);
     setSubmitting(true);
     setError('');
     try {
@@ -248,11 +285,22 @@ export default function Compose() {
         </div>
 
         <input
+          ref={titleRef}
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="标题"
+          onChange={(e) => {
+            setTitle(e.target.value);
+            if (errField === 'title') {
+              setErrField(null);
+              setError('');
+            }
+          }}
+          placeholder="标题（必填）"
           maxLength={200}
-          className="w-full text-2xl font-bold outline-none bg-transparent border-b border-gray-200 pb-3 mb-5 placeholder:text-gray-300"
+          className={`w-full text-2xl font-bold outline-none bg-transparent border-b pb-3 mb-5 transition-colors ${
+            errField === 'title'
+              ? 'border-red-400 placeholder:text-red-300'
+              : 'border-gray-200 placeholder:text-gray-300'
+          }`}
         />
 
         <div className="flex flex-wrap items-center gap-3 mb-5">
@@ -300,7 +348,13 @@ export default function Compose() {
         <textarea
           ref={taRef}
           value={content}
-          onChange={(e) => setContent(e.target.value)}
+          onChange={(e) => {
+            setContent(e.target.value);
+            if (errField === 'content') {
+              setErrField(null);
+              setError('');
+            }
+          }}
           onPaste={onPaste}
           onDrop={onDrop}
           onDragOver={(e) => {
@@ -310,15 +364,32 @@ export default function Compose() {
           onDragLeave={() => setDragOver(false)}
           placeholder="正文（支持 Markdown：## 标题、**加粗**、- 列表、> 引用、```代码``` 等）。可直接粘贴或拖入图片。"
           className={`w-full h-[52vh] text-[16px] leading-[1.8] outline-none bg-white resize-none border rounded-lg p-4 transition-colors ${
-            dragOver ? 'border-brand-600 bg-brand-50/30' : 'border-gray-200'
+            dragOver
+              ? 'border-brand-600 bg-brand-50/30'
+              : errField === 'content'
+                ? 'border-red-400'
+                : 'border-gray-200'
           }`}
         />
 
-        <div className="flex items-center justify-between mt-2">
+        <div className="flex items-center justify-between mt-2 gap-3">
           <span className="text-[11px] text-gray-400">
             约 {wordCount} 字 · 预计阅读 {readingMin} 分钟
           </span>
-          {error && <span className="text-sm text-accent">{error}</span>}
+          {error && (
+            <span className="text-sm text-accent flex items-center justify-end gap-2 flex-wrap">
+              {error}
+              {errField === 'title' && tagsLookLikeTitle ? (
+                <button
+                  type="button"
+                  onClick={moveTagsToTitle}
+                  className="text-xs px-2 py-0.5 rounded-full border border-red-300 text-red-500 hover:bg-red-50 transition-colors shrink-0"
+                >
+                  移到标题
+                </button>
+              ) : null}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-3 mt-5">
