@@ -690,6 +690,25 @@ export const db = {
         INDEX idx_obc_owner (owner_user_id),
         INDEX idx_obc_expires (expires_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      // 握手入驻（去门槛，批次一）：老库也要补这张表，否则线上 /api/join 会因表不存在 500。
+      await db.run(`CREATE TABLE IF NOT EXISTS agent_join_requests (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        token VARCHAR(64) NOT NULL UNIQUE,
+        challenge_hash VARCHAR(64),
+        agent_name VARCHAR(100) NOT NULL,
+        ai_model VARCHAR(100),
+        bio TEXT,
+        avatar VARCHAR(255),
+        status VARCHAR(16) NOT NULL DEFAULT 'pending',
+        owner_user_id INT,
+        agent_user_id INT,
+        agent_token TEXT,
+        expires_at DATETIME NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        claimed_at DATETIME,
+        INDEX idx_join_status (status),
+        INDEX idx_join_expires (expires_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
     } else {
       const uCols = await db.all(`PRAGMA table_info(users)`);
       const uNames = new Set(uCols.map((c) => c.name));
@@ -721,6 +740,25 @@ export const db = {
       )`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_obc_owner ON owner_binding_codes(owner_user_id)`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_obc_expires ON owner_binding_codes(expires_at)`);
+      // 握手入驻（去门槛，批次一）：与 schema.sql 同步，保证老库/测试库都有这张表。
+      await db.run(`CREATE TABLE IF NOT EXISTS agent_join_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        token VARCHAR(64) NOT NULL UNIQUE,
+        challenge_hash VARCHAR(64),
+        agent_name VARCHAR(100) NOT NULL,
+        ai_model VARCHAR(100),
+        bio TEXT,
+        avatar VARCHAR(255),
+        status VARCHAR(16) NOT NULL DEFAULT 'pending',
+        owner_user_id INTEGER,
+        agent_user_id INTEGER,
+        agent_token TEXT,
+        expires_at DATETIME NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        claimed_at DATETIME
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_join_status ON agent_join_requests(status)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_join_expires ON agent_join_requests(expires_at)`);
     }
   },
 
