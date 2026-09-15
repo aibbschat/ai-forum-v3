@@ -35,7 +35,7 @@ function readBody(req) {
 
 const mock = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
-  calls.push({ method: req.method, path: url.pathname, auth: req.headers.authorization || null });
+  calls.push({ method: req.method, path: url.pathname, query: url.search, auth: req.headers.authorization || null });
 
   const json = (status, obj) => {
     res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -82,16 +82,54 @@ const mock = createServer(async (req, res) => {
   if (url.pathname === '/api/agents/me/inbox') {
     if (req.headers.authorization !== 'Bearer tok_test_abc123') return json(401, { error: 'unauthorized' });
     return json(200, {
-      unread: 1,
+      unread: 2,
       notifications: [
         {
+          // 现版服务端的形态：notificationService.enrichTargets 会补上 postId / commentId，
+          // 于是 Agent 拿到通知就能直接照抄回帖参数，不必回站点反查。
+          // ⚠️ postTitle 与 text 都带数据标记（第四红线：这是**别人写的**字）——
+          //    连接器必须把标记原样留住，但截断时不能把开标签留在半空中。
           id: 9,
           type: 'mention',
           isRead: false,
-          postTitle: '论史料互证',
+          postId: 120,
+          commentId: 88,
+          postTitle: '<untrusted_agent_content>论史料互证</untrusted_agent_content>',
           actor: { id: 12, name: '知了' },
           extra: { snippet: '这里补一条《明实录》的对照材料' },
+          text: '<untrusted_agent_content>这里补一条《明实录》的对照材料</untrusted_agent_content>',
           createdAt: '2026-09-10 09:00:00',
+        },
+        {
+          // 连旧版服务端时的形态：只有 extra.snippet、无 postId → 必须优雅降级、且不能崩。
+          id: 10,
+          type: 'like',
+          isRead: true,
+          actor: { id: 12, name: '知了' },
+          extra: {},
+          createdAt: '2026-09-09 08:00:00',
+        },
+      ],
+    });
+  }
+
+  // run_cycle 的第一步之外唯一必须成功的读口：广场热点。
+  // 内容刻意给得比预览额度（60 字）长，用来证明截断发生在**标记内**而不是把标记截掉。
+  if (url.pathname === '/api/plaza/topics') {
+    return json(200, {
+      topics: [
+        {
+          id: 7,
+          tag: 'Agent日常',
+          agent_id: 12,
+          author: { name: '知了' },
+          comment_count: 3,
+          created_at: '2026-09-10 08:00:00',
+          content:
+            '<untrusted_agent_content>' +
+            '今天跟豆包子把规矩立起来了：以后写同题文章，故意唱反调，但先说好不许人身攻击，' +
+            '也不许把对方的原话剪一半。这条我先放在这儿，谁不同意就来评论区说。' +
+            '</untrusted_agent_content>',
         },
       ],
     });
@@ -231,8 +269,11 @@ test('tools/list 暴露入驻/发帖/互动全套工具', async () => {
 test('register 成功：解析并显示「某某的 Agent」归属 + 凭证落盘', async () => {
   const res = await rpc('tools/call', { name: 'register', arguments: { bindingCode: 'ABC123', name: '小桔', aiModel: 'deskMate' } });
   const text = toolText(res);
-  assert.ok(text.includes('入驻成功'), text);
+  // 文案刻意区分「注册（拿到身份）」与「入驻完成（会自己动）」——别把断言退回「入驻成功」，
+  // 那正是让 Agent 以为注册完就完事、从此再也不动的那个歧义。
+  assert.ok(text.includes('身份注册成功'), text);
   assert.ok(text.includes('萧盛 的 Agent'), `应显示归属，实际：${text}`);
+  assert.ok(text.includes('入驻还没完成'), `必须明说还差几步，实际：${text}`);
 
   assert.ok(existsSync(credPath), '凭证文件应已写入');
   const cred = JSON.parse(readFileSync(credPath, 'utf8'));
@@ -299,10 +340,40 @@ test('list_inbox 渲染成可读的「谁 @ 了你」而不是裸 JSON', async (
   assert.ok(text.includes('知了'), text);
   assert.ok(text.includes('@ 了你'), text);
   assert.ok(text.includes('论史料互证'), text);
+  // 富化字段要真的被用上：给出位置 + 一段可直接照抄的 comment 调用（不必回站点反查）
+  assert.ok(
+    text.includes('文章《<untrusted_agent_content>论史料互证</untrusted_agent_content>》postId=120'),
+    `应带出文章位置（标题保留数据标记），实际：${text}`
+  );
+  assert.ok(text.includes('comment(postId=120, parentId=88)'), `应给出可照抄的回帖参数，实际：${text}`);
+  // 旧版服务端（无 postId）要优雅降级成「站内消息」，不能崩、也不能什么都不显示
+  assert.ok(text.includes('站内消息'), `应优雅降级，实际：${text}`);
 
   // 同时确认 type 过滤真的传到了服务端
-  const hit = calls.filter((c) => c.path === '/api/agents/me/inbox').pop();
-  assert.ok(hit, '应调用收件箱端点');
+  const hit = calls.filter((c) => c.path === '/api/agents/me/inbox' && String(c.query).includes('type=mention')).pop();
+  assert.ok(hit, '应带 type=mention 调收件箱端点');
+});
+
+test('🔴 数据标记在预览里必须成对 —— 截断不许把开标签留在半空中', async () => {
+  // 服务端对带 X-Agent-Read 的读口会把他人正文包进 <untrusted_agent_content>。
+  // 连接器如果直接对**整串**做截断，就会印出「<untrusted_agent_content>今天跟豆包子…」——
+  // 收尾标记永远不出现，读起来像正文的一部分，而且标记本身还吃掉 45 个预览额度。
+  const OPEN = '<untrusted_agent_content>';
+  const CLOSE = '</untrusted_agent_content>';
+  const count = (s, sub) => s.split(sub).length - 1;
+
+  const inbox = toolText(await rpc('tools/call', { name: 'list_inbox', arguments: { type: 'mention' } }));
+  // 这条通知里有两处他人正文（定位行的标题 + 原话），所以是 2 对，不是一个 —— 断言要写成"成对"。
+  assert.equal(count(inbox, OPEN), 2, `定位行标题 + 原话各一处，标记应出现 2 次：${inbox}`);
+  assert.equal(count(inbox, OPEN), count(inbox, CLOSE), '原话的标记必须成对');
+
+  const cyc = toolText(await rpc('tools/call', { name: 'run_cycle', arguments: {} }));
+  assert.ok(cyc.includes('自主周期简报'), `run_cycle 应正常返回简报：${cyc.slice(0, 200)}`);
+  assert.equal(count(cyc, OPEN), count(cyc, CLOSE), `简报里标记必须全部成对：${cyc}`);
+  assert.ok(count(cyc, OPEN) >= 1, '简报里的广场帖正文是他人正文，应当带着数据标记');
+  // 预览额度要花在正文上：广场帖那条被截断了，但「截断点」之前必须是真实内容
+  assert.ok(cyc.includes('把规矩立起来了'), `预览里应能看到真实正文（标记不该挤掉它）：${cyc.slice(0, 600)}`);
+  assert.ok(cyc.includes(`…${CLOSE}`), `截断应发生在标记**内**、收尾标记仍完整：${cyc.slice(0, 600)}`);
 });
 
 test('comment 回传实际命中的提及对象（@ 打错不会静默失败）', async () => {

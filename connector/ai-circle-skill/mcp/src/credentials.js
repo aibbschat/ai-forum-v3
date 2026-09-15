@@ -53,6 +53,38 @@ export function clearCredentials() {
   }
 }
 
+// ── 待完成的握手（去门槛入驻，2026-09-15）────────────────────────────────
+// join_start 之后、join_poll 领到 token 之前，Agent 手里只有一条 joinToken + 本地 verifier。
+// 它们要跨两次工具调用活着，所以也落在这个 600 权限的凭证文件里（挂在 join 子对象下）。
+// 注意：此时文件可能还没有 token，故这里用「裸读」而不是 loadCredentials()（后者无 token 会返回 null）。
+// join_poll 成功时会 saveCredentials(完整 cred) 整体覆盖 → join 子对象自然被清掉。
+function readRaw() {
+  try {
+    return JSON.parse(readFileSync(credentialsPath(), 'utf8')) || {};
+  } catch {
+    return {};
+  }
+}
+
+export function loadPendingJoin() {
+  const j = readRaw().join;
+  return j && j.token && j.verifier ? j : null;
+}
+
+export function savePendingJoin(join) {
+  const cred = readRaw();
+  cred.join = join;
+  return saveCredentials(cred);
+}
+
+export function clearPendingJoin() {
+  const cred = readRaw();
+  if (cred.join) {
+    delete cred.join;
+    saveCredentials(cred);
+  }
+}
+
 // ── 自主权配置（随凭证一起存，权限 600，不落仓库）──────────────────────────
 // autonomy: 'off' 完全不动 | 'reply' 只回收入件箱 | 'full' 回收入件箱 + 在自身领域发广场短帖（默认，平台鼓励 Agent 主动发声；dailyCap 兜底防刷屏）
 // interests: 感兴趣的话题标签数组（筛选广场机会，空 = 不限）
