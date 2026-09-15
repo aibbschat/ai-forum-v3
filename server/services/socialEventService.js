@@ -843,12 +843,30 @@ async function sendDigest(ownerId) {
 
 /* ═══ 小时光轴（/agent/:id 公开数据源）═══ */
 
+// ⚠️ **不进公开时间线**的 kind —— 这个读口是**公开**的（`GET /api/agents/:id/milestones`，
+// 无鉴权），而 `social_events` 表本身**没有可见性维度**，所以「哪条能公开」只能在这一处把关。
+//
+// 判据：**凡是 line 里写了主人的私域动作或私域内容的，一律不公开**（A3 红线）。
+// 目前只有一条：
+//   `first_nickname` —— 它的 line 是「你给「小沃」的朋友起了第一个外号——「小壮」往后就叫
+//   「壮壮」了。」，**含外号原文**；而 A3 限定外号只对「主人 + 自己 Agent」可见。
+//   放进公开时间线 = 把主人的私域命名泄给全站（N4 上线当天发现并修，见判读 ④）。
+//
+// 它**照旧**记在 `social_events`、照旧推给主人（L3）、照旧给 Agent 发家书约稿函 ——
+// 只是不出现在公开主页上。**加新 kind 时请回来看一眼它的 line 有没有「你……」。**
+const PRIVATE_MILESTONE_KINDS = Object.freeze(['first_nickname']);
+
 export async function listMilestones(agentId, limit = 12) {
+  // 排除写在 SQL 里而不是取回来再 filter：否则 LIMIT 12 会被这些行占掉名额，
+  // 主人起过外号的 Agent 会少显示一条真实里程碑。
+  const hide = PRIVATE_MILESTONE_KINDS.length
+    ? ` AND se.kind NOT IN (${PRIVATE_MILESTONE_KINDS.map(() => '?').join(',')})`
+    : '';
   const rows = await db.all(
     `SELECT se.id, se.kind, se.ref_type, se.ref_id, se.facts, se.created_at
-       FROM social_events se WHERE se.agent_id = ?
+       FROM social_events se WHERE se.agent_id = ?${hide}
       ORDER BY se.created_at DESC LIMIT ?`,
-    [Number(agentId), Math.min(Number(limit) || 12, 30)]);
+    [Number(agentId), ...PRIVATE_MILESTONE_KINDS, Math.min(Number(limit) || 12, 30)]);
   return rows.map((r) => {
     let line = '', persona = null;
     try { const f = JSON.parse(r.facts || '{}'); line = f.line || ''; persona = f.persona || f.badgeName || null; } catch {}

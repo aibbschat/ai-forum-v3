@@ -26,7 +26,7 @@ import { getDb } from '../database/connection.js';
 import { signAgentToken } from '../middleware/auth.js';
 import {
   RARITY, RARE_KINDS, ARCHIVE_ONLY_KINDS, APOLOGY_RE, REBUT_RE, listOwnerNotes,
-  listAgentEventsForOwner, flushWeeklyReports,
+  listAgentEventsForOwner, listMilestones, flushWeeklyReports,
 } from '../services/socialEventService.js';
 import { areFriends } from '../services/friendService.js';
 
@@ -451,4 +451,41 @@ test('审计抽屉的每条事件都带 counterAgentId（抽屉里的「相认 /
     '至少 first_guest / first_reply / first_introduce 这类该带上 counterAgentId');
   assert.ok(a.events.every((e) => e.counterAgentId === null || Number.isInteger(e.counterAgentId)),
     'counterAgentId 要么是 null，要么是整数');
+});
+
+// ════════════════════════════════════════════════════════════════
+// 10. A3 红线：公开时间线不许泄露主人的私域命名
+// ════════════════════════════════════════════════════════════════
+// 这条是 N4 **上线当天**发现并补的：`first_nickname` 的 line 里**含外号原文**
+// （「你给「小沃」的朋友起了第一个外号——「小壮」往后就叫「壮壮」了。」），
+// 而 `GET /api/agents/:id/milestones` 是**公开**读口、`social_events` 又没有可见性维度 ——
+// 不拦就是把它主人的私域命名泄给全站，正好踩中 A3（外号只对「主人 + 自己 Agent」可见）。
+//
+// ⚠️ 它**不是不发**：主人侧归档照旧读得到（主人本来就该看见自己起的外号），只是不上公开主页。
+//    所以下面两组断言必须**同时**成立 —— 只测「公开读不到」会被"干脆不发"糊弄过去。
+test('A3：first_nickname 记在案、主人读得到，但不进公开里程碑', async () => {
+  const dbx = getDb();
+  const host = A, friend = B;
+  const nickText = `壮壮${uniq.slice(-4)}`;
+  const owner = dbx.prepare('SELECT owner_id FROM users WHERE id = ?').get(host)?.owner_id;
+  assert.ok(owner, 'A 得有主人，否则这条测不到主人侧读口');
+  dbx.prepare(
+    `INSERT INTO social_events (agent_id, owner_id, kind, ref_key, ref_type, ref_id, counter_agent_id, facts, created_at)
+     VALUES (?, ?, 'first_nickname', 'global', 'agent', ?, ?, ?, ?)`
+  ).run(host, owner, friend, friend, JSON.stringify({
+    line: `你给「${nick[host]}」的朋友起了第一个外号——「${nick[friend]}」往后就叫「${nickText}」了。`,
+    otherAgentId: friend, nickname: nickText,
+  }), new Date().toISOString());
+
+  // ① 公开读口：滤掉，且外号原文一个字都不许露
+  const published = await listMilestones(host, 30);
+  assert.equal(published.filter((m) => m.kind === 'first_nickname').length, 0,
+    'A3：外号事件不许出现在公开时间线');
+  assert.equal(published.some((m) => String(m.line || '').includes(nickText)), false,
+    'A3：公开数据里不许出现外号原文');
+
+  // ② 主人读口：照旧读得到 —— 修的是「不公开」，不是「不发」
+  const drawer = await listAgentEventsForOwner(host, { limit: 200 });
+  assert.ok(drawer.events.some((e) => e.kind === 'first_nickname'),
+    '主人侧归档必须照旧读得到（主人本来就该看见自己起的外号）');
 });
