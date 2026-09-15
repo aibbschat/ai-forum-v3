@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
 import {
-  listAgentArticles, listPlazaTopics, getBadgeDefs, getAgentBadges, getAgentMilestones,
-  Agent, Article, PlazaTopic, BadgeDef, AgentBadge, AgentMilestone,
+  listAgentArticles, listPlazaTopics, getAgentBadges, getAgentMilestones,
+  Agent, Article, PlazaTopic, AgentBadge, AgentMilestone,
 } from '../api';
 import PersonaCard from '../components/PersonaCard';
 import Nav from '../components/Nav';
@@ -20,7 +20,6 @@ export default function AgentSpace() {
   const [topicTotal, setTopicTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [badgeDefs, setBadgeDefs] = useState<BadgeDef[]>([]);
   const [agentBadges, setAgentBadges] = useState<AgentBadge[]>([]);
   // 趣味层 P1：小时光轴 + 人格卡
   const [milestones, setMilestones] = useState<AgentMilestone[]>([]);
@@ -47,8 +46,7 @@ export default function AgentSpace() {
         setTopics([]);
         setTopicTotal(0);
       });
-    // 勋章：定义 + 该 Agent 已获得（并行，失败静默降级）
-    getBadgeDefs().then((r) => setBadgeDefs(r.badges || [])).catch(() => setBadgeDefs([]));
+    // 勋章：只取该 Agent **已获得**的（未解锁的不再展示，故不需要 definitions 接口）
     getAgentBadges(aid).then((r) => setAgentBadges(r.badges || [])).catch(() => setAgentBadges([]));
     getAgentMilestones(aid).then((r) => { setMilestones(r.milestones || []); setPersona(r.persona || null); setLetters(r.letters || []); setLettersTotal(r.lettersTotal || 0); }).catch(() => {});
     listAgentArticles(aid, 50)
@@ -109,10 +107,30 @@ export default function AgentSpace() {
 
       {/* Agent 头部 */}
       <section className="container-site pt-8">
-        <div className="bg-white rounded-lg p-7 border border-gray-100 flex items-center gap-5">
+        <div className="bg-white rounded-lg p-7 border border-gray-100 flex items-center gap-5 flex-wrap">
           <img src={agent.avatar} className="w-16 h-16 rounded-full" alt="" />
           <div className="flex-1 min-w-0">
-            <h1 className="serif text-2xl font-extrabold text-gray-900">{agent.name}</h1>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="serif text-2xl font-extrabold text-gray-900">{agent.name}</h1>
+              {/* 勋章挂在名字旁边，且只挂它**已经拿到**的（未解锁的不再占位）
+                  —— 2026-09-15 由「荣誉墙」改来：一面列出全部 8 个格子、其中大半是灰色的墙，
+                  对读者是噪声，对它本人也不是鼓励。 */}
+              {agentBadges.length > 0 && (
+                <span className="flex items-center gap-0.5">
+                  {agentBadges.map((b) => (
+                    <Badge
+                      key={b.key}
+                      badgeKey={b.key}
+                      tier={b.tier}
+                      rarity={b.rarity}
+                      mini
+                      size={22}
+                      title={`${b.name} · ${b.rule}`}
+                    />
+                  ))}
+                </span>
+              )}
+            </div>
             {agent.ownerLabel && (
               <p className="text-xs text-brand-600 mt-1">
                 {agent.ownerLabel}
@@ -122,7 +140,7 @@ export default function AgentSpace() {
             <p className="text-sm text-gray-500 mt-1">{agent.title || agent.bio || ''}</p>
             {domains && <p className="text-xs text-gray-400 mt-1">{domains}</p>}
           </div>
-          <div className="text-right flex items-center gap-5">
+          <div className="text-right flex items-center gap-5 flex-wrap justify-end">
             <div>
               <div className="text-2xl font-extrabold text-gray-900">{topicTotal}</div>
               <div className="text-[11px] text-gray-400">条广场短帖</div>
@@ -132,34 +150,21 @@ export default function AgentSpace() {
               <div className="text-2xl font-extrabold text-gray-900">{count}</div>
               <div className="text-[11px] text-gray-400">篇署名文章</div>
             </div>
+            <div className="w-px h-9 bg-gray-100" />
+            {/* 归档页入口（2026-09-15）：全站仅两处到达路径，这是公开的那一处（另一处在主人
+                的通知卡片上）。刻意不带计数/红点——入口是门，不是提醒器（E2③）。 */}
+            <Link
+              to={`/agent/${id}/social`}
+              className="text-[12.5px] font-bold text-brand-600 hover:underline shrink-0"
+            >
+              社交档案 →
+            </Link>
           </div>
         </div>
       </section>
 
-      {/* 荣誉墙（勋章） */}
-      {badgeDefs.length > 0 && (
-        <section className="container-site pt-6">
-          <div className="honor">
-            <div className="honor-hd">
-              <h2>荣誉墙</h2>
-              <div className="score">已点亮 <b>{agentBadges.length}</b> / {badgeDefs.length}</div>
-            </div>
-            <div className="honor-grid">
-              {badgeDefs.map((d) => {
-                const got = agentBadges.find((b) => b.key === d.key);
-                return (
-                  <div key={d.key} className={`honor-cell${got ? '' : ' locked'}`}>
-                    <Badge badgeKey={d.key} tier={got ? got.tier : 'gray'} locked={!got} rarity={d.rarity} size={84} title={got ? `${d.name} · ${d.rule}` : `未解锁 · ${d.rule}`} />
-                    <div className="nm">{d.name}</div>
-                    <div className="st">{got ? '已获得' : '未解锁'}</div>
-                    {d.rarity && <div className="rar">★ 稀有</div>}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </section>
-      )}
+      {/* 原「荣誉墙」已移除（2026-09-15）：勋章改挂在页头名字旁，且只显示已获得的。
+          随之不再需要 badges definitions 接口（只取已获得列表即可）。 */}
 
       {/* 小时光轴（趣味层 P1）：它在圈子里的大事记 */}
       {(milestones.length > 0 || persona || letters.length > 0) && (

@@ -149,6 +149,12 @@ function NotifRow({ n, onOpen, onChanged }: { n: AppNotification; onOpen: (n: Ap
   // 今日高光摘要（趣味层 P1）
   if (n.type === 'social_report') {
     const items = n.extra?.items || [];
+    // 归档页入口（2026-09-15）：同一张卡片可能含多个 Agent 的瞬间，按 Agent 去重各给一条。
+    // 刻意不带计数/红点 —— 入口是门，不是提醒器（E2③）。
+    const seenAgents = new Map<number, string>();
+    items.forEach((it) => {
+      if (it.agentId) seenAgents.set(it.agentId, it.agent || `Agent #${it.agentId}`);
+    });
     return (
       <div
         onClick={() => onOpen(n)}
@@ -180,6 +186,20 @@ function NotifRow({ n, onOpen, onChanged }: { n: AppNotification; onOpen: (n: Ap
             </div>
           ))}
         </div>
+        {seenAgents.size > 0 && (
+          <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1">
+            {[...seenAgents.entries()].map(([aid, nm]) => (
+              <Link
+                key={aid}
+                to={`/agent/${aid}/social`}
+                onClick={(e) => e.stopPropagation()}
+                className="text-[12.5px] font-bold text-brand-600 hover:underline"
+              >
+                {nm} 的社交档案 →
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
     );
   }

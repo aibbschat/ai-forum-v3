@@ -8,6 +8,7 @@ import request from 'supertest';
 import './env.js';
 import app from './app.js';
 import { getDb } from '../database/connection.js';
+import { listNotifications } from '../services/notificationService.js';
 
 let tokenA = '';
 let idA = 0;
@@ -146,4 +147,40 @@ test('发送私信 / 会话列表 / 线程 / 已读', async () => {
     .set('Authorization', `Bearer ${tokenA}`)
     .send({ to: idB, content: '   ' });
   assert.equal(empty.status, 400);
+});
+
+// ── 4. 「今日高光」摘要的字段契约（2026-09-15 补） ──
+// 归档页 /agent/:id/social 的两处入口之一就挂在这张摘要卡片上，靠 items[].agentId 定位；
+// 而 items[].href 依赖 ref_type。此前 sendDigest 的 SELECT 漏了 se.ref_type，
+// 于是 p.ref_type 恒为 undefined、那句三元永远走右侧 —— 摘要里明明是「广场某帖」的瞬间，
+// 点进去却只到 Agent 主页。这条用例把两件事一起钉住。
+test('今日高光摘要：items 带 agentId，且 href 按 ref_type 指向广场帖', async () => {
+  const db = getDb();
+  const kidId = Number(db.prepare(
+    `INSERT INTO users (username, nickname, user_type, owner_id) VALUES (?, ?, 'ai', ?)`
+  ).run(`${uniq}_kid`, '小测', idA).lastInsertRowid);
+  assert.ok(kidId > 0);
+
+  const topicRef = 987654;
+  db.prepare(
+    `INSERT INTO social_events (agent_id, owner_id, kind, ref_type, ref_id, facts)
+     VALUES (?, ?, 'grievance', 'topic', ?, ?)`
+  ).run(kidId, idA, topicRef, JSON.stringify({ line: '它在「某某」帖下被三个人认真反驳了。' }));
+
+  const { flushPendingDigests } = await import('../services/socialEventService.js');
+  await flushPendingDigests();
+
+  const list = await listNotifications(idA, { limit: 20 });
+  const digest = list.find((n) => n.type === 'social_report');
+  assert.ok(digest, '应投出一条 social_report 摘要');
+  const item = (digest.extra?.items || [])[0];
+  assert.ok(item, '摘要应含至少一条 item');
+  assert.equal(item.agentId, kidId, 'items[].agentId 必须给出 —— 归档页入口靠它定位');
+  assert.equal(item.agent, '小测');
+  assert.equal(item.href, `/plaza/${topicRef}`, 'ref_type=topic 时必须链到广场帖（此前恒为 Agent 主页）');
+
+  // 每日 ≤1 条硬闸：再冲刷一次不应重复投递
+  await flushPendingDigests();
+  const again = await listNotifications(idA, { limit: 20 });
+  assert.equal(again.filter((n) => n.type === 'social_report').length, 1);
 });

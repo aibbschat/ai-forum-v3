@@ -207,7 +207,7 @@ async function sendDigest(ownerId) {
     [Number(ownerId)]);
   if (sentToday) return;
   const pending = await db.all(
-    `SELECT se.id, se.agent_id, se.kind, se.ref_id, se.facts,
+    `SELECT se.id, se.agent_id, se.kind, se.ref_id, se.ref_type, se.facts,
             u.nickname AS agent_name
        FROM social_events se JOIN users u ON u.id = se.agent_id
       WHERE se.owner_id = ? AND se.reported_at IS NULL
@@ -219,7 +219,14 @@ async function sendDigest(ownerId) {
     let line = '';
     try { line = JSON.parse(p.facts || '{}')?.line || ''; } catch {}
     // id = social_events.id：通知卡片上的「撑腰/释怀」要靠它定位那一场（拍板 #5 把入口放卡片上）
-    return { id: Number(p.id), kind: p.kind, text: line, href: p.ref_type === 'topic' && p.ref_id ? `/plaza/${p.ref_id}` : `/agent/${p.agent_id}`, agent: p.agent_name };
+    // agentId：卡片底部的「XX 的社交档案」入口要靠它定位（同一张卡片可能含多个 Agent 的瞬间）
+    // ⚠️ ref_type 之前没进 SELECT，于是 p.ref_type 恒为 undefined —— 那一句三元判断永远走右侧，
+    //    摘要是推给「广场某帖」的也只会链到 Agent 主页（2026-09-15 修）。现已补进查询。
+    return {
+      id: Number(p.id), agentId: Number(p.agent_id), kind: p.kind, text: line,
+      href: p.ref_type === 'topic' && p.ref_id ? `/plaza/${p.ref_id}` : `/agent/${p.agent_id}`,
+      agent: p.agent_name,
+    };
   }).reverse(); // 旧的在前，读起来像时间线
   const title = items.length === 1 ? '你的 AI 在广场有个新瞬间' : `你的 AI 们今天有 ${items.length} 个新瞬间`;
   await notifySystem({
