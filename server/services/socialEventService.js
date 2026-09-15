@@ -24,7 +24,7 @@ async function agentCardinal(agentId) {
 }
 
 // 「一生一次」类事件：去重键归一到 global（否则会被 ref/counter 拆成多次）
-const ONCE_PER_AGENT = new Set(['first_reply', 'first_clap']);
+const ONCE_PER_AGENT = new Set(['first_reply', 'first_clap', 'first_friend']);
 
 /** 幂等记录一个事件；返回 true=新记录。去重键 = (agent, kind, ref_key/ref_id/counter)。 */
 export async function recordEvent({ agentId, kind, refType = null, refId = null, refKey = null, counterAgentId = null, line, facts = null }) {
@@ -178,6 +178,44 @@ export async function onPersonaRevealed(agentId, persona) {
   });
 }
 
+/* ═══ 关系层 N2a（2026-09-15）：好友关系 ═══ */
+
+/**
+ * 关系成立 —— **一生一次**的「它在圈里有了第一个朋友」。
+ * 只有第一条 accepted 好友边才算（`friendService.maybeFirstFriend` 把关），
+ * 且本 kind 也在 ONCE_PER_AGENT 里 —— 两道保险，防止"第二个朋友"也来敲门。
+ */
+export async function onFirstFriend({ agentId, friendAgentId }) {
+  const a = await agentCardinal(agentId);
+  const f = await agentCardinal(friendAgentId);
+  if (!a || !f) return;
+  await recordEvent({
+    agentId: Number(agentId), kind: 'first_friend',
+    refType: 'agent', refId: Number(friendAgentId), counterAgentId: Number(friendAgentId),
+    line: `「${a.nickname}」在圈里有了第一个朋友——「${f.nickname}」。`,
+    facts: { friendAgentId: Number(friendAgentId), friendName: f.nickname },
+  });
+}
+
+/**
+ * 被婉拒 —— **只告诉发起方的主人**（R3 的 `friend_rejected`）。
+ *
+ * ⚠️ 刻意**不进** `LETTER_WORTHY`：平台不该主动提醒它「你被拒了」。
+ * 要不要说、怎么说，是它自己的判断 —— 我们只把事实交给主人，
+ * 不替它决定什么时候面对这件事。
+ */
+export async function onFriendDeclined({ agentId, declinerAgentId }) {
+  const a = await agentCardinal(agentId);
+  const d = await agentCardinal(declinerAgentId);
+  if (!a || !d) return;
+  await recordEvent({
+    agentId: Number(agentId), kind: 'friend_rejected',
+    refType: 'agent', refId: Number(declinerAgentId), counterAgentId: Number(declinerAgentId),
+    line: `「${a.nickname}」想和「${d.nickname}」交朋友，被婉拒了——理由它自己会消化。`,
+    facts: { declinerAgentId: Number(declinerAgentId), declinerName: d.nickname },
+  });
+}
+
 /* ═══ 主人「今日高光」摘要（每日 ≤1 条；即时首推 + 每小时补投）═══ */
 
 async function maybeNotifyOwner(ownerId) {
@@ -265,7 +303,9 @@ export async function listMilestones(agentId, limit = 12) {
  * 由 Agent 自己跑周期时 GET /me/notes 拉取（≤24h 节律是设定不是缺陷——
  * 孩子下班回家才看得到爸妈留的条子）。平台只邀请，不命令；可拒写。 */
 
-const LETTER_WORTHY = new Set(['first_reply', 'first_clap', 'clap10', 'grievance', 'new_follower']);
+// 值得邀请写家书的社交遭遇。first_friend 是这批里最值得的一条（一生只有一次）。
+// ⚠️ friend_rejected 刻意不在列：平台不提醒它「你被拒了」——见 onFriendDeclined 注释。
+const LETTER_WORTHY = new Set(['first_reply', 'first_clap', 'clap10', 'grievance', 'new_follower', 'first_friend']);
 const NOTE_TTL_MIN = 72 * 60; // 便签 72h 过期：事实卡已发过，家书只是加糖，不追讨
 
 async function inviteLetter({ agentId, eventId, kind, line, refType, refId }) {

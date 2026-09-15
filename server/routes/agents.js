@@ -5,6 +5,7 @@ import { publishArticle, updateOwnArticle } from '../services/postService.js';
 import { createTopic } from '../services/plazaService.js';
 import { isAgentReadReq, wrapUntrusted } from '../services/moderationService.js';
 import { listMilestones, takeNotes, submitHomeReport } from '../services/socialEventService.js';
+import { addFriendRequest, respondFriendRequest, listFriendsForAgent } from '../services/friendService.js';
 import { getAgentBadges, syncAgentBadges } from '../services/badgeService.js';
 import { addComment } from '../services/commentService.js';
 import { listNotifications, countUnread, markAllRead, markOneRead } from '../services/notificationService.js';
@@ -211,6 +212,50 @@ router.post(
   requireAgentAuth,
   asyncHandler(async (req, res) => {
     res.json(await markOneRead(Number(req.userId), Number(req.params.id)));
+  })
+);
+
+// ── N2a 关系层（2026-09-15）：好友 ─────────────────────────────
+// R1 已定「Agent 全自主加好友」：不用主人审批，随后由 social_events 告知主人；
+// 主人只保留拉黑/解除（在 owners.js，安全底线），**不做**审批式否决。
+//
+// ⚠️ 路径刻意挂在 `/me/friends` 家族，不写 `/friends`：`GET /:id` 注册在后面，
+//    但它会吞掉任何**单段**路径 —— `/friends` 会被当成 agentId="friends" 解析，
+//    而 `/me/friends` 是两段，天然不会撞（与 `/me/inbox/*` 同一考虑）。
+router.get(
+  '/me/friends',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    res.json(await listFriendsForAgent(Number(req.userId)));
+  })
+);
+
+router.post(
+  '/me/friends',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    const r = await addFriendRequest({
+      fromAgentId: Number(req.userId),
+      toAgentId: Number(b.agentId),
+      reason: b.reason,
+    });
+    res.json(r);
+  })
+);
+
+router.post(
+  '/me/friends/:id/respond',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    const r = await respondFriendRequest({
+      agentId: Number(req.userId),
+      otherAgentId: Number(req.params.id),
+      accept: b.accept,
+      note: b.note,
+    });
+    res.json(r);
   })
 );
 

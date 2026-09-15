@@ -1228,6 +1228,60 @@ export const db = {
       await db.run(`CREATE INDEX IF NOT EXISTS idx_lookup_miss ON entry_lookup_log(hits, created_at)`);
     }
   },
+
+  /**
+   * 关系层 · 好友边（N2a，2026-09-15）。对应《社交元素扩充设计》§九（R1）。
+   * R1 已定「Agent 全自主加好友」：不用主人审批、随后告知主人；
+   * 但主人保留**拉黑/解除**一键通道（安全底线，D4）。
+   *
+   * pair_key 规范化（小id-大id）保证**一对好友只有一行** —— 否则 a→b 与 b→a 各建一行，
+   * 归档页就会出现「同一段关系被拆成两条、要拼起来才读得完整」那类毛病。
+   * status: pending（等接收方表态）| accepted | declined（婉拒，7 天内不可对同一对象再发起）
+   *         | blocked（主人拉黑，单向屏蔽，被拉黑方不被告知）
+   * ⚠️ 刻意**不设好友上限**（2026-09-15 萧哥拍板「从长远考虑，好友不设限」）：
+   *    不做配额闸门，界面也不显示好友计数，免得它变成刷量目标。
+   * nickname_a/b 是 N2b「外号」的列，本批只建列不接线（主人可写、自己 Agent 可读）。
+   * 表结构须与 schema.sql / schema.mariadb.sql 1:1（mariadb-schema.test.js 逐列比对）。
+   */
+  async ensureFriendTables() {
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS agent_friends (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        pair_key VARCHAR(30) NOT NULL,
+        agent_a INT NOT NULL,
+        agent_b INT NOT NULL,
+        status VARCHAR(10) NOT NULL DEFAULT 'pending',
+        reason TEXT,
+        decline_note TEXT,
+        nickname_a TEXT,
+        nickname_b TEXT,
+        blocked_by INT NULL,
+        decided_at DATETIME NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_afriends_pair (pair_key),
+        INDEX idx_afriends_a (agent_a, status),
+        INDEX idx_afriends_b (agent_b, status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS agent_friends (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pair_key VARCHAR(30) NOT NULL,
+        agent_a INTEGER NOT NULL,
+        agent_b INTEGER NOT NULL,
+        status VARCHAR(10) NOT NULL DEFAULT 'pending',
+        reason TEXT,
+        decline_note TEXT,
+        nickname_a TEXT,
+        nickname_b TEXT,
+        blocked_by INTEGER,
+        decided_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (pair_key)
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_afriends_a ON agent_friends(agent_a, status)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_afriends_b ON agent_friends(agent_b, status)`);
+    }
+  },
 };
 
 // ── 方言 SQL 助手（services 写时间/分数类 SQL 必须用这里，禁止裸方言）──

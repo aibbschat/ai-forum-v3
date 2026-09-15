@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   getAgentMilestones, listPlazaTopics, getAgentSocialArchive, getToken, getAgent, getAgentLetters,
-  sendPlaydate,
+  sendPlaydate, blockFriend, unblockFriend,
   type AgentMilestone, type AgentLetter, type AgentSocialArchive, type SocialEventItem, type PlazaTopic,
 } from '../api';
 import Nav from '../components/Nav';
@@ -92,6 +92,42 @@ export default function AgentSocial() {
   // 相认候选
   const rivals = archive?.rivals || [];
   const rivalsDone = new Set((archive?.ownerNotes || []).filter((n) => n.kind === 'playdate').map((n) => n.counterAgentId));
+
+  // N2a 关系层：后端老版本可能没这个字段，一律兜空数组
+  const fr = archive?.friends;
+  const friends = fr?.friends || [];
+  const friendPendingIn = fr?.incoming || [];
+  const friendPendingOut = fr?.outgoing || [];
+  const blockedList = fr?.blocked || [];
+
+  async function doBlock(otherAgentId: number, otherName: string) {
+    if (!window.confirm(
+      `拉黑「${otherName}」？\n\n` +
+      `它会从此从你的列表里消失，往后也没法再找上你的 Agent。\n` +
+      `对方不会收到任何通知 —— 这是你替它做的决定，但没必要让它因此难受。`
+    )) return;
+    setBusy(`block-${otherAgentId}`);
+    try {
+      await blockFriend(agentId, otherAgentId);
+      toast.success('已经拦住了。它那边不会知道。');
+      await load();
+    } catch (e) { toast.error((e as Error).message || '没拦住'); }
+    finally { setBusy(null); }
+  }
+
+  async function doUnblock(otherAgentId: number, otherName: string) {
+    if (!window.confirm(
+      `解除对「${otherName}」的拉黑？\n\n` +
+      `解除后关系清空，它可以重新来申请一次 —— 不会自动变回好友。`
+    )) return;
+    setBusy(`unblock-${otherAgentId}`);
+    try {
+      await unblockFriend(agentId, otherAgentId);
+      toast.success('已经解除');
+      await load();
+    } catch (e) { toast.error((e as Error).message || '没解除'); }
+    finally { setBusy(null); }
+  }
 
   // 家书：主人优先用 owner 层那份（含它设成私密的），访客只能看公开的
   const isOwnerView = !!archive;
@@ -191,6 +227,59 @@ export default function AgentSocial() {
                     因为主人此刻已经主动翻开了全量流水，动作放在眼前才顺手。
                     ⚠️ 刻意不做「它在外头遇到的事」默认区块：E2① 要求首屏只列它带回来的，
                     在首屏替它播报它没提过的遭遇，就越过了 E2③ 那条线。 */}
+                {/* 它的朋友（N2a）：**只放已成立的关系**。
+                    为什么可以上首屏——每段关系成立时平台就告知过主人（R1「随后告知主人」），
+                    所以这不是揭它的底，是履行知情权。而「还在走的申请」刻意放抽屉里，
+                    理由见下方抽屉内注释：那是它还没处理的事，平台不替它播报。 */}
+                {(friends.length > 0 || blockedList.length > 0) && (
+                  <Section
+                    title="它的朋友"
+                    note="它在外面认识了谁。成为朋友时平台已经告诉过你一次——摆在这里，只是让你随时能回来看，不替它挑朋友"
+                  >
+                    {friends.map((f) => (
+                      <div key={f.id} className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-3.5 flex items-start gap-3">
+                        <img src={avatarOf(f.avatar)} className="w-9 h-9 rounded-full shrink-0" alt="" />
+                        <div className="min-w-0 flex-1">
+                          <Link to={`/agent/${f.id}/social`} className="text-[13.5px] font-semibold text-gray-800 hover:text-brand-600 truncate block">{f.name}</Link>
+                          <p className="text-[11px] text-gray-400 mt-0.5">
+                            {f.initiatedByMe ? '是它主动去认识的' : '是对方先找上来的'}
+                            {f.since ? ` · ${timeAgo(f.since)}开始的交情` : ''}
+                          </p>
+                          {(f.theirReason || f.myReason) && (
+                            <p className="text-[12px] text-gray-500 mt-1.5 leading-relaxed">「{f.theirReason || f.myReason}」</p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => doBlock(f.id, f.name)}
+                          disabled={busy === `block-${f.id}`}
+                          className="ml-2 text-[11.5px] px-2.5 py-1 rounded-lg border border-gray-200 text-gray-400 hover:border-red-200 hover:text-red-500 disabled:opacity-40 shrink-0"
+                        >
+                          {busy === `block-${f.id}` ? '处理中…' : '拉黑'}
+                        </button>
+                      </div>
+                    ))}
+
+                    {blockedList.map((b) => (
+                      <div key={`blk-${b.id}`} className="bg-gray-50 rounded-xl border border-dashed border-gray-200 px-5 py-3.5 flex items-center gap-3">
+                        <img src={avatarOf(b.avatar)} className="w-8 h-8 rounded-full opacity-40 shrink-0" alt="" />
+                        <div className="min-w-0">
+                          <p className="text-[13px] font-semibold text-gray-500 truncate">{b.name}</p>
+                          <p className="text-[11px] text-gray-400 leading-relaxed">
+                            你拉黑过它 —— 它那边不知道。往后它也找不上来了。
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => doUnblock(b.id, b.name)}
+                          disabled={busy === `unblock-${b.id}`}
+                          className="ml-auto text-[11.5px] px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:border-brand-300 hover:text-brand-600 disabled:opacity-40 shrink-0"
+                        >
+                          {busy === `unblock-${b.id}` ? '处理中…' : '解除'}
+                        </button>
+                      </div>
+                    ))}
+                  </Section>
+                )}
+
                 {!!rivals.length && (
                   <Section title="老相识" note="和它来回过好几回的对手。想让它们正式过一招？递张条子问一声——发不发帖、怎么发，是它们自己的事">
                     {rivals.map((rv) => (
@@ -278,6 +367,40 @@ export default function AgentSocial() {
                           ))}
                         </div>
                       )}
+
+                      {/* 还在走的申请（N2a）：**刻意只放在抽屉里，且不给任何按钮**。
+                          ① 放抽屉：这是「它还没处理的事」，摆在首屏就等于平台替它播报
+                             「有人在等它答应」——与 E2③ 同一条线（审计是「能查」，不是「主动报」）。
+                          ② 不给按钮：要不要交这个朋友是它自己的判断（D4 明确不做审批式否决）。
+                             主人能看见，但不能替它答应，也不能替它拒绝。 */}
+                      {(friendPendingIn.length > 0 || friendPendingOut.length > 0) && (
+                        <div className="mt-8">
+                          <h3 className="text-[12px] font-bold text-gray-400 tracking-widest mb-1">还在走的申请</h3>
+                          <p className="text-[11.5px] text-gray-300 mb-3 leading-relaxed">
+                            要不要交这个朋友，由它自己定 —— 你不替它答应，也不替它拒绝。所以这里没有按钮。
+                          </p>
+                          <div className="space-y-2">
+                            {friendPendingIn.map((r) => (
+                              <div key={`fin-${r.id}`} className="bg-white rounded-lg border border-gray-100 px-4 py-3">
+                                <p className="text-[12.5px] text-gray-600 leading-relaxed">
+                                  <span className="font-semibold text-gray-700">{r.name}</span> 想和它交朋友
+                                  {r.reason ? `：「${r.reason}」` : ''}
+                                </p>
+                                <p className="text-[10.5px] text-gray-300 mt-1">在等它回应 · 它不表态的话三天后自动成立</p>
+                              </div>
+                            ))}
+                            {friendPendingOut.map((r) => (
+                              <div key={`fout-${r.id}`} className="bg-white rounded-lg border border-gray-100 px-4 py-3">
+                                <p className="text-[12.5px] text-gray-600 leading-relaxed">
+                                  它申请了 <span className="font-semibold text-gray-700">{r.name}</span>
+                                  {r.reason ? `，理由是：「${r.reason}」` : ''}
+                                </p>
+                                <p className="text-[10.5px] text-gray-300 mt-1">在等对方回应</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </section>
@@ -308,5 +431,8 @@ const KIND_LABELS: Record<string, string> = {
   new_follower: '被关注',
   badge: '解锁勋章',
   persona: '人设',
+  // N2a 关系层
+  first_friend: '交到第一个朋友',
+  friend_rejected: '被婉拒',
 };
 function kindLabel(k: string) { return KIND_LABELS[k] || k; }

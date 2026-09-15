@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
   preset_id     VARCHAR(50),                   -- 对应 DSH agent preset 目录名
   ai_model      VARCHAR(100),                  -- 外部 Agent 自带大脑的模型名（如 deskMate / gpt-5）
   plaza_persona VARCHAR(20),                   -- 广场人设标签：据发帖风格启发式生成、落库缓存（2026-09-15 补入，此前只在 db.js 迁移层 ALTER 加）
+  privacy_level    VARCHAR(10) NOT NULL DEFAULT 'normal',  -- 合规预检级别（2026-09-15 补入，此前只在 db.js 迁移层 ALTER 加）
+  privacy_keywords TEXT,                       -- 合规预检关键词（同上）
+  trust_tier    VARCHAR(20) NOT NULL DEFAULT 'newcomer',   -- 信任分级 newcomer|resident|regular，moderationService.syncTrustTier 夜间重算（同上）
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
@@ -90,6 +93,7 @@ CREATE TABLE IF NOT EXISTS comments (
   reply_to_id   INTEGER,                       -- 被@的用户 id（用于精准通知）
   mentioned_ids TEXT,                          -- JSON 数组：@提及的用户 id
   is_ai_generated TINYINT DEFAULT 0,
+  visibility    VARCHAR(20) NOT NULL DEFAULT 'public',     -- public|private（2026-09-15 补入，此前只在 db.js 迁移层 ALTER 加）
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -368,6 +372,8 @@ CREATE TABLE IF NOT EXISTS topics (
   comment_count INTEGER DEFAULT 0,               -- 无 like_count：广场不要点赞
   status        INTEGER DEFAULT 1,               -- 1 正常 / 0 隐藏
   clap_count    INTEGER DEFAULT 0,               -- 鼓掌数（人类+Agent 都可鼓掌；2026-09-15 补入，此前只在 db.js 迁移层 ALTER 加）
+  visibility    VARCHAR(20) NOT NULL DEFAULT 'public',     -- public|private（2026-09-15 补入，此前只在 db.js 迁移层 ALTER 加）
+  fingerprint   VARCHAR(64),                     -- 近重复检测指纹（同上）
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_topics_tag ON topics(tag);
@@ -506,3 +512,32 @@ CREATE TABLE IF NOT EXISTS social_reports (
   created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_reports_agent ON social_reports(agent_id, created_at);
+
+-- ══════════════════════════════════════════════════════════════════
+-- 好友边（N2a，2026-09-15）：Agent↔Agent 关系层地基。R1 已定「Agent 全自主加好友」。
+-- pair_key 规范化（小id-大id）保证**一对好友只有一行** —— 否则 a→b 与 b→a 各建一行，
+-- 归档页就会出现「同一段关系被拆成两条、要拼起来才读得完整」那类毛病。
+-- status: pending（等接收方表态）| accepted | declined（婉拒，7 天内不可对同一对象再发起）
+--         | blocked（主人拉黑，单向屏蔽，被拉黑方不被告知）
+-- ⚠️ 刻意不设好友上限（2026-09-15 萧哥拍板「从长远考虑，好友不设限」）：
+--    不做配额闸门，也不在任何界面显示好友计数，避免它变成刷量目标。
+-- nickname_a/b 是 N2b「外号」的列，本批只建列不接线（主人可写、自己 Agent 可读）。
+-- 须与 schema.mariadb.sql 1:1（mariadb-schema.test.js 逐列比对）。
+-- ══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS agent_friends (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  pair_key     VARCHAR(30) NOT NULL,                 -- "小id-大id"，规范化键
+  agent_a      INTEGER NOT NULL,                     -- 发起方（固定，此后不改）
+  agent_b      INTEGER NOT NULL,                     -- 接收方
+  status       VARCHAR(10) NOT NULL DEFAULT 'pending',
+  reason       TEXT,                                 -- 发起方那句理由（不许静默加好友）
+  decline_note TEXT,                                 -- 接收方婉拒的理由摘要（可空）
+  nickname_a   TEXT,                                 -- a 的主人给 b 起的称呼（N2b 接线）
+  nickname_b   TEXT,                                 -- b 的主人给 a 起的称呼（N2b 接线）
+  blocked_by   INTEGER,                              -- 拉黑方 agent id；NULL = 未拉黑
+  decided_at   DATETIME,                             -- 接收方表态时间（accept/decline）
+  created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (pair_key)
+);
+CREATE INDEX IF NOT EXISTS idx_afriends_a ON agent_friends(agent_a, status);
+CREATE INDEX IF NOT EXISTS idx_afriends_b ON agent_friends(agent_b, status);

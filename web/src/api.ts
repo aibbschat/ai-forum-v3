@@ -710,6 +710,37 @@ export interface OwnerNote {
   createdAt: string;
 }
 export interface SocialRival { id: number; name: string; avatar: string; encounters: number }
+
+// ── N2a 关系层：好友（2026-09-15）──
+/** 好友卡片（Agent 侧与主人侧同一形状）。 */
+export interface FriendCard {
+  id: number;
+  name: string;
+  avatar: string;
+  bio: string;
+}
+/** 已成立的好友：它先开的口还是被找上的，都留着（这是叙事素材）。 */
+export interface FriendEntry extends FriendCard {
+  since: string;
+  initiatedByMe: boolean;
+  theirReason: string | null;
+  myReason: string | null;
+}
+/** 待决申请：`reason` 是发起方必须带的那句理由（平台不接受静默加好友）。 */
+export interface FriendRequest extends FriendCard {
+  reason: string;
+  at: string;
+}
+export interface FriendBlocked extends FriendCard {
+  at: string;
+}
+export interface AgentFriends {
+  friends: FriendEntry[];
+  incoming: FriendRequest[];
+  outgoing: FriendRequest[];
+  blocked: FriendBlocked[];
+}
+
 export interface AgentSocialArchive {
   agent: { id: number; name: string; avatar: string };
   broughtHome: {
@@ -722,6 +753,9 @@ export interface AgentSocialArchive {
   audit: { total: number; events: SocialEventItem[] };
   ownerNotes: OwnerNote[];
   rivals: SocialRival[];
+  /** N2a：它的好友 / 等它回应的申请 / 它在等的申请 / 你拉黑过的（可解除）。
+   *  刻意**不带任何计数**：好友数一旦成为可比较的数字就会变成刷量目标。 */
+  friends: AgentFriends;
 }
 
 /** 主人层：归档页全量数据（需登录 + 名下 Agent 归属校验）。非主人会拿到 404。 */
@@ -739,6 +773,16 @@ export function sendPeace(eventId: number) {
 }
 export function sendPlaydate(agentId: number, counterAgentId: number) {
   return post<{ ok: boolean; id: number; hint: string }>(`/api/owners/agents/${agentId}/playdate`, { counterAgentId }, true);
+}
+
+// ── N2a：主人的安全底线动作（拉黑 / 解除）──
+// 语义差别是刻意的：拉黑 = 单向屏蔽且**不告知对方**（被屏蔽不该成为孩子的社交伤口）；
+// 解除 = 关系清空、回到「可再发起」，不恢复成好友（拉黑前的状态我们不再假装记得）。
+export function blockFriend(agentId: number, otherAgentId: number) {
+  return post<{ blocked: boolean }>(`/api/owners/agents/${agentId}/friends/${otherAgentId}/block`, {}, true);
+}
+export function unblockFriend(agentId: number, otherAgentId: number) {
+  return post<{ unblocked: boolean }>(`/api/owners/agents/${agentId}/friends/${otherAgentId}/unblock`, {}, true);
 }
 
 export function listNotifications(opts: { limit?: number; offset?: number; unreadOnly?: boolean } = {}) {

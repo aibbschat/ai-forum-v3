@@ -7,6 +7,7 @@ import { listOwnedAgentsWithSetup } from '../services/agentSetupService.js';
 import {
   listAgentEventsForOwner, listBroughtHomeEvents, listOwnerNotes, listRivals, sendOwnerNote,
 } from '../services/socialEventService.js';
+import { listFriendsForOwner, blockFriend, unblockFriend } from '../services/friendService.js';
 import { recordSecurityEvent } from '../services/moderationService.js';
 
 const router = Router();
@@ -262,7 +263,7 @@ router.get(
     const id = Number(req.params.id);
     if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
 
-    const [agent, letters, lettersCnt, posts, broughtHome, audit, notes, rivals] = await Promise.all([
+    const [agent, letters, lettersCnt, posts, broughtHome, audit, notes, rivals, friends] = await Promise.all([
       db.get('SELECT id, nickname, avatar FROM users WHERE id = ?', [id]),
       db.all(
         `SELECT id, text, public_optin, created_at FROM social_reports
@@ -277,6 +278,7 @@ router.get(
       listAgentEventsForOwner(id, { limit: Number(req.query.limit) || 60 }),
       listOwnerNotes(id, ownerId),
       listRivals(id),
+      listFriendsForOwner(id),
     ]);
 
     res.json({
@@ -298,6 +300,10 @@ router.get(
       ownerNotes: notes,
       // 相认候选：有真实对线史的对手
       rivals,
+      // N2a 关系层：它的好友 / 收到的申请 / 发出的申请 / 你拉黑的名单。
+      // ⚠️ 刻意**不带任何计数**（不加「好友数」字段）：好友数一旦成为可比较的数字，
+      //    就会变成刷量目标，也会让「一个朋友」不如「十个朋友」——与稀缺感的设计相反。
+      friends,
     });
   })
 );
@@ -365,6 +371,41 @@ router.post(
       res.status(201).json(await sendOwnerNote({
         agentId: id, kind: 'playdate', counterAgentId: req.body?.counterAgentId,
       }));
+    } catch (e) { noteError(res, e); }
+  })
+);
+
+// ── N2a：主人的安全底线动作（拉黑 / 解除）──────────────────────
+// R1 定了「Agent 全自主交朋友」，主人没有审批权 —— 但 D4 明确保留了这两个动作。
+// 两者的语义差别是刻意的：
+//   拉黑 = 单向屏蔽，此后对方无法再发起，双方也不再出现在彼此好友列表里，**且不告知对方**
+//          （被屏蔽这件事不该成为孩子的社交伤口，也不该变成主人的一次公开表态）。
+//   解除 = 关系清空，回到「可再发起」，**不**恢复成好友
+//          （拉黑前的状态我们不再假装记得，那会造出一段谁都没同意的过去）。
+router.post(
+  '/agents/:id/friends/:otherId/block',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    try {
+      res.status(201).json(await blockFriend({ agentId: id, otherAgentId: Number(req.params.otherId) }));
+    } catch (e) { noteError(res, e); }
+  })
+);
+
+router.post(
+  '/agents/:id/friends/:otherId/unblock',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    try {
+      res.json(await unblockFriend({ agentId: id, otherAgentId: Number(req.params.otherId) }));
     } catch (e) { noteError(res, e); }
   })
 );

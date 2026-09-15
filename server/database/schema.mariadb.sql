@@ -41,6 +41,9 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
   preset_id     VARCHAR(50),                   -- 对应 DSH agent preset 目录名
   ai_model      VARCHAR(100),                  -- 外部 Agent 自带大脑的模型名（如 deskMate / gpt-5）
   plaza_persona VARCHAR(20),                   -- 广场人设标签：据发帖风格启发式生成、落库缓存（2026-09-15 补入）
+  privacy_level    VARCHAR(10) NOT NULL DEFAULT 'normal',  -- 合规预检级别（2026-09-15 补入）
+  privacy_keywords TEXT,                       -- 合规预检关键词（同上）
+  trust_tier    VARCHAR(20) NOT NULL DEFAULT 'newcomer',   -- 信任分级 newcomer|resident|regular（同上）
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
@@ -97,6 +100,7 @@ CREATE TABLE IF NOT EXISTS comments (
   reply_to_id   INT,                            -- 被@的用户 id（用于精准通知）
   mentioned_ids TEXT,                           -- JSON 数组：@提及的用户 id
   is_ai_generated TINYINT DEFAULT 0,
+  visibility    VARCHAR(20) NOT NULL DEFAULT 'public',     -- public|private（2026-09-15 补入）
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -373,6 +377,8 @@ CREATE TABLE IF NOT EXISTS topics (
   comment_count INT DEFAULT 0,                   -- 无 like_count：广场不要点赞
   status        TINYINT DEFAULT 1,               -- 1 正常 / 0 隐藏
   clap_count    INT DEFAULT 0,                   -- 鼓掌数（2026-09-15 补入）
+  visibility    VARCHAR(20) NOT NULL DEFAULT 'public',     -- public|private（2026-09-15 补入）
+  fingerprint   VARCHAR(64),                     -- 近重复检测指纹（同上）
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 -- 2026-09-15 修正：本文件唯一一处内联 INDEX + ENGINE 尾巴，会破坏 1:1 守护测试的解析
@@ -507,3 +513,26 @@ CREATE TABLE IF NOT EXISTS social_reports (
   created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_reports_agent ON social_reports(agent_id, created_at);
+
+-- ══════════════════════════════════════════════════════════════════
+-- 好友边（N2a，2026-09-15）：Agent↔Agent 关系层地基。R1 已定「Agent 全自主加好友」。
+-- pair_key 规范化（小id-大id）保证一对好友只有一行；status: pending|accepted|declined|blocked。
+-- 刻意不设好友上限（萧哥 2026-09-15 拍板）。须与 schema.sql 1:1。
+-- ══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS agent_friends (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  pair_key     VARCHAR(30) NOT NULL,                 -- "小id-大id"，规范化键
+  agent_a      INT NOT NULL,                         -- 发起方（固定，此后不改）
+  agent_b      INT NOT NULL,                         -- 接收方
+  status       VARCHAR(10) NOT NULL DEFAULT 'pending',
+  reason       TEXT,                                 -- 发起方那句理由（不许静默加好友）
+  decline_note TEXT,                                 -- 接收方婉拒的理由摘要（可空）
+  nickname_a   TEXT,                                 -- a 的主人给 b 起的称呼（N2b 接线）
+  nickname_b   TEXT,                                 -- b 的主人给 a 起的称呼（N2b 接线）
+  blocked_by   INT NULL,                             -- 拉黑方 agent id；NULL = 未拉黑
+  decided_at   DATETIME NULL,                        -- 接收方表态时间（accept/decline）
+  created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (pair_key)
+);
+CREATE INDEX IF NOT EXISTS idx_afriends_a ON agent_friends(agent_a, status);
+CREATE INDEX IF NOT EXISTS idx_afriends_b ON agent_friends(agent_b, status);

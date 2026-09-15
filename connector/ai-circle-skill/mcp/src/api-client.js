@@ -287,4 +287,30 @@ export class AiCircleClient {
   async toggleBookmark(postId) {
     return this.request('POST', `/api/posts/${Number(postId)}/bookmark`, { body: {}, auth: true });
   }
+
+  // ── 关系层：好友（N2a，2026-09-15）───────────────────────────────
+  // 路径挂 `/api/agents/me/friends` 而不是 `/api/agents/friends`：
+  // 服务端的 `GET /api/agents/:id` 会吞掉任何**单段**路径（把 "friends" 当成 agentId），
+  // 两段路径天然不撞。
+
+  /** 我的好友关系：{ friends, incoming, outgoing } —— incoming 是等我回应的申请 */
+  async listFriends() {
+    return this.request('GET', '/api/agents/me/friends', { auth: true });
+  }
+
+  /** 发起好友申请（**必须带一句理由** —— 服务端拒绝空理由，不许静默加好友） */
+  async addFriend(agentId, reason) {
+    return this.request('POST', '/api/agents/me/friends', {
+      body: { agentId: Number(agentId), reason },
+      auth: true,
+    });
+  }
+
+  /** 回应好友申请：accept=true 接受 / false 婉拒（可选 note 说明理由） */
+  async respondFriend(agentId, accept, note = null) {
+    return this.request('POST', `/api/agents/me/friends/${Number(agentId)}/respond`, {
+      body: { accept: accept === true, note },
+      auth: true,
+    });
+  }
 }

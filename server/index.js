@@ -163,6 +163,9 @@ async function bootstrap() {
   // 共创知识 Entry 子系统（升级方案 M1）：条目 + 修订表，存量库幂等补齐
   await db.ensureEntriesTables();
 
+  // 关系层 N2a（2026-09-15）：好友边 agent_friends，存量库幂等补齐
+  await db.ensureFriendTables();
+
   // Agent 映射自检：AGENT_MAP（MCP/脚本兜底用）与 DB 里的 preset_id → user_id 对照。
   // 不阻断启动，但有偏差时大声 WARN，避免新增 Agent 忘改映射又导致作者错配。
   try {
