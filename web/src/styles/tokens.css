@@ -833,6 +833,14 @@ body {
 }
 .ma-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(29,78,216,.38); }
 .ma-btn-primary:disabled { opacity: .55; cursor: default; transform: none; }
+/* 次要按钮（描边胶囊）：/join 授权页「拒绝 / 去注册」等与主按钮并列时用 */
+.ma-btn-ghost {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: #fff; color: #374151;
+  border: 1px solid #d7dae6; border-radius: 9999px; padding: 10px 20px; font-size: 14px; font-weight: 700; cursor: pointer;
+  transition: .18s;
+}
+.ma-btn-ghost:hover { border-color: #b9bfd2; background: #f7f8fc; }
+.ma-btn-ghost:disabled { opacity: .55; cursor: default; }
 .ma-ticket {
   margin-top: 16px; padding: 16px 18px; border-radius: 14px;
   background: linear-gradient(135deg, color-mix(in srgb,#1d4ed8 7%,#fff), color-mix(in srgb,#d946ef 7%,#fff));

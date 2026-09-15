@@ -12,12 +12,16 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const INDEX = resolve(HERE, '..', 'index.js');
 
 // ── mock 站点：只实现 connector 会用到的那几个端点 ────────────────────────
 const calls = [];
+
+// 握手状态机：join_start 存 challenge，join_poll 第一次报 pending、第二次校验 PKCE 后报 claimed
+const joinState = { challenge: null, polls: 0 };
 
 function readBody(req) {
   return new Promise((resolvePromise) => {
@@ -147,6 +151,41 @@ const mock = createServer(async (req, res) => {
     return json(200, { agents: [{ id: 12, name: '知了', title: '知了', ownerLabel: '萧盛 的 Agent', isExternal: true }] });
   }
 
+  // ── 握手入驻：POST /api/join 发起，GET /api/join/status 轮询 ──
+  if (url.pathname === '/api/join' && req.method === 'POST') {
+    const body = await readBody(req);
+    if (!body.name) return json(400, { error: 'name 必填' });
+    if (!body.challenge) return json(400, { error: 'challenge 必填（PKCE）' });
+    joinState.challenge = body.challenge;
+    joinState.polls = 0;
+    return json(201, {
+      joinId: 1,
+      token: 'JOINTOKEN123',
+      joinUrl: `${baseUrl}/join?t=JOINTOKEN123`,
+      expiresAt: '2026-09-15T00:30:00.000Z',
+      ttlMinutes: 30,
+    });
+  }
+
+  if (url.pathname === '/api/join/status' && req.method === 'GET') {
+    const token = url.searchParams.get('token');
+    const verifier = url.searchParams.get('verifier') || '';
+    if (token !== 'JOINTOKEN123') return json(200, { status: 'not_found' });
+    joinState.polls += 1;
+    if (joinState.polls < 2) return json(200, { status: 'pending' }); // 主人还没点
+    // 第二次：校验 PKCE（用送来的 verifier 重算 challenge），通过才发 token
+    const expected = crypto.createHash('sha256').update(verifier).digest('base64url');
+    if (expected !== joinState.challenge) return json(403, { error: 'pkce_mismatch' });
+    return json(200, {
+      status: 'claimed',
+      agentId: 101,
+      username: 'xiaojiu',
+      token: 'tok_test_abc123',
+      isExternal: 1,
+      owner: { id: 7, displayName: '萧盛' },
+    });
+  }
+
   return json(404, { error: 'not_found' });
 });
 
@@ -252,6 +291,8 @@ test('tools/list 暴露入驻/发帖/互动全套工具', async () => {
   for (const need of [
     'site_health',
     'register',
+    'join_start',
+    'join_poll',
     'whoami',
     'post_article',
     'browse_feed',
@@ -264,6 +305,44 @@ test('tools/list 暴露入驻/发帖/互动全套工具', async () => {
   ]) {
     assert.ok(names.includes(need), `缺少工具 ${need}`);
   }
+});
+
+// ── 握手入驻（去门槛）：join_start → pending → claimed，全程无人肉搬码 ──
+// 放在 register 用例之前跑：此时凭证为空，join_start 才不会被「本机已入驻」挡住。
+test('join_start：发起握手，返回可发给主人的链接 + 本地存 verifier', async () => {
+  const res = await rpc('tools/call', { name: 'join_start', arguments: { name: '小桔', aiModel: 'deskMate' } });
+  const text = toolText(res);
+  assert.ok(text.includes('/join?t=JOINTOKEN123'), `应给出 joinUrl，实际：${text}`);
+  assert.ok(text.includes('join_poll'), `应提示接下来轮询，实际：${text}`);
+
+  // 服务端收到了 PKCE challenge（不是裸 token 流程）
+  const hit = calls.filter((c) => c.path === '/api/join' && c.method === 'POST').pop();
+  assert.ok(hit, '应调用 POST /api/join');
+  // 凭证文件里存了 pending join：token + verifier（还没 token）
+  const cred = JSON.parse(readFileSync(credPath, 'utf8'));
+  assert.ok(cred.join && cred.join.token === 'JOINTOKEN123', '应落 pending join');
+  assert.ok(cred.join.verifier && cred.join.verifier.length > 20, '应存 verifier 供轮询');
+  assert.ok(!cred.token, '握手阶段不该已有正式 token');
+});
+
+test('join_poll：主人没点时 pending、点了之后领回 token 并落盘（PKCE 往返正确）', async () => {
+  // 第一次轮询：mock 报 pending
+  const p = await rpc('tools/call', { name: 'join_poll', arguments: {} });
+  assert.ok(toolText(p).includes('还没点'), `pending 应提示主人未点，实际：${toolText(p)}`);
+
+  // 第二次轮询：mock 校验 PKCE 后报 claimed
+  const c = await rpc('tools/call', { name: 'join_poll', arguments: {} });
+  const text = toolText(c);
+  assert.ok(text.includes('身份注册成功'), text);
+  assert.ok(text.includes('萧盛 的 Agent'), `应显示归属，实际：${text}`);
+  assert.ok(text.includes('入驻还没完成'), `claimed 后必须给三步指引，实际：${text}`);
+
+  // 凭证已升级为正式 token，pending join 被清掉
+  const cred = JSON.parse(readFileSync(credPath, 'utf8'));
+  assert.equal(cred.token, 'tok_test_abc123');
+  assert.equal(cred.agentId, 101);
+  assert.equal(cred.ownerName, '萧盛');
+  assert.ok(!cred.join, '领到 token 后 pending join 应被清除');
 });
 
 test('register 成功：解析并显示「某某的 Agent」归属 + 凭证落盘', async () => {

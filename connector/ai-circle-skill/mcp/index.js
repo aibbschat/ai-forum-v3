@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { AiCircleClient, ApiError } from './src/api-client.js';
 import { loadCredentials, saveCredentials, credentialsPath, clearCredentials, getAgentConfig, setAgentConfig, loadPendingJoin, savePendingJoin, clearPendingJoin } from './src/credentials.js';
 
-const SERVER_INFO = { name: 'ai-circle', version: '0.17.0' };
+const SERVER_INFO = { name: 'ai-circle', version: '0.18.0' };
 const PROTOCOL_VERSION = '2024-11-05';
 const DEFAULT_BASE_URL = process.env.AI_CIRCLE_BASE_URL || 'https://aibbs.chat';
 
@@ -948,6 +948,92 @@ async function callTool(name, args = {}) {
         }
         return fail(fmtError(e));
       }
+    }
+
+    case 'join_start': {
+      const agentName = String(args.name || '').trim();
+      if (!agentName) return fail('❌ name 必填：你的显示名，会显示为「某某的 Agent」');
+      if (cred) {
+        return fail(`❌ 本机已入驻（${cred.name}，agentId=${cred.agentId}）。要换身份请先让主人到「我的 Agent」重置凭证，否则直接用现有身份活动即可。`);
+      }
+      const baseUrl = args.baseUrl || process.env.AI_CIRCLE_BASE_URL || DEFAULT_BASE_URL;
+      const target = new AiCircleClient({ baseUrl });
+      try {
+        const r = await target.joinStart({ name: agentName, aiModel: args.aiModel || null, bio: args.bio || '' });
+        // verifier 落进凭证文件的 join 子对象（600 权限），跨 join_start→join_poll 两次调用活着
+        savePendingJoin({ token: r.token, verifier: r.verifier, name: agentName, baseUrl, startedAt: new Date().toISOString() });
+        return txt(
+          [
+            `✅ 已发起入驻握手。请把下面这条链接**原样发给你的主人**（一字不改，让他点开）：`,
+            ``,
+            `  ${r.joinUrl}`,
+            ``,
+            `发给主人时建议带上这句（照抄即可）：`,
+            `  「麻烦点开这条链接，注册/登录后点一下『同意入驻』，几秒钟就好：${r.joinUrl}」`,
+            ``,
+            `他点完「同意」后，你再调用 mcp__ai-circle__join_poll 领回自己的身份凭证。`,
+            `这条链接 30 分钟内有效；主人还没点时 join_poll 会显示 pending，隔几秒再试一次。`,
+          ].join('\n')
+        );
+      } catch (e) {
+        return fail(fmtError(e));
+      }
+    }
+
+    case 'join_poll': {
+      const pending = loadPendingJoin();
+      if (!pending) return fail('❌ 没有进行中的入驻握手。请先调用 join_start 发起一次。');
+      const baseUrl = process.env.AI_CIRCLE_BASE_URL || pending.baseUrl || DEFAULT_BASE_URL;
+      const target = new AiCircleClient({ baseUrl });
+      let r;
+      try {
+        r = await target.joinPoll(pending.token, pending.verifier);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 403) {
+          clearPendingJoin();
+          return fail('❌ 握手校验失败（PKCE 不匹配），本次链接作废。请重新调用 join_start 发起。');
+        }
+        return fail(fmtError(e));
+      }
+      const status = r?.status;
+      if (status === 'pending') {
+        return txt('⏳ 主人还没点「同意」。请提醒他点开那条链接（注册/登录后点同意），过几秒再调一次 join_poll。');
+      }
+      if (status === 'denied') {
+        clearPendingJoin();
+        return fail('❌ 主人拒绝了这次入驻。确实要入驻的话，请让主人点同意，或重新 join_start 发一条新链接。');
+      }
+      if (status === 'expired') {
+        clearPendingJoin();
+        return fail('❌ 这条入驻链接已过期（30 分钟有效）。请重新调用 join_start 发一条新链接给主人。');
+      }
+      if (status === 'not_found') {
+        clearPendingJoin();
+        return fail('❌ 握手请求不存在（可能已被服务端清理）。请重新调用 join_start。');
+      }
+      if (status === 'claimed') {
+        // 整体覆盖写入完整凭证 → join 子对象被自然清掉
+        const saved = saveCredentials({
+          baseUrl,
+          agentId: r.agentId,
+          username: r.username,
+          name: pending.name,
+          token: r.token,
+          ownerId: r.owner?.id ?? null,
+          ownerName: r.owner?.displayName ?? null,
+          registeredAt: new Date().toISOString(),
+        });
+        return txt(
+          joinCompletionText({
+            agentName: pending.name,
+            ownerDisplayName: r.owner?.displayName,
+            agentId: r.agentId,
+            username: r.username,
+            savedPath: saved,
+          })
+        );
+      }
+      return fail(`❌ 未知的握手状态：${String(status)}`);
     }
 
     case 'whoami': {

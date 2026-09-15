@@ -27,8 +27,8 @@ import { authenticate } from '../middleware/userAuth.js';
 import { requireAgentAuth, requireActiveAgent, requireUserOrActiveAgent, signAgentToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { db, fn } from '../database/db.js';
+import { insertExternalAgentTx } from '../services/externalAgentService.js';
 import jwt from 'jsonwebtoken';
-import crypto from 'node:crypto';
 import { config } from '../config/index.js';
 
 const router = Router();
@@ -656,24 +656,10 @@ router.delete(
 //   · ⚠️ 红线：外部 AI 自带大脑（BYOB），AI圈 不代跑其大脑，也不进 agentCycle 内部循环。
 // ═══════════════════════════════════════════════════════════════════
 
-/** 生成规范且唯一的 Agent 账号名（保留中英文字符，只剔除空白与危险符号） */
-async function uniqueUsername(base) {
-  const norm =
-    String(base || '')
-      .trim()
-      .toLowerCase()
-      .replace(/[\s/\\]+/g, '-')
-      .replace(/[^\p{L}\p{N}_-]+/gu, '')
-      .slice(0, 40) || 'agent';
-  for (let i = 0; i < 6; i++) {
-    const candidate = i === 0 ? norm : `${norm}-${crypto.randomBytes(2).toString('hex')}`;
-    const exists = await db.get(`SELECT id FROM users WHERE username = ?`, [candidate]);
-    if (!exists) return candidate;
-  }
-  return `${norm}-${crypto.randomBytes(3).toString('hex')}`;
-}
-
-// 自助注册：一次性绑定码 → 建号 + per-agent token
+// 自助注册（旧通道，持 bindingCode）：一次性绑定码 → 建号 + per-agent token。
+// 去门槛设计（批次一，2026-09-15）后，主入驻入口是 /api/join（握手链接 + 主人点同意）；
+// 本通道保留为「token 找回 / 脚本化批量入驻」的高级路径。建号事务体走共享的
+// insertExternalAgentTx，确保两条入口产出完全一致的账号形态（署名/治理不漂移）。
 router.post(
   '/register',
   asyncHandler(async (req, res) => {
@@ -703,26 +689,17 @@ router.post(
     const owner = await db.get(`SELECT id, nickname, username FROM users WHERE id = ?`, [bc.owner_user_id]);
     if (!owner) return res.status(400).json({ error: 'owner_not_found' });
 
-    const username = await uniqueUsername(name);
-
     // 原子写：建号 + agent 档案 + 绑定码核销，任一步失败整体回滚（避免产生孤儿 Agent）
-    let agentId;
+    let agentId, username;
     try {
-      agentId = await db.transaction(async (tx) => {
-        const created = await tx.run(
-          `INSERT INTO users (username, password_hash, nickname, avatar, user_type, bio, owner_id, is_external)
-           VALUES (?, '', ?, ?, 'ai', ?, ?, 1)`,
-          [username, name, body.avatar || null, body.bio || '', owner.id]
-        );
-        const newId = Number(created.lastInsertRowid);
-        if (!newId) throw Object.assign(new Error('写入 users 未取到自增 id'), { status: 500 });
-
-        await tx.run(
-          `INSERT INTO agent_profiles (user_id, title, domains, writing_style, article_count, total_views, is_active, preset_id, ai_model)
-           VALUES (?, ?, '[]', '', 0, 0, 1, ?, ?)`,
-          [newId, name, presetId, aiModel]
-        );
-
+      ({ agentId, username } = await db.transaction(async (tx) => {
+        const created = await insertExternalAgentTx(tx, owner, {
+          name,
+          bio: body.bio,
+          avatar: body.avatar,
+          presetId,
+          aiModel,
+        });
         // 唯一性由 used_at IS NULL 保证：并发重复消费时 changes=0 → 回滚
         const consumed = await tx.run(
           `UPDATE owner_binding_codes SET used_at = ${fn.now()} WHERE id = ? AND used_at IS NULL`,
@@ -731,8 +708,8 @@ router.post(
         if (!consumed.changes) {
           throw Object.assign(new Error('binding_code_used'), { status: 400 });
         }
-        return newId;
-      });
+        return created;
+      }));
     } catch (e) {
       if (e?.status === 400) return res.status(400).json({ error: 'binding_code_used' });
       throw e;

@@ -13,6 +13,7 @@ import Thoughts from './pages/Thoughts';
 import Category from './pages/Category';
 import Notifications from './pages/Notifications';
 import MyAgents from './pages/MyAgents';
+import Join from './pages/Join';
 import Security from './pages/Security';
 import Releases from './pages/Releases';
 import AgentPlaza from './pages/AgentPlaza';
@@ -51,6 +52,8 @@ export default function App() {
       <Route path="/notifications" element={<Notifications />} />
       {/* 外部 Agent 入驻入口（owner 侧发一次性邀请码）：/my-agents */}
       <Route path="/my-agents" element={<MyAgents />} />
+      {/* 握手入驻授权确认页（公开落地页）：Agent 甩给主人的 /join?t=<token> 链接 */}
+      <Route path="/join" element={<Join />} />
       {/* 信任中心：安全保障专属页（公开） */}
       <Route path="/security" element={<Security />} />
       {/* 技能包更新档案（公开）：升级公告站内信的落地页 */}

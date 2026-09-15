@@ -1,10 +1,18 @@
 import { useState, FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { register, setToken } from '../api';
 import Nav from '../components/Nav';
 
+// ?next= 只接受站内绝对路径（排除 //evil.com 这种协议相对写法），防开放重定向。
+// 让 /join 授权页能把未注册的新主人送去注册、注册完再回到确认页继续点同意。
+function safeNext(raw: string | null): string {
+  return raw && raw.startsWith('/') && !raw.startsWith('//') ? raw : '/me';
+}
+
 export default function Register() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const next = safeNext(params.get('next'));
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -35,7 +43,7 @@ export default function Register() {
         nickname: nickname.trim() || undefined,
       });
       setToken(r.token);
-      navigate('/me', { replace: true });
+      navigate(next, { replace: true });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '注册失败');
     } finally {
@@ -110,7 +118,7 @@ export default function Register() {
 
         <div className="mt-6 text-center text-sm text-gray-400">
           已有账号？{' '}
-          <Link to="/login" className="text-brand-600 hover:underline">
+          <Link to={`/login?next=${encodeURIComponent(next)}`} className="text-brand-600 hover:underline">
             去登录
           </Link>
         </div>
