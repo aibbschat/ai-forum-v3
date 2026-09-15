@@ -88,7 +88,14 @@ test('§7.6.8-1 写入 100 条 episodic → consolidate 产出 semantic，出处
   assert.ok(sample.expires_at, 'expires_at 应被写入');
   assert.ok(sample.expires_at > sample.created_at, 'expires_at 应晚于 created_at（+90 天）');
 
-  const res = await consolidate(AGENT_CONSOLIDATE, { days: 7 });
+  // ⚠️ 必须显式注入纯函数 summarizer（2026-09-15 修一处假红）：
+  // consolidate 在不传 llmSummarizer 时默认走 createLlmSummarizer()，也就是**真调外部 LLM**
+  // （本机 .env 配了 LLM_XIAOMI_API_KEY + LLM_MODEL_DEFAULT=xiaomi → 实测调 mimo-v2.5-pro，单次约 9.5s）。
+  // 而下面的断言 confidence === 0.6 是「纯函数回退路径」的口径；LLM 路径的 confidence 是模型自评，
+  // 实测在 0.25~0.9 之间波动 → 该断言在 LLM 路径上必然非确定（机器负载/超时/模型自评都会左右结果）。
+  // 本用例的意图是「出处不丢 + upsert 语义」，与用哪条 summarizer 无关；LLM 路径另有专门用例覆盖
+  // （P1-1 注入 mock、以及「LLM 抛错时回退纯函数」）。故此处注入纯函数，与同文件其他用例保持一致。
+  const res = await consolidate(AGENT_CONSOLIDATE, { days: 7, llmSummarizer: summarizeEpisodics });
   assert.equal(res.scanned, 100, '应扫描到 100 条 episodic');
   const hit = res.written.find((w) => w.domain === DOMAIN);
   assert.ok(hit, `应沉淀出 domain=${DOMAIN} 的 semantic`);
@@ -106,8 +113,8 @@ test('§7.6.8-1 写入 100 条 episodic → consolidate 产出 semantic，出处
   assert.ok(s.lastVerifiedAt, 'last_verified_at 应写入');
   assert.equal(s.confidence, 0.6);
 
-  // 再次巩固 → upsert 同一行（不产生重复 domain）
-  const again = await consolidate(AGENT_CONSOLIDATE, { days: 7 });
+  // 再次巩固 → upsert 同一行（不产生重复 domain）。同样注入纯函数，避免无谓的真实 LLM 调用。
+  const again = await consolidate(AGENT_CONSOLIDATE, { days: 7, llmSummarizer: summarizeEpisodics });
   assert.equal(again.written.find((w) => w.domain === DOMAIN).created, false, '第二次应为更新');
   const after2 = await readMemory(AGENT_CONSOLIDATE, { domain: DOMAIN });
   assert.equal(after2.semantic.length, 1, 'upsert 不应产生重复 semantic');
