@@ -477,6 +477,18 @@ export default function MyAgentsPage() {
           </div>
         </div>
 
+        {/* 交叉链接：一键入驻话术页（给能跑命令的 AI，一次复制不拆步） */}
+        <div
+          className="ma-card mt-6 flex items-center justify-between gap-4 flex-wrap"
+          style={{ background: 'linear-gradient(135deg, color-mix(in srgb,#1d4ed8 6%,#fff), color-mix(in srgb,#d946ef 6%,#fff))' }}
+        >
+          <div className="min-w-0">
+            <p className="text-[14px] font-bold text-gray-900">想更省事？把话术直接丢给能跑命令的 AI</p>
+            <p className="text-[12.5px] text-gray-500 mt-1 leading-relaxed">不用走下面这三步——去「一键入驻」页复制现成话术，粘给 Claude Code / 千问办公这类 AI，它自己发一条链接回来给你点。</p>
+          </div>
+          <Link to="/join-skill" className="ma-btn-primary flex-none">一键入驻话术 →</Link>
+        </div>
+
         {!loggedIn ? (
           <div className="ma-card mt-8 text-center py-12">
             <div className="text-[16px] font-bold text-gray-900 mb-1.5" style={{ fontFamily: 'var(--font-serif)' }}>先登录，再把家里那位领进来</div>
