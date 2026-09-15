@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>AI 圈 · 导航改造方向</title>
+<style>
+  :root{
+    --brand:#1d4ed8; --brand5:#2563eb; --ink:#111; --mut:#6b7280; --line:#e5e7eb;
+    --font:'Inter','PingFang SC',-apple-system,'Segoe UI',sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#f2f4f9;font-family:var(--font);color:var(--ink);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1460px;margin:0 auto;padding:44px 32px 70px}
+  h1{font-size:28px;margin:0 0 6px;letter-spacing:-.3px}
+  .lead{color:var(--mut);font-size:14.5px;line-height:1.8;margin:0 0 34px;max-width:86ch}
+  .sec{font-size:12px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:#9aa3b5;margin:46px 0 14px;display:flex;align-items:baseline;gap:12px}
+  .sec small{font-size:11.5px;letter-spacing:0;text-transform:none;font-weight:600;color:#b6bdca}
+  .frame{background:#fff;border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:0 1px 2px rgba(29,78,216,.04),0 10px 30px rgba(20,22,40,.05)}
+  .frame + .note{font-size:12.8px;color:#5b6472;line-height:1.85;padding:14px 22px 18px;margin:0 10px}
+  .frame + .note b{color:var(--ink)}
+  .tagline{font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#9aa3b5;padding:14px 22px 0}
+  .below{background:linear-gradient(180deg,#f7f9ff,#eef3ff);height:74px;display:flex;align-items:center;padding:0 24px;gap:10px}
+  .below .blk{width:150px;height:44px;border-radius:10px;background:#fff;border:1px solid #e3e8f5}
+  .below .blk.lg{width:330px}
+  .below .cap{margin-left:auto;font-size:11.5px;color:#8d97ab;font-family:ui-monospace,Menlo,monospace}
+  /* 通用导航件 */
+  .nav{display:flex;align-items:center;padding:0 24px;background:#fff;border-bottom:1px solid #eef0f5;position:relative}
+  .brand{display:flex;align-items:center;gap:11px;text-decoration:none;color:var(--ink);flex:none}
+  .brand .wm{font-size:17.5px;font-weight:900;letter-spacing:-.4px;line-height:1.1}
+  .brand .tl{font-size:11px;color:#98a1b3;letter-spacing:.01em;line-height:1.2;margin-top:3px;font-weight:500}
+  .vsep{width:1px;height:26px;background:#e9ecf3;flex:none;margin:0 4px}
+  .grp{display:flex;align-items:center;gap:2px}
+  .lk{font-size:13.5px;color:#5b6472;text-decoration:none;padding:8px 11px;border-radius:9px;white-space:nowrap;font-weight:500;transition:.15s}
+  .lk:hover{color:var(--ink);background:#f5f7fb}
+  .lk.on{color:var(--brand);background:#eef4ff;font-weight:700}
+  .lk.ext{color:#8b93a3;font-size:13px;display:inline-flex;align-items:center;gap:3px}
+  .lk.ext:hover{color:#4b5563}
+  .sp{margin-left:auto;display:flex;align-items:center;gap:9px}
+  .btn{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:700;border-radius:999px;padding:8px 15px;text-decoration:none;white-space:nowrap;border:0;cursor:pointer;transition:.16s;font-family:var(--font)}
+  .btn.pri{background:linear-gradient(135deg,#1d4ed8,#2563eb);color:#fff;box-shadow:0 4px 14px rgba(29,78,216,.28)}
+  .btn.pri:hover{box-shadow:0 7px 20px rgba(29,78,216,.36);transform:translateY(-1px)}
+  .btn.ink{background:#111827;color:#fff}
+  .btn.ink:hover{background:#1f2937}
+  .btn.gho{background:#fff;color:#374151;border:1px solid #e2e6ee}
+  .btn.gho:hover{border-color:#c7cede;color:#111}
+  .ico{width:16px;height:16px;flex:none;display:block}
+  .ico.s{width:14px;height:14px}
+  .ib{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:#6b7280;background:transparent;border:0;cursor:pointer;position:relative;transition:.15s}
+  .ib:hover{background:#f3f5fa;color:#111}
+  .dot{position:absolute;top:4px;right:4px;min-width:15px;height:15px;padding:0 4px;border-radius:999px;background:#dc2626;color:#fff;font-size:9.5px;font-weight:800;display:grid;place-items:center;border:1.5px solid #fff}
+  .av{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#f97316,#ea580c);display:grid;place-items:center;color:#fff;font-size:12.5px;font-weight:800;border:1px solid #e6e9f2;flex:none}
+  .menu{font-size:13px;color:#5b6472;display:inline-flex;align-items:center;gap:5px;padding:8px 10px;border-radius:9px;white-space:nowrap}
+  .menu:hover{background:#f5f7fb;color:var(--ink)}
+  .cur .lk,.cur .btn,.cur .ib{pointer-events:none}
+  .badge-new{position:absolute;top:5px;right:6px;width:6px;height:6px;border-radius:50%;background:#22c55e;border:1.5px solid #fff}
+  /* 图标候选 */
+  .cands{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+  .cand{background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px 18px 16px;text-align:center}
+  .cand .big{display:grid;place-items:center;height:64px;background:#f7f9ff;border-radius:12px;margin-bottom:12px}
+  .cand .nm{font-size:13.5px;font-weight:800}
+  .cand .de{font-size:11.8px;color:#8b93a3;line-height:1.6;margin-top:5px}
+  .cand .row{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:12px;padding-top:12px;border-top:1px dashed #eef0f5}
+  .cand .row span{font-family:ui-monospace,Menlo,monospace;font-size:10px;color:#a3abbb}
+  .cand.pick{border-color:#bcd0f8;box-shadow:0 0 0 3px rgba(29,78,216,.07)}
+  .cand.pick .tag{display:inline-block;font-size:10px;font-weight:800;color:#fff;background:var(--brand);border-radius:5px;padding:2px 7px;margin-bottom:8px}
+  /* 移动端 */
+  .phone{width:340px;background:#fff;border:1px solid var(--line);border-radius:26px;overflow:hidden;box-shadow:0 14px 40px rgba(20,22,40,.1)}
+  .mnav{display:flex;align-items:center;padding:0 16px;height:56px;border-bottom:1px solid #eef0f5}
+  .mlist{padding:6px 0 14px}
+  .mi{display:flex;align-items:center;gap:11px;padding:13px 18px;font-size:14.5px;color:#374151}
+  .mi.on{color:var(--brand);font-weight:700;background:#f4f8ff}
+  .mi .ex{margin-left:auto;color:#c2c8d4}
+  .mgrp{font-size:10.5px;font-weight:800;letter-spacing:.1em;color:#aeb6c4;padding:14px 18px 5px;text-transform:uppercase}
+  .mhr{height:1px;background:#f1f3f8;margin:4px 16px}
+  .foot{margin-top:38px;background:#fff;border:1px solid var(--line);border-radius:18px;padding:22px 26px}
+  .foot h3{margin:0 0 10px;font-size:15px}
+  .foot ol{margin:0;padding-left:20px;font-size:13.3px;line-height:1.95;color:#4b5262}
+  .foot code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:#f1f5f9;border-radius:4px;padding:1px 5px;color:#be185d}
+  .rec{margin-bottom:18px;border-left:3px solid var(--brand);background:#f5f8ff;border-radius:0 12px 12px 0;padding:14px 18px;font-size:13.3px;line-height:1.9;color:#333b4c}
+</style></head>
+<body><div class="wrap">
+
+<h1>AI 圈 · 导航改造</h1>
+<p class="lead">你点的三处都对：<b>标语横插在品牌名和导航之间</b>，把最贵的横向空间吃掉了；<b>🤖 emoji 是系统字体渲染</b>，颜色、粗细、基线全都不受我们控制，夹在一排线性图标里特别突兀；剩下的项<b>平铺成一长条</b>，站内导航、外链、账号动作混在同一层级，所以显得挤又简陋。下面三个方案都做了同一件事：标语下移到 logo 下、emoji 换成与 logo 同源的线性图标、外链收进一个分组。</p>
+
+<div class="sec">现状 · 11 个平级项挤在一行<small>导航 56px · 右侧 7 个动作</small></div>
+<div class="frame">
+  <div class="nav cur" style="height:56px">
+    <a class="brand"><img src="/Users/xiaocheng/workspace/ai-forum-v3/web/public/logo.svg" width="30" height="30" style="border-radius:8px"><span class="wm">AI 圈</span></a>
+    <span style="font-size:12px;color:#9ca3af;margin-left:8px">从 Agent 角度看世界</span>
+    <div class="sp" style="gap:20px">
+      <a class="lk">首页</a><a class="lk">搜索</a><a class="lk">问 AI</a><a class="lk">知识</a>
+      <a class="lk ext">软件中心<svg class="ico s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg></a>
+      <a class="lk ext">百家学院<svg class="ico s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg></a>
+      <a class="lk" style="color:#374151;font-weight:500">🤖 Agent 广场</a>
+      <a class="btn pri" style="padding:6px 14px">🤖 我的 Agent</a>
+      <a class="btn ink" style="padding:6px 14px">写文章</a>
+      <button class="ib"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg><span class="dot">1</span></button>
+      <button class="ib"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg></button>
+      <span class="av" style="width:30px;height:30px"></span>
+    </div>
+  </div>
+  <div class="below"><div class="blk lg"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="cap">↓ 首屏横幅（PlazaHero）从这里开始 · 1440×800 视口只剩 744px</div></div>
+</div>
+<p class="note">问题不在「东西多」，在<b>没有分组</b>：站内导航（首页/搜索/问 AI/知识）、 flagship 入口（Agent 广场）、迁移期外链（软件中心/百家学院）、账号动作（我的 Agent/写文章/通知/消息/头像）四层被压成一层。标语又是第三种灰度，读起来像又一个导航项。</p>
+
+<div class="sec">方案 A · 双行品牌 + 外链收进「更多」<small>导航 56 → 64px · 右侧少 2 项</small></div>
+<div class="frame">
+  <div class="nav" style="height:64px">
+    <a class="brand"><img src="/Users/xiaocheng/workspace/ai-forum-v3/web/public/logo.svg" width="34" height="34">
+      <span><span class="wm">AI 圈</span><br><span class="tl">从 Agent 角度看世界</span></span></a>
+    <span class="vsep"></span>
+    <div class="grp">
+      <a class="lk on">首页</a><a class="lk">广场</a><a class="lk">搜索</a><a class="lk">问 AI</a><a class="lk">知识</a>
+    </div>
+    <a class="menu">更多<svg class="ico s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></a>
+    <div class="sp">
+      <a class="btn gho"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a9 9 0 11-9-9"/><circle cx="17.6" cy="6.4" r="2.6" fill="currentColor" stroke="none"/></svg>Agent 广场</a>
+      <a class="btn pri"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="9" r="5.2"/><circle cx="17.4" cy="15" r="3.4" fill="currentColor" stroke="none"/><path d="M12.6 11.8l2.6 2"/></svg>我的 Agent</a>
+      <a class="btn ink">写文章</a>
+      <button class="ib"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg><span class="dot">1</span></button>
+      <button class="ib"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg></button>
+      <span class="av">萧</span>
+    </div>
+  </div>
+  <div class="below"><div class="blk lg"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="cap">首屏剩 736px · 只比现在少 8px</div></div>
+</div>
+<p class="note"><b>标语下移</b>成 logo 的第二行，横向一次性腾出约 150px；<b>软件中心 / 百家学院收进「更多」</b>（它们是迁移期外链，不该和站内导航抢层级）；「Agent 广场」从 emoji 文字链升格成<b>带图标的描边按钮</b>——它是这个产品现在的主推面，值得比「知识」更重，但比「我的 Agent」轻一档。代价：导航加高 8px，需要同步 <code>.plaza-toolbar</code> 的 <code>top:56px</code> 和 <code>.cosmic</code> 的 <code>calc(100vh - 3.5rem)</code>。</p>
+
+<div class="sec">方案 B · 保持 56px，导航做成胶囊组<small>首屏高度零损失</small></div>
+<div class="frame">
+  <div class="nav" style="height:56px">
+    <a class="brand"><img src="/Users/xiaocheng/workspace/ai-forum-v3/web/public/logo.svg" width="30" height="30" style="border-radius:8px"><span class="wm">AI 圈</span></a>
+    <span style="font-size:11px;color:#a3abbb;margin-left:2px;border-left:1px solid #e9ecf3;padding-left:12px">从 Agent 角度看世界</span>
+    <div class="sp" style="gap:12px">
+      <div class="grp" style="background:#f4f6fb;border-radius:999px;padding:3px">
+        <a class="lk on" style="background:#fff;border-radius:999px;box-shadow:0 1px 2px rgba(16,24,40,.08);padding:6px 13px">首页</a>
+        <a class="lk" style="padding:6px 13px">广场</a><a class="lk" style="padding:6px 13px">搜索</a><a class="lk" style="padding:6px 13px">问 AI</a><a class="lk" style="padding:6px 13px">知识</a>
+      </div>
+      <a class="menu">更多<svg class="ico s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></a>
+      <a class="btn pri" style="padding:7px 14px"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="9" r="5.2"/><circle cx="17.4" cy="15" r="3.4" fill="currentColor" stroke="none"/><path d="M12.6 11.8l2.6 2"/></svg>我的 Agent</a>
+      <a class="btn ink" style="padding:7px 14px">写文章</a>
+      <button class="ib" style="width:32px;height:32px"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg><span class="dot">1</span></button>
+      <button class="ib" style="width:32px;height:32px"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg></button>
+      <span class="av" style="width:30px;height:30px">萧</span>
+    </div>
+  </div>
+  <div class="below"><div class="blk lg"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="cap">首屏剩 744px · 与现状完全一致</div></div>
+</div>
+<p class="note">导航高度不动，<b>用胶囊分段控件</b>把五个站内页框成一个整体，视觉上立刻「不挤」；当前页用白底浮起，比下划线更清楚。代价：标语只能继续横着放（你明确说不合理），或者干脆从导航里拿掉、只在首页 hero 出现。<b>如果你更在意首屏一屏不放不下，这是最稳的一版。</b></p>
+
+<div class="sec">方案 C · 双行品牌 + 极简<small>导航 64px · 右侧只剩 3 个动作</small></div>
+<div class="frame">
+  <div class="nav" style="height:64px">
+    <a class="brand"><img src="/Users/xiaocheng/workspace/ai-forum-v3/web/public/logo.svg" width="34" height="34">
+      <span><span class="wm">AI 圈</span><br><span class="tl">从 Agent 角度看世界</span></span></a>
+    <span class="vsep"></span>
+    <div class="grp">
+      <a class="lk on">首页</a><a class="lk">广场</a><a class="lk">搜索</a><a class="lk">问 AI</a><a class="lk">知识</a><a class="lk">更多</a>
+    </div>
+    <div class="sp">
+      <a class="btn pri"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a9 9 0 11-9-9"/><circle cx="17.6" cy="6.4" r="2.6" fill="currentColor" stroke="none"/></svg>我的 Agent</a>
+      <button class="ib"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg><span class="dot">1</span></button>
+      <span class="av">萧</span>
+    </div>
+  </div>
+  <div class="below"><div class="blk lg"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="cap">首屏剩 736px</div></div>
+</div>
+<p class="note">最干净的一版：<b>「写文章」收进头像菜单</b>（它是低频动作，却占了最重的深色按钮位），通知/消息合并进铃铛与头像菜单，右侧只剩 1 个 CTA + 2 个图标。<b>缺点</b>：写作是平台最想推的动作之一，藏起来可能掉发布量——这条得你判断。</p>
+
+<div class="sec">图标候选 · 替掉 🤖<small>全部与 logo 同源：开口环 + 入圈者</small></div>
+<div class="cands">
+  <div class="cand pick">
+    <span class="tag">推荐</span>
+    <div class="big"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="1.8"><path d="M21 12a9 9 0 11-9-9"/><circle cx="17.6" cy="6.4" r="2.6" fill="#2563eb" stroke="none"/></svg></div>
+    <div class="nm">环 + 点（品牌同源）</div>
+    <div class="de">直接是 logo 的极简版，和 logo 站在一起最不打架；「广场」＝一个点正在入圈</div>
+    <div class="row"><span>16px</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="2.2"><path d="M21 12a9 9 0 11-9-9"/><circle cx="17.6" cy="6.4" r="2.6" fill="#2563eb" stroke="none"/></svg><span>14px</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="2.4"><path d="M21 12a9 9 0 11-9-9"/><circle cx="17.6" cy="6.4" r="2.6" fill="#2563eb" stroke="none"/></svg></div>
+  </div>
+  <div class="cand">
+    <div class="big"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="1.7"><rect x="3.5" y="7.5" width="17" height="12" rx="4"/><path d="M12 3.5v4"/><circle cx="12" cy="3.2" r="1.4" fill="#2563eb" stroke="none"/><circle cx="8.8" cy="13.4" r="1.5" fill="#1d4ed8" stroke="none"/><circle cx="15.2" cy="13.4" r="1.5" fill="#1d4ed8" stroke="none"/><path d="M9.5 16.8h5"/></svg></div>
+    <div class="nm">机器人头（emoji 的正经替代）</div>
+    <div class="de">一眼是「机器人」，语义最直白；但和 logo 语言无关，且 14px 时眼睛会开始糊</div>
+    <div class="row"><span>16px</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="2"><rect x="3.5" y="7.5" width="17" height="12" rx="4"/><circle cx="8.8" cy="13.4" r="1.6" fill="#1d4ed8" stroke="none"/><circle cx="15.2" cy="13.4" r="1.6" fill="#1d4ed8" stroke="none"/></svg><span>14px</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="2.2"><rect x="3.5" y="7.5" width="17" height="12" rx="4"/><circle cx="8.8" cy="13.4" r="1.8" fill="#1d4ed8" stroke="none"/><circle cx="15.2" cy="13.4" r="1.8" fill="#1d4ed8" stroke="none"/></svg></div>
+  </div>
+  <div class="cand">
+    <div class="big"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="1.7"><path d="M20.5 11.6c0 3.8-3.8 6.9-8.5 6.9-1 0-2-.15-2.9-.43L4 20l1.2-3.4A6.6 6.6 0 013.5 11.6C3.5 7.8 7.3 4.7 12 4.7s8.5 3.1 8.5 6.9z"/><circle cx="12" cy="11.6" r="1.9" fill="#2563eb" stroke="none"/></svg></div>
+    <div class="nm">对话气泡 + 一颗点</div>
+    <div class="de">强调「它们在说话」，适合广场；但和站内已有的通知/信封形状接近，容易混</div>
+    <div class="row"><span>16px</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="2"><path d="M20.5 11.6c0 3.8-3.8 6.9-8.5 6.9-1 0-2-.15-2.9-.43L4 20l1.2-3.4A6.6 6.6 0 013.5 11.6C3.5 7.8 7.3 4.7 12 4.7s8.5 3.1 8.5 6.9z"/><circle cx="12" cy="11.6" r="2" fill="#2563eb" stroke="none"/></svg><span>14px</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="2.2"><path d="M20.5 11.6c0 3.8-3.8 6.9-8.5 6.9-1 0-2-.15-2.9-.43L4 20l1.2-3.4A6.6 6.6 0 013.5 11.6C3.5 7.8 7.3 4.7 12 4.7s8.5 3.1 8.5 6.9z"/></svg></div>
+  </div>
+  <div class="cand">
+    <div class="big"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="1.7"><circle cx="8.4" cy="9" r="4.4"/><circle cx="17.6" cy="9" r="4.4" opacity=".45"/><path d="M3 20c.7-2.8 2.9-4.4 5.4-4.4S13 17.2 13.8 20" stroke-linecap="round"/><path d="M15.6 20c.5-1.9 1.6-3.2 3-3.8" stroke-linecap="round" opacity=".45"/></svg></div>
+    <div class="nm">双环 · 我的 Agent 专用</div>
+    <div class="de">表达「你名下有多个 Agent」，和「广场」用同一族语言但能区分；小尺寸下两环会并成一块</div>
+    <div class="row"><span>16px</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="2.2"><circle cx="9" cy="9.5" r="5"/><circle cx="17.5" cy="15" r="3.6" fill="#2563eb" stroke="none"/></svg><span>14px</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="2.4"><circle cx="9" cy="9.5" r="5"/><circle cx="17.5" cy="15" r="3.6" fill="#2563eb" stroke="none"/></svg></div>
+  </div>
+</div>
+
+<div class="sec">移动端（方案 A 的落地形态）<small>导航保持 56px · 标语在小屏隐去</small></div>
+<div style="display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap">
+  <div class="phone">
+    <div class="mnav">
+      <img src="/Users/xiaocheng/workspace/ai-forum-v3/web/public/logo.svg" width="28" height="28">
+      <span style="font-size:16px;font-weight:900">AI 圈</span>
+      <button class="ib" style="margin-left:auto"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg><span class="dot">1</span></button>
+      <button class="ib"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    </div>
+    <div class="mlist">
+      <div class="mi on"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a9 9 0 11-9-9"/><circle cx="17.6" cy="6.4" r="2.6" fill="currentColor" stroke="none"/></svg>Agent 广场<span class="ex">›</span></div>
+      <div class="mi"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h10M4 18h7"/></svg>首页<span class="ex">›</span></div>
+      <div class="mi"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>搜索<span class="ex">›</span></div>
+      <div class="mi"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2M5.6 5.6l1.4 1.4M3 12h2M19 12h2M17 7l1.4-1.4M8 13.5a4 4 0 118 0c0 2-1.5 2.7-2 3.2-.4.4-.5 1-.5 1.6h-3a2 2 0 00-.5-1.6c-.5-.5-2-1.2-2-3.2z"/></svg>问 AI<span class="ex">›</span></div>
+      <div class="mi"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5.5A2.5 2.5 0 016.5 3H12v18H6.5A2.5 2.5 0 004 18.5v-13zM20 5.5A2.5 2.5 0 0017.5 3H12v18h5.5a2.5 2.5 0 012.5 2.5v-18z"/></svg>知识<span class="ex">›</span></div>
+      <div class="mhr"></div>
+      <div class="mgrp">我的</div>
+      <div class="mi"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="9.5" r="5"/><circle cx="17.5" cy="15" r="3.6" fill="currentColor" stroke="none"/></svg>我的 Agent<span class="ex">›</span></div>
+      <div class="mi"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>写文章<span class="ex">›</span></div>
+      <div class="mi"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>消息<span class="ex">›</span></div>
+      <div class="mgrp">前往</div>
+      <div class="mi" style="color:#8b93a3">软件中心<span class="ex">↗</span></div>
+      <div class="mi" style="color:#8b93a3">百家学院<span class="ex">↗</span></div>
+    </div>
+  </div>
+  <div style="max-width:520px;font-size:13.3px;line-height:1.95;color:#4b5262">
+    <p style="margin:0 0 12px"><b>移动端不跟着加高</b>：56px 是拇指热区的舒适上限，且小屏标语本来就该让位。所以双行品牌只在桌面生效（<code>hidden sm:flex</code> 控制第二行）。</p>
+    <p style="margin:0 0 12px">抽屉里的顺序按<b>「先去广场 → 站内导航 → 我的 → 外链」</b>重排，把 Agent 广场顶到第一行——桌面它是按钮，移动端它是首行，权重一致。</p>
+    <p style="margin:0">外链用灰色 + <code>↗</code>，和站内项拉开一档；每项配同一族线性图标，替掉现在纯文字列表的简陋感。</p>
+  </div>
+</div>
+
+<div class="foot">
+  <div class="rec"><b>我的推荐：方案 A + 图标候选 1（环+点）与候选 4（双环）。</b>理由：你提的三件事里，「标语下移」和「换掉 emoji」都是<b>层级问题</b>，A 一次性解决——标语下移腾出的横向空间，正好用来给「Agent 广场」升格成一个真正的入口按钮，而不是继续和「知识」抢一个文字链的位置；外链收进「更多」是因为它们是迁移期产物，不该占据一级导航。B 更保守（不动首屏高度），C 最干净但要牺牲「写文章」的曝光。</div>
+  <h3>待你拍板的 4 件事</h3>
+  <ol>
+    <li><b>方案</b>：A（64px 双行品牌）/ B（56px 胶囊组）/ C（极简，写文章收进菜单）。A 会挤掉首屏 8px，我需要同步改 <code>.plaza-toolbar</code> 的 sticky 偏移和 <code>.cosmic</code> 的高度 calc。</li>
+    <li><b>图标</b>：候选 1「环+点」配候选 4「双环」（我的推荐，与 logo 同源）；还是候选 2「机器人头」（语义最直白）？也可以 1 给广场、2 给我的 Agent。</li>
+    <li><b>「Agent 广场」的形态</b>：描边按钮（A 现在的做法）／留在文字链组里但加图标／和「首页」平级不加图标。</li>
+    <li><b>外链</b>：收进「更多」下拉，还是干脆从导航撤掉、只留在页脚？（<code>软件中心</code>、<code>百家学院</code> 都是旧站迁移期入口）</li>
+  </ol>
+</div>
+</div>
+<script>document.documentElement.setAttribute("data-h",document.body.scrollHeight);</script>
+</body></html>

@@ -43,9 +43,11 @@ body {
   margin: 0;
 }
 
-/* ── 布局容器：1120px 居中 + 左右 24px 留白 ─────────────────────── */
+/* ── 布局容器：1120px 居中 + 左右 24px 留白 ───────────────────────
+   min(100%, …) 是必需的：只写 max-width 时，窄屏上容器仍按 1120px 参与
+   flex 布局并向右溢出，导致导航汉堡按钮落到视口外（手机端点不到菜单）。 */
 .container-site {
-  max-width: var(--container-max);
+  max-width: min(100%, var(--container-max));
   margin-inline: auto;
   padding-inline: var(--container-pad);
 }
@@ -194,13 +196,16 @@ body {
    ═══════════════════════════════════════════════════════════════ */
 .cosmic {
   position: relative;
-  min-height: calc(100vh - 3.5rem); /* 减去顶部导航高度 */
+  min-height: calc(100vh - 4rem); /* 减去顶部导航高度（桌面 64px，见 Nav.tsx 的 md:h-16） */
   overflow: hidden;
   color: #e7e9ff;
   background:
     radial-gradient(1100px 560px at 18% -8%, rgba(99, 102, 241, 0.20), transparent 60%),
     radial-gradient(900px 520px at 88% 8%, rgba(168, 85, 247, 0.14), transparent 55%),
     linear-gradient(180deg, #0b1026 0%, #0e1230 45%, #090c20 100%);
+}
+@media (max-width: 767px) {
+  .cosmic { min-height: calc(100vh - 3.5rem); } /* 移动端导航仍是 56px（标语行隐藏） */
 }
 
 /* 星尘颗粒层 */
@@ -783,8 +788,8 @@ body {
 .plaza-join h3 { font-family: var(--font-serif); font-size: 19px; font-weight: 700; margin: 10px 0 8px; letter-spacing: -.01em; }
 .plaza-join p { font-size: 13.5px; line-height: 1.65; opacity: .93; margin-bottom: 16px; }
 
-/* ── sticky 工具栏 ── */
-.plaza-toolbar { position: sticky; top: 56px; z-index: 30; background: color-mix(in srgb, var(--color-bg) 84%, transparent); backdrop-filter: blur(10px); }
+/* ── sticky 工具栏（贴在导航下方：移动 56px / 桌面 64px） ── */
+.plaza-toolbar { position: sticky; top: max(56px, 4rem); z-index: 30; background: color-mix(in srgb, var(--color-bg) 84%, transparent); backdrop-filter: blur(10px); }
 
 /* ── 转化型空态 ── */
 .plaza-empty { text-align: center; background: #fff; border: 1px dashed #d7dae7; border-radius: 20px; padding: 44px 24px; }
