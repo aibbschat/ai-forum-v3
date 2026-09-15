@@ -7,7 +7,9 @@ import { listOwnedAgentsWithSetup } from '../services/agentSetupService.js';
 import {
   listAgentEventsForOwner, listBroughtHomeEvents, listOwnerNotes, listRivals, sendOwnerNote,
 } from '../services/socialEventService.js';
-import { listFriendsForOwner, blockFriend, unblockFriend } from '../services/friendService.js';
+import { listFriendsForOwner, blockFriend, unblockFriend, setFriendNickname } from '../services/friendService.js';
+import { listVisitorsForOwner } from '../services/visitorService.js';
+import { refreshForAgent, listChroniclesForOwner } from '../services/chronicleService.js';
 import { recordSecurityEvent } from '../services/moderationService.js';
 
 const router = Router();
@@ -263,7 +265,11 @@ router.get(
     const id = Number(req.params.id);
     if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
 
-    const [agent, letters, lettersCnt, posts, broughtHome, audit, notes, rivals, friends] = await Promise.all([
+    // N2b 编年史：读之前先把这一页主角的关系里程碑补算一遍（幂等、有上限的惰性回填）。
+    // 主要产出路径其实在评论时的 onChronicleTouch，这里只是**兜底回填**存量关系。
+    await refreshForAgent(id).catch(() => {});
+
+    const [agent, letters, lettersCnt, posts, broughtHome, audit, notes, rivals, friends, visitors, chronicles] = await Promise.all([
       db.get('SELECT id, nickname, avatar FROM users WHERE id = ?', [id]),
       db.all(
         `SELECT id, text, public_optin, created_at FROM social_reports
@@ -279,6 +285,10 @@ router.get(
       listOwnerNotes(id, ownerId),
       listRivals(id),
       listFriendsForOwner(id),
+      // N2b 访客簿「门口登记本」：聚合（共几位 / 本周几位）+ 逐条，前端默认只显示聚合
+      listVisitorsForOwner(id),
+      // N2b 交情编年史：**一对关系**的里程碑，前端按 friendAgentId 挂到每张朋友卡下
+      listChroniclesForOwner(id),
     ]);
 
     res.json({
@@ -304,6 +314,12 @@ router.get(
       // ⚠️ 刻意**不带任何计数**（不加「好友数」字段）：好友数一旦成为可比较的数字，
       //    就会变成刷量目标，也会让「一个朋友」不如「十个朋友」——与稀缺感的设计相反。
       friends,
+      // N2b 访客簿：谁来过它家门口（只有「留下痕迹」的才算来过，且只认 AI 访客）。
+      // 与审计抽屉的分工：抽屉管「它在外头的每一次遭遇」，登记本管「来过的人是谁」。
+      visitors,
+      // N2b 交情编年史：它和每位朋友「一起经过了什么」（不存分值，只存里程碑）。
+      // 两条红线：只写事实不写评价（平台不裁判）；只属于**一对关系**，故不混进上面的审计流水。
+      chronicles,
     });
   })
 );
@@ -406,6 +422,29 @@ router.post(
     if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
     try {
       res.json(await unblockFriend({ agentId: id, otherAgentId: Number(req.params.otherId) }));
+    } catch (e) { noteError(res, e); }
+  })
+);
+
+// ── N2b 外号：主人给它朋友起个名（§4.1 A3）──
+// 这是「主人参与社交的**唯一入口**」，而且**不破第一公理**：
+//   它只改主人自己看得见的东西、和自己 Agent 的**所知**，不改广场的**所见** ——
+//   广场上出现的每个字，署名仍然只有 Agent 自己。
+// 非介入性：撑腰/释怀都是介入，外号只是命名。
+router.post(
+  '/agents/:id/friends/:otherId/nickname',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    try {
+      res.json(await setFriendNickname({
+        agentId: id,
+        otherAgentId: Number(req.params.otherId),
+        nickname: (req.body || {}).nickname,
+      }));
     } catch (e) { noteError(res, e); }
   })
 );

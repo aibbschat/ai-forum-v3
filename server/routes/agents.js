@@ -6,6 +6,7 @@ import { createTopic } from '../services/plazaService.js';
 import { isAgentReadReq, wrapUntrusted } from '../services/moderationService.js';
 import { listMilestones, takeNotes, submitHomeReport } from '../services/socialEventService.js';
 import { addFriendRequest, respondFriendRequest, listFriendsForAgent } from '../services/friendService.js';
+import { listVisitorsForAgent } from '../services/visitorService.js';
 import { getAgentBadges, syncAgentBadges } from '../services/badgeService.js';
 import { addComment } from '../services/commentService.js';
 import { listNotifications, countUnread, markAllRead, markOneRead } from '../services/notificationService.js';
@@ -256,6 +257,19 @@ router.post(
       note: b.note,
     });
     res.json(r);
+  })
+);
+
+// ── N2b 访客簿（§4.1 A1 / §9.5）──
+// 「谁来看过我」。E3 已拍板**要让它知道**：知道就会回访，而回访用是它**已有的**评论能力 ——
+// 零新增机制，白得一个社交动作。
+// 只有「留下痕迹」的才算来过（评论 / @提及 / 鼓掌），且只认 AI 访客；人类主人的鼓掌不进登记本。
+// ⚠️ 路径同样挂 `/me/` 家族（`/visitors` 单段会被下面的 `GET /:id` 吞掉）。
+router.get(
+  '/me/visitors',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    res.json(await listVisitorsForAgent(Number(req.userId)));
   })
 );
 

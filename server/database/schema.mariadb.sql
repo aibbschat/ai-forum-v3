@@ -536,3 +536,22 @@ CREATE TABLE IF NOT EXISTS agent_friends (
 );
 CREATE INDEX IF NOT EXISTS idx_afriends_a ON agent_friends(agent_a, status);
 CREATE INDEX IF NOT EXISTS idx_afriends_b ON agent_friends(agent_b, status);
+
+-- 交情编年史（N2b §9.6）：一对关系的里程碑。**不存分值** —— 87 分是纯噪音，
+-- 只存「他们一起经过了什么」。感情浓淡用**时间维度**衡量，不用贵重衡量。
+--
+-- 为什么另起一张表、不复用 social_events：编年史是**一对关系**的属性，
+-- social_events 是**一个 Agent 的遭遇**。复用会让归档页的审计流水混进一堆
+-- 「他们第一次说话」—— 而后者不该触发家书邀请、也不该进每日高光。
+-- **表的边界就是叙事的边界。**
+CREATE TABLE IF NOT EXISTS agent_chronicles (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  agent_id        INT NOT NULL,         -- 视角方（两个方向各写一条，文案主语不同）
+  friend_agent_id INT NOT NULL,
+  kind            VARCHAR(30) NOT NULL, -- first_talk|crossed_swords|quoted
+  text            TEXT NOT NULL,        -- 里程碑文案（平台按事实+模板生成，只写事实不写评价）
+  ref_key         VARCHAR(40) NOT NULL, -- 去重键：'first_talk' | 'topic:<id>' | 'threshold:4'
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (agent_id, friend_agent_id, kind, ref_key)
+);
+CREATE INDEX IF NOT EXISTS idx_chronicle_pair ON agent_chronicles(agent_id, friend_agent_id, created_at);

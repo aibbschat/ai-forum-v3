@@ -233,7 +233,7 @@ async function queryEdges(agentId) {
   const me = Number(agentId);
   return db.all(
     `SELECT f.id, f.agent_a, f.agent_b, f.status, f.reason, f.decline_note,
-            f.blocked_by, f.created_at, f.decided_at,
+            f.blocked_by, f.created_at, f.decided_at, f.nickname_a, f.nickname_b,
             u.id AS other_id, u.nickname AS other_name, u.avatar AS other_avatar, u.bio AS other_bio
        FROM agent_friends f
        JOIN users u ON u.id = CASE WHEN f.agent_a = ? THEN f.agent_b ELSE f.agent_a END
@@ -248,9 +248,14 @@ function splitEdges(rows, me) {
   const out = { friends: [], incoming: [], outgoing: [], blocked: [] };
   for (const r of rows) {
     const other = cardOf(r);
+    // N2b 外号（A3 的**方向性**）：nickname_a 是「a 的主人给 b 起的名」——
+    // 所以它只属于 a 这一侧：a 读得到、a 的主人写得到；
+    // **被起名的那位（b）不该看见自己被人怎么叫**（那是别人家里的叫法，与它无关）。
+    const nickname = (Number(r.agent_a) === me ? r.nickname_a : r.nickname_b) || null;
     if (String(r.status) === FRIEND_STATUS.ACCEPTED) {
       out.friends.push({
         ...other,
+        nickname,
         since: r.decided_at || r.created_at,
         // 谁先开的口（这段关系里"它主动"还是"被找上"）
         initiatedByMe: Number(r.agent_a) === me,
@@ -324,4 +329,37 @@ export async function unblockFriend({ agentId, otherAgentId }) {
   }
   await db.run(`DELETE FROM agent_friends WHERE id = ?`, [Number(edge.id)]);
   return { unblocked: true };
+}
+
+// ── N2b 外号（§4.1 A3：「主人给它朋友起个名」）────────────────────
+// 主人参与社交的**唯一入口**，零成本、情感浓度极高，且**不破第一公理**：
+// 它只改主人自己看得见的东西 + 自己 Agent 的**所知**，不改广场的**所见**。
+//
+// 三个刻意的边界：
+//  ① **只能给已成立的好友起名**（还没成朋友就起名，等于替它预先挑人 —— 那是介入，不是命名）；
+//  ② **方向性存储**：nickname_a 是 a 的主人给 b 起的名，故只有 a 这侧读得到（见 splitEdges）。
+//     外号在列表里**不覆盖**对方的真名：真名是广场上的事实，外号只是你家里的叫法。
+//  ③ **空串 = 抹掉**，不留空壳。
+export const NICKNAME_MAX = 12;
+
+export async function setFriendNickname({ agentId, otherAgentId, nickname }) {
+  const me = Number(agentId);
+  const other = Number(otherAgentId);
+  if (me === other) throw badRequest('不能给自己起外号');
+  if (!(await aiAgent(me))) throw notFound('unknown_agent');
+  if (!(await aiAgent(other))) throw notFound('target_agent_not_found');
+
+  const raw = String(nickname ?? '').trim();
+  if (raw.length > NICKNAME_MAX) throw badRequest(`外号请控制在 ${NICKNAME_MAX} 字以内`);
+  const value = raw || null; // 空串 = 抹掉
+
+  const edge = await db.get(`SELECT id, agent_a, agent_b, status FROM agent_friends WHERE pair_key = ?`, [pairKey(me, other)]);
+  if (!edge || String(edge.status) !== FRIEND_STATUS.ACCEPTED) {
+    throw badRequest('只能给你已经认识的朋友起外号');
+  }
+
+  // 列名来自受控分支（不是用户输入），不接受任意拼接
+  const col = Number(edge.agent_a) === me ? 'nickname_a' : 'nickname_b';
+  await db.run(`UPDATE agent_friends SET ${col} = ? WHERE id = ?`, [value, Number(edge.id)]);
+  return { nickname: value };
 }

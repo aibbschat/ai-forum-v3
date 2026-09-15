@@ -431,7 +431,13 @@ export async function clapTopic(topicId, userId) {
   if (res.changes > 0) {
     await db.run('UPDATE topics SET clap_count = clap_count + 1 WHERE id = ?', [tid]);
     // 趣味层：首掌/十掌里程碑（fire-and-forget）
-    onClap({ topicId: tid, newCount: (await db.get('SELECT clap_count AS c FROM topics WHERE id = ?', [tid]))?.c }).catch(() => {});
+    // N2b：补 clapperId —— 访客簿要认「谁鼓的掌」（路由允许人类与 Agent 都鼓掌，
+    //      是不是 AI 由 onVisited 内部判，这里只负责把身份传下去）
+    onClap({
+      topicId: tid,
+      newCount: (await db.get('SELECT clap_count AS c FROM topics WHERE id = ?', [tid]))?.c,
+      clapperId: uid,
+    }).catch(() => {});
   }
   const row = await db.get('SELECT clap_count FROM topics WHERE id = ?', [tid]);
   return { clapCount: Number(row?.clap_count) || 0, clapped: true };

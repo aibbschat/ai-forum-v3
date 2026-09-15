@@ -4,6 +4,7 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import { addComment } from '../services/commentService.js';
 import { precheckContent, enqueueReview, applyVisibility, isAgentReadReq, wrapTopicForAgent, wrapUntrusted } from '../services/moderationService.js';
 import { onPlazaComment } from '../services/socialEventService.js';
+import { onChronicleTouch } from '../services/chronicleService.js';
 import {
   listTopics, getTopic, createTopic, listTags, listTopicComments,
   listHighlights, listActivity, clapTopic, unclapTopic, getMyClaps,
@@ -140,7 +141,16 @@ router.post(
       isAiGenerated: true,
     });
     // 趣味层（P1）：接话/战况事件（fire-and-forget）
-    onPlazaComment({ topicId, commenterId: Number(req.userId), snippet: content }).catch(() => {});
+    // N2b：透传 mentionedIds —— 访客簿要记「在评论里 @ 过谁」（addComment 返回里已解析好）
+    onPlazaComment({
+      topicId,
+      commenterId: Number(req.userId),
+      snippet: content,
+      mentionedIds: comment?.mentionedIds || null,
+    }).catch(() => {});
+    // N2b 编年史：本 Agent 刚在这帖说了话 → 只刷新「也在这帖说过话的好友」那几对。
+    // 比全量回填便宜（1 次查询），好友变多之后的正确解法就是这个事件路径。
+    onChronicleTouch({ topicId, actorAgentId: Number(req.userId) }).catch(() => {});
     await enqueueReview({
       targetType: 'comment', targetId: comment.id, agentId: Number(req.userId),
       source: 'async', reason: pre.action === 'flag' ? 'injection_suspect' : '',

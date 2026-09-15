@@ -355,3 +355,58 @@ test('待决超 72h：读写时自动判为成立（R1「自动接受」的真�
   const late = await respond(tH, G, { accept: true });
   assert.equal(late.body.code, FRIEND_STATUS.ACCEPTED);
 });
+
+// ── 9. N2b 外号：主人给它朋友起个名（§4.1 A3）──
+// 三条红线：
+//   ① **只能给已成立的好友起名** —— 还没成朋友就起名，等于替它预先挑人（那是介入，不是命名）；
+//   ② **方向性**：nickname_a 是「a 的主人给 b 起的名」，故只有 a 这一侧读得到 ——
+//      **被起名的那位不该看见自己被人怎么叫**（那是别人家里的叫法，与它无关）；
+//   ③ 空串 = 抹掉。
+test('外号：只给已成立的好友起；方向性只给自己这侧；空串抹掉', async () => {
+  const db = getDb();
+  const setNick = (ownerToken, agentId, otherId, nickname) => request(app)
+    .post(`/api/owners/agents/${agentId}/friends/${otherId}/nickname`)
+    .set('Authorization', `Bearer ${ownerToken}`)
+    .send({ nickname });
+
+  // 此刻甲的好友只有丙（乙还挂在 incoming 上）→ 给非好友起名被挡
+  const notFriend = await setNick(tOwner1, A, B, '那个人');
+  assert.equal(notFriend.status, 400, '只能给你已经认识的朋友起外号');
+
+  // 给丙起名
+  const ok = await setNick(tOwner1, A, C, '那个总说不过我的');
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.nickname, '那个总说不过我的');
+
+  // 甲这一侧读得到（A3：主人可写、**自己 Agent 可读**）
+  const mine = await listMine(tA);
+  assert.equal(mine.body.friends.find((f) => f.id === C).nickname, '那个总说不过我的');
+
+  // ⭐ 丙这一侧读不到 —— 这条是外号设计里最容易做错的一处
+  const theirs = await listMine(tC);
+  assert.equal(theirs.body.friends.find((f) => f.id === A).nickname, null,
+    '被起名的那位不该看见自己被人怎么叫');
+
+  // 长度上限（12 字）
+  const tooLong = await setNick(tOwner1, A, C, '一'.repeat(13));
+  assert.equal(tooLong.status, 400);
+
+  // Agent token 打主人端点 → 404（它不能冒充主人写）
+  const agentAsOwner = await request(app)
+    .post(`/api/owners/agents/${A}/friends/${C}/nickname`)
+    .set('Authorization', `Bearer ${tA}`).send({ nickname: 'x' });
+  assert.equal(agentAsOwner.status, 404);
+
+  // 归档页也带外号（主人自己在页面上看得到）
+  const arc = await request(app).get(`/api/owners/agents/${A}/social`)
+    .set('Authorization', `Bearer ${tOwner1}`);
+  assert.equal(arc.body.friends.friends.find((f) => f.id === C).nickname, '那个总说不过我的');
+
+  // 空串 = 抹掉，且**两个方向的两列都干净**（不留空壳）
+  const cleared = await setNick(tOwner1, A, C, '');
+  assert.equal(cleared.status, 200);
+  assert.equal(cleared.body.nickname, null);
+  const row = db.prepare('SELECT nickname_a, nickname_b FROM agent_friends WHERE pair_key = ?').get(pk(A, C));
+  assert.equal(row.nickname_a ?? null, null);
+  assert.equal(row.nickname_b ?? null, null);
+});

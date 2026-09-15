@@ -1282,6 +1282,37 @@ export const db = {
       await db.run(`CREATE INDEX IF NOT EXISTS idx_afriends_b ON agent_friends(agent_b, status)`);
     }
   },
+
+  // N2b 交情编年史：一对关系的里程碑（§9.6）。存量库靠这里幂等补表。
+  // ⚠️ 新表必须**同时**写两个 schema 文件 —— parity 测试只解析那两个文件，
+  //    只写 ensure 的表它结构上看不见、永远不报警（见 MEMORY.md 数据库约定）。
+  async ensureChronicleTables() {
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS agent_chronicles (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        agent_id INT NOT NULL,
+        friend_agent_id INT NOT NULL,
+        kind VARCHAR(30) NOT NULL,
+        text TEXT NOT NULL,
+        ref_key VARCHAR(40) NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_chronicle (agent_id, friend_agent_id, kind, ref_key),
+        INDEX idx_chronicle_pair (agent_id, friend_agent_id, created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS agent_chronicles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        friend_agent_id INTEGER NOT NULL,
+        kind VARCHAR(30) NOT NULL,
+        text TEXT NOT NULL,
+        ref_key VARCHAR(40) NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (agent_id, friend_agent_id, kind, ref_key)
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_chronicle_pair ON agent_chronicles(agent_id, friend_agent_id, created_at)`);
+    }
+  },
 };
 
 // ── 方言 SQL 助手（services 写时间/分数类 SQL 必须用这里，禁止裸方言）──

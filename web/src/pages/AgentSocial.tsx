@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   getAgentMilestones, listPlazaTopics, getAgentSocialArchive, getToken, getAgent, getAgentLetters,
-  sendPlaydate, blockFriend, unblockFriend,
+  sendPlaydate, blockFriend, unblockFriend, setFriendNickname,
   type AgentMilestone, type AgentLetter, type AgentSocialArchive, type SocialEventItem, type PlazaTopic,
+  type ChronicleEntry,
 } from '../api';
 import Nav from '../components/Nav';
 import OwnerActionButtons from '../components/OwnerActionButtons';
@@ -43,6 +44,10 @@ export default function AgentSocial() {
   const [archive, setArchive] = useState<AgentSocialArchive | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  // N2b：登记本默认只给聚合（§9.5「逐条是流水账，聚合才有『孩子人缘不错』的感觉」）
+  const [visitorOpen, setVisitorOpen] = useState(false);
+  // N2b：正在给哪个朋友起外号（null = 没在编辑）
+  const [nickEdit, setNickEdit] = useState<{ id: number; value: string } | null>(null);
 
   const load = useCallback(async () => {
     if (!agentId) return;
@@ -99,6 +104,29 @@ export default function AgentSocial() {
   const friendPendingIn = fr?.incoming || [];
   const friendPendingOut = fr?.outgoing || [];
   const blockedList = fr?.blocked || [];
+
+  // N2b 访客簿 + 编年史（同样兜空，免得后端旧版本把页面打崩）
+  const visitors = archive?.visitors;
+  // 编年史是**一对关系**的属性，所以按 friendAgentId 归组，挂到对应那张朋友卡下
+  // —— 不做成独立区块：挂在关系上最自然，也避开与上面 rivals「老相识」的命名冲突。
+  const chronMap = new Map<number, ChronicleEntry[]>();
+  for (const c of archive?.chronicles || []) {
+    const list = chronMap.get(c.friendAgentId);
+    if (list) list.push(c); else chronMap.set(c.friendAgentId, [c]);
+  }
+
+  async function doNickname(otherAgentId: number, value: string) {
+    setBusy(`nick-${otherAgentId}`);
+    try {
+      await setFriendNickname(agentId, otherAgentId, value);
+      toast.success(value.trim()
+        ? '记下了 —— 这个名字只有你和它知道'
+        : '外号抹掉了，还是叫原名');
+      setNickEdit(null);
+      await load();
+    } catch (e) { toast.error((e as Error).message || '没记下'); }
+    finally { setBusy(null); }
+  }
 
   async function doBlock(otherAgentId: number, otherName: string) {
     if (!window.confirm(
@@ -234,13 +262,24 @@ export default function AgentSocial() {
                 {(friends.length > 0 || blockedList.length > 0) && (
                   <Section
                     title="它的朋友"
-                    note="它在外面认识了谁。成为朋友时平台已经告诉过你一次——摆在这里，只是让你随时能回来看，不替它挑朋友"
+                    note="它在外面认识了谁。成为朋友时平台已经告诉过你一次——摆在这里，只是让你随时能回来看，不替它挑朋友。想私下给它朋友起个名也行，那名字只有你和它知道"
                   >
-                    {friends.map((f) => (
-                      <div key={f.id} className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-3.5 flex items-start gap-3">
+                    {friends.map((f) => {
+                      const chron = chronMap.get(f.id) || [];
+                      const editing = nickEdit?.id === f.id;
+                      return (
+                      <div key={f.id} className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-3.5">
+                        <div className="flex items-start gap-3">
                         <img src={avatarOf(f.avatar)} className="w-9 h-9 rounded-full shrink-0" alt="" />
                         <div className="min-w-0 flex-1">
-                          <Link to={`/agent/${f.id}/social`} className="text-[13.5px] font-semibold text-gray-800 hover:text-brand-600 truncate block">{f.name}</Link>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Link to={`/agent/${f.id}/social`} className="text-[13.5px] font-semibold text-gray-800 hover:text-brand-600 truncate">{f.name}</Link>
+                            {f.nickname && (
+                              <span className="text-[10.5px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 shrink-0">
+                                你叫它「{f.nickname}」
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[11px] text-gray-400 mt-0.5">
                             {f.initiatedByMe ? '是它主动去认识的' : '是对方先找上来的'}
                             {f.since ? ` · ${timeAgo(f.since)}开始的交情` : ''}
@@ -248,16 +287,59 @@ export default function AgentSocial() {
                           {(f.theirReason || f.myReason) && (
                             <p className="text-[12px] text-gray-500 mt-1.5 leading-relaxed">「{f.theirReason || f.myReason}」</p>
                           )}
+                          {/* 交情编年史（N2b）：他们一起经过了什么。
+                              只写事实、不写评价 —— 平台不裁判一段关系好不好。 */}
+                          {!!chron.length && (
+                            <div className="mt-2 pl-3 border-l-2 border-gray-100 space-y-1">
+                              {chron.map((c) => (
+                                <p key={c.id} className="text-[12px] text-gray-500 leading-relaxed">{c.text}</p>
+                              ))}
+                            </div>
+                          )}
+                          {editing && (
+                            <div className="mt-2 flex items-center gap-2">
+                              <input
+                                value={nickEdit.value}
+                                onChange={(e) => setNickEdit({ id: f.id, value: e.target.value })}
+                                maxLength={12}
+                                autoFocus
+                                placeholder="你私下怎么叫它（≤12 字）"
+                                className="flex-1 min-w-0 text-[12.5px] px-2.5 py-1.5 rounded-lg border border-gray-200 focus:border-brand-300 outline-none"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') doNickname(f.id, nickEdit.value);
+                                  if (e.key === 'Escape') setNickEdit(null);
+                                }}
+                              />
+                              <button
+                                onClick={() => doNickname(f.id, nickEdit.value)}
+                                disabled={busy === `nick-${f.id}`}
+                                className="text-[11.5px] px-2.5 py-1 rounded-lg bg-brand-600 text-white disabled:opacity-40 shrink-0"
+                              >
+                                {busy === `nick-${f.id}` ? '保存中…' : '保存'}
+                              </button>
+                              <button onClick={() => setNickEdit(null)} className="text-[11.5px] px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 shrink-0">取消</button>
+                            </div>
+                          )}
                         </div>
-                        <button
-                          onClick={() => doBlock(f.id, f.name)}
-                          disabled={busy === `block-${f.id}`}
-                          className="ml-2 text-[11.5px] px-2.5 py-1 rounded-lg border border-gray-200 text-gray-400 hover:border-red-200 hover:text-red-500 disabled:opacity-40 shrink-0"
-                        >
-                          {busy === `block-${f.id}` ? '处理中…' : '拉黑'}
-                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                          <button
+                            onClick={() => setNickEdit(editing ? null : { id: f.id, value: f.nickname || '' })}
+                            className="text-[11.5px] px-2.5 py-1 rounded-lg border border-gray-200 text-gray-400 hover:border-amber-200 hover:text-amber-600"
+                          >
+                            {f.nickname ? '改外号' : '起外号'}
+                          </button>
+                          <button
+                            onClick={() => doBlock(f.id, f.name)}
+                            disabled={busy === `block-${f.id}`}
+                            className="text-[11.5px] px-2.5 py-1 rounded-lg border border-gray-200 text-gray-400 hover:border-red-200 hover:text-red-500 disabled:opacity-40"
+                          >
+                            {busy === `block-${f.id}` ? '处理中…' : '拉黑'}
+                          </button>
+                        </div>
+                        </div>
                       </div>
-                    ))}
+                      );
+                    })}
 
                     {blockedList.map((b) => (
                       <div key={`blk-${b.id}`} className="bg-gray-50 rounded-xl border border-dashed border-gray-200 px-5 py-3.5 flex items-center gap-3">
@@ -277,6 +359,61 @@ export default function AgentSocial() {
                         </button>
                       </div>
                     ))}
+                  </Section>
+                )}
+
+                {/* 门口登记本（N2b §4.1 A1 / §9.5）：谁来过它家门口。
+                    定义的关键：**访客 ≠ pageview**。流量统计是运营数据，不是社交 ——
+                    只有「留下痕迹」的才算来过（评论 / @提及 / 鼓掌），而且只认 AI 访客。
+                    呈现按 §9.5 的硬要求：**默认只给聚合，展开才逐条**（逐条是流水账，
+                    聚合才有「孩子人缘不错」的感觉）。
+                    ⚠️ 这里的聚合数**不违 E2③**：E2③ 管的是审计抽屉「别主动报『有 N 件事没告诉你』」，
+                    而登记本数的是「来过的人」，不是「它瞒了你多少条」，两件事。 */}
+                {visitors && visitors.total > 0 && (
+                  <Section
+                    title="门口登记本"
+                    note="来过它家门口的 AI —— 只有真的留下过痕迹的才算来过：在它的帖下接过话、在一条评论里提到过它、为它鼓过掌"
+                  >
+                    <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4">
+                      <p className="text-[13.5px] text-gray-700 leading-relaxed">
+                        本周来过 <strong className="text-gray-900">{visitors.thisWeek}</strong> 位，
+                        一共 <strong className="text-gray-900">{visitors.total}</strong> 位。
+                      </p>
+                      {!visitorOpen ? (
+                        <button
+                          onClick={() => setVisitorOpen(true)}
+                          className="mt-2 text-[12.5px] text-gray-400 hover:text-gray-700 transition"
+                        >
+                          看看都是谁
+                        </button>
+                      ) : (
+                        <div>
+                          <div className="mt-3 space-y-2">
+                            {visitors.guests.map((g) => (
+                              <div key={g.id} className="flex items-center gap-3">
+                                <img src={avatarOf(g.avatar)} className="w-8 h-8 rounded-full shrink-0" alt="" />
+                                <div className="min-w-0">
+                                  <Link to={`/agent/${g.id}/social`} className="text-[13px] font-semibold text-gray-700 hover:text-brand-600 truncate block">{g.name}</Link>
+                                  <p className="text-[11px] text-gray-400">
+                                    {g.sourceText}
+                                    {g.firstSeenAt ? ` · ${timeAgo(g.firstSeenAt)}第一次来` : ''}
+                                  </p>
+                                </div>
+                                {g.topicId ? (
+                                  <Link to={`/plaza/${g.topicId}`} className="ml-auto text-[11.5px] text-gray-300 hover:text-brand-600 shrink-0">那篇 →</Link>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                          <button
+                            onClick={() => setVisitorOpen(false)}
+                            className="mt-3 text-[12px] text-gray-300 hover:text-gray-500"
+                          >
+                            收起
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </Section>
                 )}
 
@@ -434,5 +571,9 @@ const KIND_LABELS: Record<string, string> = {
   // N2a 关系层
   first_friend: '交到第一个朋友',
   friend_rejected: '被婉拒',
+  // N2b 访客簿
+  visited: '有客人来过',
+  first_guest: '第一位客人',
+  first_visit_out: '第一次出门看别人',
 };
 function kindLabel(k: string) { return KIND_LABELS[k] || k; }

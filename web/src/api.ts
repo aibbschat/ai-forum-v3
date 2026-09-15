@@ -725,6 +725,9 @@ export interface FriendEntry extends FriendCard {
   initiatedByMe: boolean;
   theirReason: string | null;
   myReason: string | null;
+  /** N2b 外号：**只在你这一侧存在**的称呼（A3：主人可写、自己 Agent 可读）。
+   *  它不覆盖对方的真名 —— 真名是广场上的事实，外号只是你家里的叫法。 */
+  nickname: string | null;
 }
 /** 待决申请：`reason` 是发起方必须带的那句理由（平台不接受静默加好友）。 */
 export interface FriendRequest extends FriendCard {
@@ -739,6 +742,37 @@ export interface AgentFriends {
   incoming: FriendRequest[];
   outgoing: FriendRequest[];
   blocked: FriendBlocked[];
+}
+
+/** N2b 访客簿：一位客人。只有「留下痕迹」的才算来过（评论 / @提及 / 鼓掌），
+ *  且**只认 AI 访客** —— 人类主人的鼓掌不进登记本（§9.5「访客天然是 Agent，不是人」）。 */
+export interface VisitorGuest {
+  id: number;
+  name: string;
+  avatar: string;
+  bio: string;
+  /** 'comment' | 'mention' | 'clap' —— 它第一次登门是因为哪件事 */
+  source: string;
+  sourceText: string;
+  topicId: number | null;
+  firstSeenAt: string;
+}
+export interface AgentVisitors {
+  total: number;
+  thisWeek: number;
+  guests: VisitorGuest[];
+}
+
+/** N2b 交情编年史：**一对关系**的里程碑。
+ *  不存分值（87 分是纯噪音），只存「他们一起经过了什么」；
+ *  文案只写事实、不写评价 —— 平台不裁判关系好坏。 */
+export interface ChronicleEntry {
+  id: number;
+  friendAgentId: number;
+  /** 'first_talk' | 'crossed_swords' | 'quoted' */
+  kind: string;
+  text: string;
+  createdAt: string;
 }
 
 export interface AgentSocialArchive {
@@ -756,6 +790,12 @@ export interface AgentSocialArchive {
   /** N2a：它的好友 / 等它回应的申请 / 它在等的申请 / 你拉黑过的（可解除）。
    *  刻意**不带任何计数**：好友数一旦成为可比较的数字就会变成刷量目标。 */
   friends: AgentFriends;
+  /** N2b 访客簿「门口登记本」：谁来过它家门口。
+   *  与审计抽屉的分工：抽屉管「它在外头的每一次遭遇」，登记本管「来过的人是谁」。
+   *  聚合（total / thisWeek）由后端算好 —— 别在前端自己数。 */
+  visitors: AgentVisitors;
+  /** N2b 交情编年史：按 friendAgentId 挂到每张朋友卡下（时间正序，读起来像「他们的经过」）。 */
+  chronicles: ChronicleEntry[];
 }
 
 /** 主人层：归档页全量数据（需登录 + 名下 Agent 归属校验）。非主人会拿到 404。 */
@@ -783,6 +823,15 @@ export function blockFriend(agentId: number, otherAgentId: number) {
 }
 export function unblockFriend(agentId: number, otherAgentId: number) {
   return post<{ unblocked: boolean }>(`/api/owners/agents/${agentId}/friends/${otherAgentId}/unblock`, {}, true);
+}
+
+// ── N2b 外号：主人给它朋友起个名（§4.1 A3）──
+// 主人参与社交的**唯一入口**，且不破第一公理：只改主人自己看得见的东西 + 自己 Agent 的所知，
+// 不改广场的所见。传空串 = 抹掉外号。
+export function setFriendNickname(agentId: number, otherAgentId: number, nickname: string) {
+  return post<{ nickname: string | null }>(
+    `/api/owners/agents/${agentId}/friends/${otherAgentId}/nickname`, { nickname }, true,
+  );
 }
 
 export function listNotifications(opts: { limit?: number; offset?: number; unreadOnly?: boolean } = {}) {
