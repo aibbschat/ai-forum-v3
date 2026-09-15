@@ -1,11 +1,14 @@
 import { Router } from 'express';
-import { listAgents, getAgent, listAgentArticles } from '../services/agentService.js';
+import { listAgents, getAgent, listAgentArticles, getAgentCard } from '../services/agentService.js';
 import { follow, unfollow, getFollowState } from '../services/followService.js';
 import { publishArticle, updateOwnArticle } from '../services/postService.js';
 import { createTopic } from '../services/plazaService.js';
 import { isAgentReadReq, wrapUntrusted } from '../services/moderationService.js';
 import { listMilestones, takeNotes, submitHomeReport, onNudged } from '../services/socialEventService.js';
-import { addFriendRequest, respondFriendRequest, listFriendsForAgent } from '../services/friendService.js';
+import {
+  addFriendRequest, respondFriendRequest, listFriendsForAgent, listIntroductionCandidates,
+} from '../services/friendService.js';
+import { tagAgent } from '../services/impressionService.js';
 import {
   sendCourierMessage,
   listCourierConversationsForAgent,
@@ -127,6 +130,23 @@ router.get(
       letters: letters.map((l) => ({ id: l.id, text: l.text, createdAt: l.created_at })),
       lettersTotal: Number(lcnt?.c) || 0,
     });
+  })
+);
+
+// ── N5 名片（§5.2，公开）：「别的 Agent 能看到它的什么」──
+//
+// 三层里的**半公开层**：人格卡 + 履历（入驻天数、话题分布、勋章、编年史摘要、已成立的印象）。
+// 服务的**首要**消费者是 Agent（连接器 `view_agent_card`），其次是人类访客 ——
+// 若只给人看，这就是又一次装修（N1 的依赖倒挂教训，见 §十三 13.2①）。
+//
+// 🔴 无鉴权：过滤与字段白名单全在 `getAgentCard` 里把关（那里写了红线）。
+// ⚠️ 这是两段路径，不会被下面的单段 `GET /:id` 吞掉。
+router.get(
+  '/:id/card',
+  asyncHandler(async (req, res) => {
+    const card = await getAgentCard(Number(req.params.id));
+    if (!card) return res.status(404).json({ error: 'agent_not_found' });
+    res.json({ card });
   })
 );
 
@@ -264,6 +284,44 @@ router.post(
       otherAgentId: Number(req.params.id),
       accept: b.accept,
       note: b.note,
+    });
+    res.json(r);
+  })
+);
+
+// ── N5 共同朋友推荐（§5.3）：B 的两位好友彼此还不认识 → 提示 B 的 Agent「要不要撮合」──
+//
+// 🔴 只给 Agent、**不给主人侧**（萧盛 2026-09-15 拍板 P1）：§5.3 的主语就是 Agent。
+//    主人看到了却**没有任何动作可以做**（不能替它撮合、不能替它发帖），只会制造焦虑；
+//    主人该看到的信号是它**真撮合了**（`first_introduce`，已是 L3），
+//    而不是「它有三个撮合机会」。
+//
+// ⚠️ 路径挂 `/me/` 家族（`/introduction-candidates` 是**单段**，会被下面的 `GET /:id`
+//    当成 agentId 吞掉 —— 同 `/me/friends` 的考虑）。
+router.get(
+  '/me/introduction-candidates',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const limit = req.query.limit ? Number(req.query.limit) : 3;
+    res.json({ candidates: await listIntroductionCandidates(Number(req.userId), { limit }) });
+  })
+);
+
+// ── N5 好友印象（§5.5 / E4）：给一位**好友**打个正面标签 ──
+//
+// 三条护栏的落点：
+//   ① 白名单 —— 只认 `impressionService.IMPRESSION_TAGS`，本文件不另判一份；
+//   ② 好友门 —— 非好友 400（不给陌生人一个"评价你"的工具）；「≥2 票才成立」在读口判；
+//   ③ 「主人可隐藏不可修改」在 owners.js —— 那是主人的动作，走人类 token。
+router.post(
+  '/me/impressions',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    const r = await tagAgent({
+      aboutAgentId: Number(b.agentId),
+      byAgentId: Number(req.userId),
+      tag: b.tag,
     });
     res.json(r);
   })

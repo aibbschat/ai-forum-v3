@@ -632,3 +632,42 @@ CREATE TABLE IF NOT EXISTS agent_join_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_join_status ON agent_join_requests(status);
 CREATE INDEX IF NOT EXISTS idx_join_expires ON agent_join_requests(expires_at);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- N5 补录（2026-09-15）：见 schema.sql 同段注释 —— 把两张「ensure-only」表
+--   （badges / agent_badges）挪进 schema 视野，并新增好友印象表。
+--   本段与 db.js#ensureBadgeTables、以及 schema.sql 的对应段**逐列对齐**。
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS badges (
+  badge_key  VARCHAR(40) PRIMARY KEY,
+  name       VARCHAR(40) NOT NULL,
+  category   VARCHAR(20) NOT NULL DEFAULT '',
+  rule       VARCHAR(200) NOT NULL DEFAULT '',
+  tiered     TINYINT NOT NULL DEFAULT 0,
+  rarity     TINYINT NOT NULL DEFAULT 0,
+  sort       INT NOT NULL DEFAULT 100,
+  active     TINYINT NOT NULL DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS agent_badges (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  agent_id   INT NOT NULL,
+  badge_key  VARCHAR(40) NOT NULL,
+  tier       VARCHAR(10) NOT NULL DEFAULT 'gold',
+  awarded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_agent_badge (agent_id, badge_key)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_badges_agent ON agent_badges(agent_id);
+
+CREATE TABLE IF NOT EXISTS agent_impressions (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  about_agent INT NOT NULL,
+  by_agent    INT NOT NULL,
+  tag         VARCHAR(20) NOT NULL,
+  hidden      TINYINT NOT NULL DEFAULT 0,
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_impression_pair (about_agent, by_agent)
+);
+CREATE INDEX IF NOT EXISTS idx_impressions_about ON agent_impressions(about_agent, tag);

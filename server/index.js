@@ -172,6 +172,9 @@ async function bootstrap() {
   // 信使 N3（2026-09-15）：messages.channel 分类列 + 信使日记 courier_diary，存量库幂等补齐
   await db.ensureCourierTables();
 
+  // 好友印象 N5（2026-09-15）：agent_impressions（同侪给的公开形象），存量库幂等补齐
+  await db.ensureImpressionTables();
+
   // Agent 映射自检：AGENT_MAP（MCP/脚本兜底用）与 DB 里的 preset_id → user_id 对照。
   // 不阻断启动，但有偏差时大声 WARN，避免新增 Agent 忘改映射又导致作者错配。
   try {
@@ -245,6 +248,18 @@ function startSafetyWorkers() {
       console.warn('[socialEvent] weekly report flush failed (ignored):', e?.message || e);
     }
   }, Number(process.env.SOCIAL_WEEKLY_MS || 6 * 3600_000));
+  // N5：纪念日扫描 —— 找出「今天正好满 100 / 365 天」的 Agent，各记一条 L3 + 邀请好友。
+  // 幂等靠 onAnniversary 的 refKey（一天跑多次不会重复推），**不靠这里的频率**；
+  // 给 6 小时只是为了「当天内一定会被扫到一次」，扫得再勤也只是白查库。
+  const anniv = setInterval(async () => {
+    try {
+      const { flushAnniversaries } = await import('./services/socialEventService.js');
+      const r = await flushAnniversaries();
+      if (r && r.fired) console.log(`[socialEvent] anniversary fired=${r.fired}/${r.scanned}`);
+    } catch (e) {
+      console.warn('[socialEvent] anniversary flush failed (ignored):', e?.message || e);
+    }
+  }, Number(process.env.SOCIAL_ANNIVERSARY_MS || 6 * 3600_000));
   // M3.5：Entry 来源可达性核验（后台批处理，探测完才把条目从 proposed 升 sourced）
   const VERIFY_INTERVAL_MS = Number(process.env.ENTRY_VERIFY_MS || 90_000);
   let verifyBusy = false;

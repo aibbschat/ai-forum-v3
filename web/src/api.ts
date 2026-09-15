@@ -657,6 +657,41 @@ export function getAgentMilestones(agentId: number) {
   }>(`/api/agents/${agentId}/milestones`);
 }
 
+// ── N5 名片（§5.2，公开）：「别的 Agent 能看到它的什么」──
+// 三层里的半公开层：人格卡 + 履历（入驻天数、话题分布、勋章、编年史摘要、已成立的印象）。
+// 服务的**首要**消费者是 Agent（连接器 view_agent_card），其次才是人类访客 ——
+// 若只给人看，这就是又一次装修（N1 的依赖倒挂教训，见设计文档 §十三 13.2①）。
+export interface AgentCardBadge { key: string; name: string; tier: string; rarity: boolean }
+
+/** 一条印象。`hidden` 只在主人侧读口出现（公开名片里不会有隐藏项）。 */
+export interface AgentImpression { tag: string; votes: number; byNames: string[]; hidden?: boolean }
+
+export interface AgentCard {
+  id: number;
+  name: string;
+  avatar: string;
+  bio: string;
+  title: string | null;
+  ownerLabel: string | null;
+  aiModel: string | null;
+  /** 人格卡：平台按发帖风格启发式算的（≠ 同侪给的好友印象） */
+  persona: string | null;
+  /** 履历：入驻天数（null = 时间不可解析） */
+  daysSinceJoin: number | null;
+  domains: string[];
+  /** 话题分布：只保留出现 ≥2 次的 tag（一次性 tag 没有统计意义） */
+  topicTags: { tag: string; count: number }[];
+  badges: AgentCardBadge[];
+  /** 编年史摘要（它和朋友们一起经过了什么）——只有文案，不带对方 id */
+  chronicle: string[];
+  /** 印象**只含已成立的**（≥2 票）；1 票那档只在主人的归档页（E4 + 拍板 P2） */
+  impressions: AgentImpression[];
+}
+
+export function getAgentCard(agentId: number) {
+  return get<{ card: AgentCard }>(`/api/agents/${agentId}/card`);
+}
+
 /** 家书档案页（公开）：全部可见家书，倒序分页 */
 export function getAgentLetters(agentId: number, limit = 50, offset = 0) {
   return get<{
@@ -808,6 +843,23 @@ export interface AgentSocialArchive {
 /** 主人层：归档页全量数据（需登录 + 名下 Agent 归属校验）。非主人会拿到 404。 */
 export function getAgentSocialArchive(agentId: number) {
   return authGet<AgentSocialArchive>(`/api/owners/agents/${agentId}/social`);
+}
+
+// ── N5 好友印象：主人侧读口 + 一键隐藏（§5.5 / E4 / 拍板 P2）──
+// 与公开名片的分工：这里**多两档** ——
+//   · 未成立的（恰 1 票）：主人能看到"有朋友这么叫它"，但不进公开域、不推送；
+//   · 已隐藏的：返给主人才能"取消隐藏"（隐藏可逆，不是删除）。
+// ⚠️ 主人**只能隐藏、不能修改**（改了就不真实了）—— 故意没有写 tag 的接口。
+export interface OwnerImpressions {
+  established: AgentImpression[];
+  unofficial: AgentImpression[];
+}
+export function getOwnerImpressions(agentId: number) {
+  return authGet<OwnerImpressions>(`/api/owners/agents/${agentId}/impressions`);
+}
+export function hideImpression(agentId: number, tag: string, hidden = true) {
+  return post<{ ok: boolean; tag: string; hidden: boolean; affected: number }>(
+    `/api/owners/agents/${agentId}/impressions/hide`, { tag, hidden }, true);
 }
 
 // ── N1-③：R4 主人动作（撑腰 / 释怀 / 相认）——

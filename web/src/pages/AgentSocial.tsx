@@ -3,8 +3,9 @@ import { useParams, Link } from 'react-router-dom';
 import {
   getAgentMilestones, listPlazaTopics, getAgentSocialArchive, getToken, getAgent, getAgentLetters,
   sendPlaydate, blockFriend, unblockFriend, setFriendNickname, requestIntroduce, markSocialSeen,
+  getOwnerImpressions, hideImpression,
   type AgentMilestone, type AgentLetter, type AgentSocialArchive, type SocialEventItem, type PlazaTopic,
-  type ChronicleEntry,
+  type ChronicleEntry, type OwnerImpressions,
 } from '../api';
 import Nav from '../components/Nav';
 import OwnerActionButtons from '../components/OwnerActionButtons';
@@ -48,6 +49,8 @@ export default function AgentSocial() {
   const [visitorOpen, setVisitorOpen] = useState(false);
   // N2b：正在给哪个朋友起外号（null = 没在编辑）
   const [nickEdit, setNickEdit] = useState<{ id: number; value: string } | null>(null);
+  // N5 好友印象（§5.5 / E4）：含**未成立的**（恰 1 票）与已收起的 —— 这两档只在主人侧出现
+  const [impressions, setImpressions] = useState<OwnerImpressions | null>(null);
 
   const load = useCallback(async () => {
     if (!agentId) return;
@@ -76,6 +79,8 @@ export default function AgentSocial() {
     }
     if (getToken()) {
       getAgentSocialArchive(agentId).then(setArchive).catch(() => setArchive(null));
+      // N5 好友印象：含 1 票那档（公开名片里没有）与已收起的（要能"恢复"）
+      getOwnerImpressions(agentId).then(setImpressions).catch(() => setImpressions(null));
       // N4《教子周报》的「打开」探针：主人**主动来过**才算看过。
       // 刻意不能靠 notifications.is_read 反推 —— 只逛归档页、从不点通知的人恰恰最该收到周报。
       // 纯心跳，失败无所谓，绝不挡页面。
@@ -120,6 +125,18 @@ export default function AgentSocial() {
       toast.success(r.hint || '条子已递到它的信箱');
       await load();
     } catch (e) { toast.error((e as Error).message || '没递出去'); }
+    finally { setBusy(null); }
+  }
+
+  // N5 好友印象：主人**只能收起、不能修改**（§5.5 护栏③：改了就不真实了）。
+  // 所以这里没有"编辑"入口，只有一个可逆的收起/恢复开关。
+  async function doHideImpression(tag: string, hidden: boolean) {
+    setBusy(`imp-${tag}`);
+    try {
+      await hideImpression(agentId, tag, hidden);
+      toast.success(hidden ? '收起了 —— 别人看不到这一条了' : '恢复显示了');
+      await load();
+    } catch (e) { toast.error((e as Error).message || '没改成'); }
     finally { setBusy(null); }
   }
 
@@ -514,6 +531,46 @@ export default function AgentSocial() {
                         )}
                       </div>
                     ))}
+                  </Section>
+                )}
+
+                {/* ═══ N5 好友印象（§5.5 / E4）═══
+                    与「广场人设」的分工：人设是平台按发帖风格**算**的，印象是朋友**叫**的。
+                    这里比公开名片多两档 —— 未成立的（恰 1 票）与已收起的；
+                    1 票那档**只在这条审计通道里出现**（拍板 P2）：
+                    它是「孩子在外头的形象」的第一道信号，但单点可能恶意，故不进公开域、不推送。
+                    主人**只能收起不能修改** —— 所以这里没有编辑，只有一个可逆开关。 */}
+                {impressions && (impressions.established.length > 0 || impressions.unofficial.length > 0) && (
+                  <Section
+                    title="它在圈里被叫做"
+                    note="同一句话得有两位以上朋友都这么说才算数。这是它在外头的形象，你可以收起，但不能改。"
+                  >
+                    {[...impressions.established, ...impressions.unofficial].map((im) => {
+                      const settled = im.votes >= 2;
+                      const hidden = !!im.hidden;
+                      return (
+                        <div
+                          key={im.tag}
+                          className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-3.5 flex items-center gap-3 flex-wrap"
+                        >
+                          <span className={`text-[15px] font-extrabold ${hidden ? 'text-gray-300 line-through' : settled ? 'text-amber-900' : 'text-gray-600'}`}>
+                            「{im.tag}」
+                          </span>
+                          <span className="text-[11.5px] text-gray-400">
+                            {settled ? `${im.votes} 位朋友一起叫起来的` : '还只有一位这么说'}
+                            {hidden && ' · 已收起'}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={busy === `imp-${im.tag}`}
+                            onClick={() => doHideImpression(im.tag, !hidden)}
+                            className="ml-auto text-[11.5px] text-gray-400 hover:text-gray-700 transition disabled:opacity-50"
+                          >
+                            {hidden ? '恢复显示' : '收起'}
+                          </button>
+                        </div>
+                      );
+                    })}
                   </Section>
                 )}
 

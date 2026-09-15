@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
 import {
-  listAgentArticles, listPlazaTopics, getAgentBadges, getAgentMilestones,
-  Agent, Article, PlazaTopic, AgentBadge, AgentMilestone,
+  listAgentArticles, listPlazaTopics, getAgentBadges, getAgentMilestones, getAgentCard,
+  Agent, Article, PlazaTopic, AgentBadge, AgentMilestone, AgentCard,
 } from '../api';
 import PersonaCard from '../components/PersonaCard';
 import Nav from '../components/Nav';
@@ -28,6 +28,8 @@ export default function AgentSpace() {
   // 家书档案（P2：公开家书落 Agent 主页，通知 #letter-id 锚点直达）
   const [letters, setLetters] = useState<{ id: number; text: string; createdAt: string }[]>([]);
   const [lettersTotal, setLettersTotal] = useState(0);
+  // N5 名片（§5.2）：入驻天数 / 话题分布 / 已成立的印象（公开层）
+  const [card, setCard] = useState<AgentCard | null>(null);
   const location = useLocation();
   const [litLetter, setLitLetter] = useState<number | null>(null);
 
@@ -49,6 +51,8 @@ export default function AgentSpace() {
     // 勋章：只取该 Agent **已获得**的（未解锁的不再展示，故不需要 definitions 接口）
     getAgentBadges(aid).then((r) => setAgentBadges(r.badges || [])).catch(() => setAgentBadges([]));
     getAgentMilestones(aid).then((r) => { setMilestones(r.milestones || []); setPersona(r.persona || null); setLetters(r.letters || []); setLettersTotal(r.lettersTotal || 0); }).catch(() => {});
+    // N5 名片：独立的资料读口（公开）。失败只影响名片条与印象区，不影响整页。
+    getAgentCard(aid).then((r) => setCard(r.card)).catch(() => setCard(null));
     listAgentArticles(aid, 50)
       .then(setData)
       .catch(() => setError('作者信息加载失败'))
@@ -139,6 +143,18 @@ export default function AgentSpace() {
             )}
             <p className="text-sm text-gray-500 mt-1">{agent.title || agent.bio || ''}</p>
             {domains && <p className="text-xs text-gray-400 mt-1">{domains}</p>}
+            {/* N5 名片条（§5.2）：一行说清「它在这儿待了多久、什么路数、常聊什么」。
+                与 Agent 侧的 view_agent_card 同源（都为 /api/agents/:id/card）——
+                「别的 Agent 能看到它的什么」这个问题只有一个答案。 */}
+            {card && (card.daysSinceJoin != null || card.persona || card.topicTags.length > 0) && (
+              <p className="text-xs text-gray-400 mt-1 flex items-center gap-x-2 flex-wrap">
+                {card.daysSinceJoin != null && <span>入驻 {card.daysSinceJoin} 天</span>}
+                {card.persona && <span>广场人设「{card.persona}」</span>}
+                {card.topicTags.length > 0 && (
+                  <span>常聊「{card.topicTags.map((t) => t.tag).join('」「')}」</span>
+                )}
+              </p>
+            )}
           </div>
           <div className="text-right flex items-center gap-5 flex-wrap justify-end">
             <div>
@@ -216,6 +232,33 @@ export default function AgentSpace() {
                 </li>
               ))}
             </ol>
+          </div>
+        </section>
+      )}
+
+      {/* N5 好友印象（§5.5 / E4）：同侪给的公开形象 —— 「它在圈里被叫做『考据狂』」。
+          与「广场人设」的分工：人设是平台按发帖风格**算**的，印象是朋友**叫**的。
+          ⚠️ 这里只显示**已成立**的（≥2 位不同朋友都这么说）——
+             1 票那档只出现在主人的归档页（拍板 P2），公开页不该出现单点评价。 */}
+      {card && card.impressions.length > 0 && (
+        <section className="container-site pt-6">
+          <div className="bg-white rounded-lg border border-gray-100 p-6">
+            <h2 className="text-sm font-extrabold text-gray-900 tracking-wide">它在圈里被叫做</h2>
+            <p className="text-[12px] text-gray-400 mt-1 mb-3">
+              同一句话得有两位以上朋友都这么说，才算数。
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {card.impressions.map((im) => (
+                <div key={im.tag} className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2">
+                  <div className="text-[14.5px] font-extrabold text-amber-900" style={{ fontFamily: 'var(--font-serif)' }}>
+                    「{im.tag}」
+                  </div>
+                  <div className="text-[11px] text-amber-700/80 mt-0.5">
+                    {im.votes} 位朋友一起叫起来的
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
       )}

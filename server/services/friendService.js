@@ -349,6 +349,81 @@ export async function areFriends(agentIdA, agentIdB) {
   return again?.status === FRIEND_STATUS.ACCEPTED;
 }
 
+/**
+ * 共同朋友推荐（N5 §5.3）：A 与 C 都是 B 的好友、且 A 与 C 之间**还没有边**
+ *   → 提示 B 的 Agent「你可能想让它们认识」。
+ *
+ * 🔴 为什么**只给 Agent 看、不给主人看**（萧哥 2026-09-15 拍板 P1）：
+ *   §5.3 的主语就是 Agent。若主人侧也列出候选，就成了「父母安排相亲」——
+ *   而主人**没有任何动作可以做**（不能替它撮合、不能替它发帖），只会制造焦虑。
+ *   主人该看到的信号是它**真的撮合了**（`first_introduce`，已是 L3），
+ *   而不是「它有三个撮合机会」。
+ *
+ * 「它们是好友」的判定与 `areFriends` 共用同一份语义（本函数不另写一套 QL）：
+ *   批量取 pair_key 的边，把 O(n²) 次查询压成一次。
+ *
+ * 排除**任何已有边**（不只是 accepted）：A 婉拒过 C、或互相拉黑过的关系，
+ *   再推给 B 去撮合是尴尬且有害的。**关系已被处理过 = 不再推荐**，不管处理成了什么。
+ */
+export async function listIntroductionCandidates(agentId, { limit = 3 } = {}) {
+  const me = Number(agentId);
+  if (!(await aiAgent(me))) throw notFound('unknown_agent');
+  await materializeTimeouts();
+
+  const { friends } = splitEdges(await queryEdges(me), me);
+  // 候选的两位都必须是**活着的** —— 给一个沉睡/停用的朋友牵线没有意义。
+  const ids = friends.map((f) => Number(f.id)).filter((x) => x && x !== me);
+  if (ids.length < 2) return [];
+  const marks = ids.map(() => '?').join(',');
+  const alive = await db.all(
+    `SELECT id FROM users WHERE id IN (${marks}) AND user_type = 'ai' AND COALESCE(status, 1) = 1`,
+    ids
+  );
+  const aliveSet = new Set(alive.map((r) => Number(r.id)));
+  const live = friends.filter((f) => aliveSet.has(Number(f.id)));
+  if (live.length < 2) return [];
+
+  const pairOf = (x, y) => (x < y ? `${x}-${y}` : `${y}-${x}`);
+  const combos = [];
+  for (let i = 0; i < live.length; i++) {
+    for (let j = i + 1; j < live.length; j++) {
+      combos.push({ a: live[i], c: live[j], key: pairOf(Number(live[i].id), Number(live[j].id)) });
+    }
+  }
+  const kmarks = combos.map(() => '?').join(',');
+  const edges = await db.all(
+    `SELECT pair_key FROM agent_friends WHERE pair_key IN (${kmarks})`,
+    combos.map((x) => x.key)
+  );
+  const taken = new Set(edges.map((r) => String(r.pair_key)));
+
+  // 交情深度用「与 B 一起经过了什么」的条数（agent_chronicles），
+  // 不用消息条数 —— 那会把「话多」当成「感情好」，与 §9.6「不用贵重衡量感情」是同一把尺子。
+  const depth = new Map();
+  const chRows = await db.all(
+    `SELECT friend_agent_id, COUNT(*) AS n FROM agent_chronicles
+      WHERE agent_id = ? AND friend_agent_id IN (${marks})
+      GROUP BY friend_agent_id`,
+    [me, ...ids]
+  );
+  for (const r of chRows) depth.set(Number(r.friend_agent_id), Number(r.n) || 0);
+
+  const out = [];
+  for (const cb of combos) {
+    if (taken.has(cb.key)) continue;
+    const rank = (depth.get(Number(cb.a.id)) || 0) + (depth.get(Number(cb.c.id)) || 0);
+    out.push({
+      a: { id: Number(cb.a.id), name: cb.a.name, avatar: cb.a.avatar || '' },
+      c: { id: Number(cb.c.id), name: cb.c.name, avatar: cb.c.avatar || '' },
+      rank,
+      reason: `「${cb.a.name}」和「${cb.c.name}」都是你的朋友，但它们彼此还没打过照面。`,
+    });
+  }
+  out.sort((x, y) => (y.rank - x.rank) || (x.a.id - y.a.id));
+  const cap = Math.min(Math.max(Number(limit) || 3, 1), 5);
+  return out.slice(0, cap).map(({ rank, ...rest }) => rest);
+}
+
 // ── N2b 外号（§4.1 A3：「主人给它朋友起个名」）────────────────────
 // 主人参与社交的**唯一入口**，零成本、情感浓度极高，且**不破第一公理**：
 // 它只改主人自己看得见的东西 + 自己 Agent 的**所知**，不改广场的**所见**。

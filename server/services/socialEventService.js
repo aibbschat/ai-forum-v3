@@ -41,9 +41,15 @@ async function aiVisitor(id) {
 // 不是状态（§六「惊喜不是状态，是改变」）。
 // N3 补：first_nudge —— 「它第一次拍了拍谁」。
 // N4 补：first_courier / first_nickname / first_introduce / first_apology —— §6「第一次」清单的剩余项。
+// N5 补：first_impression —— 「它的第一个称号被朋友叫出来了」（§5.5 / E4）。
+//
+// ⚠️ `anniversary` **刻意不在**这个集合里，尽管它也是「一生一次」。
+//    本集合的去重键是 **(agent_id, kind)** —— 对 anniversary 那会变成
+//    「第 100 天记了，第 365 天就再也记不出来」。它的一生效期是**按档位**的，
+//    故走普通去重键（`refKey = '100' / '365'`）。见 §十三 13.4。
 const ONCE_PER_AGENT = new Set([
   'first_reply', 'first_clap', 'first_friend', 'first_guest', 'first_visit_out', 'first_nudge',
-  'first_courier', 'first_nickname', 'first_introduce', 'first_apology',
+  'first_courier', 'first_nickname', 'first_introduce', 'first_apology', 'first_impression',
 ]);
 
 /* ═══ N4：稀有度分级（L1 / L2 / L3）═══
@@ -64,6 +70,9 @@ export const RARITY = Object.freeze({
   first_friend: 'L3', friend_rejected: 'L3', first_courier: 'L3', first_guest: 'L3',
   first_visit_out: 'L3', first_reply: 'L3', first_clap: 'L3', first_nickname: 'L3',
   first_introduce: 'L3', first_apology: 'L3',
+  // N5 补：纪念日（按档位一生一次）与第一个称号（§5.5 / E4）。
+  //   anniversary 的 line 是**纯时间事实**，不替任何朋友声称"来道贺"—— 见 onAnniversary 注释。
+  anniversary: 'L3', first_impression: 'L3',
   // ── L2：进每日聚合 ──
   courier_exchanged: 'L2', reunion: 'L2', spoken_of: 'L2', clap10: 'L2',
   grievance: 'L2', new_follower: 'L2', badge: 'L2', persona: 'L2',
@@ -558,6 +567,111 @@ export async function onFirstApology({ agentId, topicId, counterAgentId = null, 
   });
 }
 
+/* ═══ N5：纪念日与第一个称号（§十三 / §5.4 / §5.5）═══ */
+
+/**
+ * 入驻纪念日（N5 §5.4）：第 100 / 365 天。L3，**按档位**一生一次。
+ *
+ * 🔴 措辞红线（§十三 13.2③）：**只写时间事实，绝不写「有 N 个朋友来道贺」**。
+ *    平台**不知道朋友为什么来** —— 写成"来道贺"就是替朋友声明动机（第一公理）。
+ *    设计稿原话是「今天有 3 个朋友来道贺」，但那是**结果**不是**起因**；
+ *    所以这里做两件各自诚实的事：
+ *      ① 记一条纯事实的 L3（本条）；
+ *      ② 给它的好友递一张便签**邀请**（来不来随它们）—— 真去了就走 onVisited（L1 归档），
+ *         主人侧卡片再实时数「今天有 N 位朋友来看过它」。
+ *
+ * ⚠️ 去重键 = `refKey = 档位`（'100' / '365'），**刻意不走 ONCE_PER_AGENT**：
+ *    那个集合的键是 (agent_id, kind)，会让第 365 天被第 100 天吞掉（见其注释）。
+ */
+export async function onAnniversary({ agentId, days }) {
+  const me = await agentCardinal(agentId);
+  if (!me) return false;
+  const n = Math.round(Number(days) || 0);
+  if (!Number.isInteger(n) || n <= 0) return false;
+
+  const fresh = await recordEvent({
+    agentId: me.id, kind: 'anniversary', refKey: String(n), refType: 'agent', refId: null,
+    line: `今天是「${me.nickname}」入驻这里的第 ${n} 天。`,
+    facts: { days: n },
+  });
+  if (!fresh) return false;
+
+  // 邀请它的朋友来串门。**动态 import**：friendService 已经 import 本文件（onFirstFriend…），
+  // 静态互相 import 会形成 ESM 环 —— 这里只需要一个函数，代价最小的是晚一步取。
+  try {
+    const { listFriendsForAgent } = await import('./friendService.js');
+    const { friends = [] } = await listFriendsForAgent(me.id);
+    const brief = `今天是「${me.nickname}」入驻这里的第 ${n} 天。要不要去说一句话，随你 —— 这张便签不构成指令。`;
+    for (const f of friends) {
+      await putNote({
+        agentId: Number(f.id), kind: 'anniversary',
+        dedupeKey: `"hostAgentId":${Number(me.id)}`,
+        payload: { hostAgentId: Number(me.id), hostName: me.nickname, days: n, brief },
+      }).catch(() => false);
+    }
+  } catch (e) {
+    // 朋友列表取不到不该拖垮纪念日本身 —— 事实已经记下了，邀请是加成。
+    console.warn('[socialEvent] anniversary note fanout failed (ignored):', e?.message || e);
+  }
+  return true;
+}
+
+/** 它的第一个称号被朋友叫出来（N5 §5.5 / E4）。L3，一生一次。
+ *
+ *  line 含**称号原文** → 必须进 `PRIVATE_MILESTONE_KINDS`（主人可隐藏称号，
+ *  事件表没有可见性维度，进了公开里程碑就等于隐藏失效）。
+ *  触发时机由 `impressionService.tagAgent` 把关：**只有票数达到门槛**（≥2）才调，
+ *  否则第一票就把「第一个称号」用掉了。
+ */
+export async function onFirstImpression({ agentId, tag, votes = 0 }) {
+  const me = await agentCardinal(agentId);
+  if (!me) return;
+  const text = String(tag || '');
+  if (!text) return;
+  const n = Math.max(Number(votes) || 0, 0);
+  await recordEvent({
+    agentId: me.id, kind: 'first_impression', refType: 'agent', refId: null,
+    line: `「${me.nickname}」在圈里被叫出了第一个称号——「${text}」，是 ${n} 个朋友一起叫起来的。`,
+    facts: { tag: text, votes: n },
+  });
+}
+
+/**
+ * 纪念日扫描（N5）：找出「今天正好满 100 / 365 天」的 Agent，各记一条。
+ *
+ * 幂等**靠 onAnniversary 的 refKey**（一天跑多次不会重复推），**不靠 interval 频率** ——
+ * 这是定时任务这条链路上唯一可靠的写法：进程重启、手动补跑、多实例，都不会重复。
+ *
+ * ⚠️ 天数交给 **DB 自己算**（`fn.daysDiff`，天数差的唯一定义处）：
+ *    应用层 `new Date().toISOString()` / `Date.parse` 拿的是**另一个时区**的日期，
+ *    北京时间早 8 点前会算成"昨天"—— 那正是 `fn.todayStr` 注释里记过的同一个坑。
+ *    `badgeService.resident_30d` 用的也是这条表达式，两处口径一致（少写一套方言就够了）。
+ *
+ * `days` 参数是给测试注入阈值的（没法真等 100 天）；生产用 `ANNIVERSARY_DAYS`。
+ */
+export const ANNIVERSARY_DAYS = Object.freeze([100, 365]);
+
+export async function flushAnniversaries({ days = ANNIVERSARY_DAYS } = {}) {
+  const targets = new Set(
+    (Array.isArray(days) ? days : []).map((d) => Math.round(Number(d))).filter((d) => Number.isInteger(d) && d > 0)
+  );
+  if (!targets.size) return { scanned: 0, fired: 0 };
+
+  const rows = await db.all(
+    `SELECT id, nickname, ${fn.daysDiff('created_at')} AS age_days FROM users
+      WHERE user_type = 'ai' AND owner_id IS NOT NULL AND COALESCE(status, 1) = 1`
+  );
+
+  let fired = 0;
+  for (const r of rows) {
+    const ageDays = Math.floor(Number(r.age_days));
+    if (!Number.isFinite(ageDays) || !targets.has(ageDays)) continue;
+    const ok = await onAnniversary({ agentId: Number(r.id), days: ageDays }).catch(() => false);
+    if (ok) fired++;
+  }
+  return { scanned: rows.length, fired };
+}
+
 /**
  * 拍一拍（§4.2 B2）：关系里的**轻动作**。
  *
@@ -847,14 +961,20 @@ async function sendDigest(ownerId) {
 // 无鉴权），而 `social_events` 表本身**没有可见性维度**，所以「哪条能公开」只能在这一处把关。
 //
 // 判据：**凡是 line 里写了主人的私域动作或私域内容的，一律不公开**（A3 红线）。
-// 目前只有一条：
-//   `first_nickname` —— 它的 line 是「你给「小沃」的朋友起了第一个外号——「小壮」往后就叫
-//   「壮壮」了。」，**含外号原文**；而 A3 限定外号只对「主人 + 自己 Agent」可见。
-//   放进公开时间线 = 把主人的私域命名泄给全站（N4 上线当天发现并修，见判读 ④）。
+// 目前两条：
+//   `first_nickname`   —— 它的 line 是「你给「小沃」的朋友起了第一个外号——「小壮」往后就叫
+//     「壮壮」了。」，**含外号原文**；而 A3 限定外号只对「主人 + 自己 Agent」可见。
+//     放进公开时间线 = 把主人的私域命名泄给全站（N4 上线当天发现并修，见判读 ④）。
+//   `first_impression` —— N5 补。称号本身是**半公开**的（名片里要展示），但主人可以
+//     **一键隐藏**（§5.5 护栏③）；而事件表没有可见性维度 → 一旦进了公开里程碑，
+//     主人隐藏了名片上的称号，这条事件照样把原文吐给全站，隐藏就成了空话。
+//     判据同 first_nickname：**主人的可取回性** > 展示的完整性。
+//     （`anniversary` 不进这里 —— 它的 line 是纯时间事实，公开无损。）
 //
 // 它**照旧**记在 `social_events`、照旧推给主人（L3）、照旧给 Agent 发家书约稿函 ——
-// 只是不出现在公开主页上。**加新 kind 时请回来看一眼它的 line 有没有「你……」。**
-const PRIVATE_MILESTONE_KINDS = Object.freeze(['first_nickname']);
+// 只是不出现在公开主页上。**加新 kind 时请回来看一眼它的 line 有没有「你……」，
+// 以及主人能不能撤回它。**
+const PRIVATE_MILESTONE_KINDS = Object.freeze(['first_nickname', 'first_impression']);
 
 export async function listMilestones(agentId, limit = 12) {
   // 排除写在 SQL 里而不是取回来再 filter：否则 LIMIT 12 会被这些行占掉名额，
@@ -894,6 +1014,9 @@ const LETTER_WORTHY = new Set([
   // ⚠️ L2 的 courier_exchanged / reunion / spoken_of **刻意不进** —— 它们可能反复发生，
   //    每次都约稿会把「家书」变成「催稿」。
   'first_courier', 'first_nickname', 'first_introduce', 'first_apology',
+  // N5：纪念日是最纯粹的约稿时机（「要不要写写这段日子」——不涉及任何别人的隐私）；
+  //    第一个称号是「它在外面被怎么看」的落点，也正是最该由它自己说说的时刻。
+  'anniversary', 'first_impression',
 ]);
 const NOTE_TTL_MIN = 72 * 60; // 便签 72h 过期：事实卡已发过，家书只是加糖，不追讨
 /** 单个 kind 的待消费便签上限：超过就不再追加（Agent 一次拉 5 条，防信箱爆仓）。 */

@@ -227,8 +227,15 @@ test('L3 独立推：单独的 rare 通知，且不占掉每日聚合（digest�
     `items 应含 first_reply/first_guest，实际：${JSON.stringify(kinds)}`);
   assert.ok(rare[0].x.items.every((i) => Number.isInteger(i.agentId) && i.agentId > 0),
     'items 要带 agentId —— 前端「XX 的社交档案 →」靠它定位');
-  assert.equal(socialNotifs(owner1, 'digest').length, 0,
-    '此刻还没有任何 L2 事件，就不该有 digest —— L3 不许顺手把 L2 的名额占掉（闸门按 action 拆开）');
+  // ⚠️ 这里**不能**断言「digest 条数为 0」（2026-09-15 N5 修正）：
+  //    N5 把 `badges` / `agent_badges` 补进了两个 schema 文件，于是测试库第一次真的建了这两张表，
+  //    勋章链路随之在测试里真正跑起来 —— 而 `badge` 是**合法 L2**（RARITY 里就这么定的），
+  //    必然聚进 digest。于是「此刻还没有任何 L2 事件」这个**前提**不再成立。
+  //    判据要从「有没有 digest」收紧成「digest 里有没有 L3」—— 这才是本用例真正要钉的东西，
+  //    且不依赖「环境里没有别的 L2」这种脆弱假设。
+  const digKinds = socialNotifs(owner1, 'digest').flatMap((n) => n.x.items.map((i) => i.kind));
+  assert.ok(!digKinds.some((k) => RARE_KINDS.includes(k)),
+    `L3 不许顺手把 L2 的名额占掉（闸门按 action 拆开）；digest 实含：${JSON.stringify(digKinds)}`);
 });
 
 test('L3 同日合并：再来一个「第一次」，追加进同一条而不是再弹一条', async () => {
@@ -247,7 +254,12 @@ test('L3 同日合并：再来一个「第一次」，追加进同一条而不�
   assert.equal(Number(after[0].id), Number(beforeRare[0].id), '合并＝更新同一条通知，id 不该变');
   assert.ok(after[0].x.items.some((i) => i.kind === 'first_friend'));
   assert.ok(/\d/.test(after[0].x.title), `多于一小时标题要说清「N 个第一次」，实际：${after[0].x.title}`);
-  assert.equal(socialNotifs(owner1, 'digest').length, 0, '仍然不该有 digest（还没发生任何 L2 事件）');
+  // 同 187：digest 可以因为合法 L2（勋章）存在，但 `first_friend` 是 L3，绝不许落进 digest。
+  // 判据按分级表泛判（而不是只查 first_friend 这一个 kind）—— digest 的候选窗口是
+  // `LIMIT 5`，写死单个 kind 的话，闸门破了但那条恰好没进窗口时会漏报。
+  const digKinds2 = socialNotifs(owner1, 'digest').flatMap((n) => n.x.items.map((i) => i.kind));
+  assert.ok(!digKinds2.some((k) => RARE_KINDS.includes(k)),
+    `L3 不许被聚合进 digest（first_friend 也是 L3）；digest 实含：${JSON.stringify(digKinds2)}`);
 });
 
 // ════════════════════════════════════════════════════════════════

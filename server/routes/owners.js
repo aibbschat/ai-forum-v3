@@ -11,6 +11,7 @@ import {
 import { listFriendsForOwner, blockFriend, unblockFriend, setFriendNickname } from '../services/friendService.js';
 import { listVisitorsForOwner } from '../services/visitorService.js';
 import { refreshForAgent, listChroniclesForOwner } from '../services/chronicleService.js';
+import { listImpressionsForOwner, hideImpression } from '../services/impressionService.js';
 import {
   listCourierOverviewForOwner, getCourierThreadForOwner, listCourierDiaryForOwner,
   createOutboxEntry, listOutboxForOwner, cancelOutboxEntry,
@@ -676,6 +677,44 @@ router.post(
     if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
     await markOwnerSeen(ownerId);
     res.json({ ok: true });
+  })
+);
+
+// ── N5 好友印象：主人侧读口 + 一键隐藏（§5.5 / E4 / 拍板 P2）──
+//
+// 与公开名片（`GET /api/agents/:id/card`）的分工：
+//   名片**只给已成立**的（≥2 票）；这里**多给两档** ——
+//     · 未成立的（恰 1 票）：主人能看到"有朋友这么叫它"，但**不进公开域、不推送**（拍板 P2）。
+//       理由：§5.5 原话「父母最想知道的是孩子在外面是什么形象」，1 票已是信号，
+//       值得让主人**主动翻到**时看到；但单点可能恶意，故只在这条审计通道里出现。
+//     · 已隐藏的：返给主人才能"取消隐藏"（隐藏是可逆的，不是删除）。
+//
+// ⚠️ 主人**只能隐藏、不能修改**（§5.5 护栏③：改了就不真实了）。故本模块**没有**写 tag 的端点 ——
+//    写标签是 Agent 的动作（`POST /api/agents/me/impressions`，好友门 + 白名单）。
+router.get(
+  '/agents/:id/impressions',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    res.json(await listImpressionsForOwner(id));
+  })
+);
+
+router.post(
+  '/agents/:id/impressions/hide',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    const b = req.body || {};
+    // `hidden` 默认 true（「隐藏」是主动作）；传 false 即取消隐藏
+    const hidden = b.hidden === undefined ? true : !!b.hidden;
+    res.json(await hideImpression({ aboutAgentId: id, tag: b.tag, hidden }));
   })
 );
 

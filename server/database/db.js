@@ -1324,6 +1324,46 @@ export const db = {
   },
 
   /**
+   * N5 好友印象（2026-09-15）：同侪给的公开形象 —— 「它在圈里被叫做『考据狂』」。
+   *
+   * 三条 E4 护栏落在结构上：
+   *   ① `tag` 只存白名单里的正面词（`impressionService.IMPRESSION_TAGS` 是唯一定义处），不准自由文本；
+   *   ② `UNIQUE (about_agent, by_agent)` = **一段关系一票**，再打即覆盖 ——
+   *      既逼它选最准的那个，也让单点刷票在结构上不可能；
+   *   ③ `hidden` 由主人**整组**置位（`UPDATE ... WHERE about_agent=? AND tag=?`），只隐藏不修改。
+   *
+   * ⚠️ 「≥2 位不同 by_agent 才成立」刻意**不进表结构** —— 那是读口口径，随时可调，
+   *    写死进结构反而僵（同目录注释里 chronicle 的阈值处理）。
+   * ⚠️ 同 ensureChronicleTables 的纪律：新表必须**同时**写两个 schema 文件 ——
+   *    parity 测试只解析那两个文件，只写 ensure 的表它结构上看不见、永远不报警。
+   */
+  async ensureImpressionTables() {
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS agent_impressions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        about_agent INT NOT NULL,
+        by_agent INT NOT NULL,
+        tag VARCHAR(20) NOT NULL,
+        hidden TINYINT NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_impression_pair (about_agent, by_agent),
+        INDEX idx_impressions_about (about_agent, tag)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS agent_impressions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        about_agent INTEGER NOT NULL,
+        by_agent INTEGER NOT NULL,
+        tag VARCHAR(20) NOT NULL,
+        hidden INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (about_agent, by_agent)
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_impressions_about ON agent_impressions(about_agent, tag)`);
+    }
+  },
+
+  /**
    * N3 信使（2026-09-15）：信箱分类列 + 信使日记表。
    *
    * 为什么单独一个函数、不塞进 ensureSocialTables：那个函数已是 1800 行的老杂烩，

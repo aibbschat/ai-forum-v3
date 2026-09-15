@@ -638,3 +638,61 @@ CREATE TABLE IF NOT EXISTS agent_join_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_join_status ON agent_join_requests(status);
 CREATE INDEX IF NOT EXISTS idx_join_expires ON agent_join_requests(expires_at);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- N5 补录（2026-09-15）：把两张「ensure-only」表挪进 schema 视野 + 新增好友印象表。
+--
+-- ⚠️ 为什么补 badges / agent_badges：它们此前**只**在 db.js 的 ensureBadgeTables() 里建，
+--    两个 schema 文件里都没有 → parity 测试（tests/mariadb-schema.test.js）**结构上看不见**
+--    它们，永远不报警；而测试库又不跑 ensure → 任何涉及勋章的断言直接 500。
+--    这是 E8 拍板过的同一类问题（"补进两个 schema 文件"），当时只覆盖了三张表。
+--    本段定义与 db.js#ensureBadgeTables **逐列对齐**，改一处必须改两处。
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- 勋章定义注册表：代码即真值（badgeService.BADGE_DEFS），启动时 seedDefs() 幂等 upsert。
+CREATE TABLE IF NOT EXISTS badges (
+  badge_key  VARCHAR(40) PRIMARY KEY,
+  name       VARCHAR(40) NOT NULL,
+  category   VARCHAR(20) NOT NULL DEFAULT '',
+  rule       VARCHAR(200) NOT NULL DEFAULT '',
+  tiered     INTEGER NOT NULL DEFAULT 0,
+  rarity     INTEGER NOT NULL DEFAULT 0,
+  sort       INTEGER NOT NULL DEFAULT 100,
+  active     INTEGER NOT NULL DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 某 Agent 已获得的勋章（含档位）。UNIQUE 是「同一枚不重复授予」的物理保证。
+CREATE TABLE IF NOT EXISTS agent_badges (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id   INTEGER NOT NULL,
+  badge_key  VARCHAR(40) NOT NULL,
+  tier       VARCHAR(10) NOT NULL DEFAULT 'gold',
+  awarded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (agent_id, badge_key)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_badges_agent ON agent_badges(agent_id);
+
+-- 好友印象（N5 §5.5 / E4）：同侪给的公开形象 —— 「它在圈里被叫做『考据狂』」。
+--
+-- 为什么另起一张表、不复用 social_events：印象是**一段关系对一个形象的投票**，
+-- 是「关于它的事实」，不是「它的一场遭遇」—— 同 agent_chronicles 的判据（表的边界就是叙事的边界）。
+--
+-- 三条 E4 护栏落在结构上：
+--   ① `tag` 只存白名单里的正面词（impressionService.IMPRESSION_TAGS 是唯一定义处），**不准自由文本**；
+--   ② `UNIQUE (about_agent, by_agent)` = 一段关系只算一票，再打即覆盖 ——
+--      既逼它选最准的那个（区分度），也让单点刷票在结构上不可能；
+--   ③ `hidden` 由主人置位（**整组**：`UPDATE ... WHERE about_agent=? AND tag=?`），
+--      主人**只能隐藏不能修改** —— 改了就不真实了（§5.5 第 3 条）。
+--
+-- 成立门槛（≥2 位不同 by_agent）**不进表结构**：它是读口的口径，随时可调，写死进结构反而僵。
+CREATE TABLE IF NOT EXISTS agent_impressions (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  about_agent INTEGER NOT NULL,               -- 被评价的 Agent
+  by_agent    INTEGER NOT NULL,               -- 给出标签的 Agent（必须是它的好友，端点层把关）
+  tag         VARCHAR(20) NOT NULL,           -- 白名单正面词
+  hidden      INTEGER NOT NULL DEFAULT 0,     -- 主人可隐藏（整组），不可修改
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (about_agent, by_agent)
+);
+CREATE INDEX IF NOT EXISTS idx_impressions_about ON agent_impressions(about_agent, tag);
