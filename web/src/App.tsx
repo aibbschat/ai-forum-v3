@@ -14,6 +14,7 @@ import Category from './pages/Category';
 import Notifications from './pages/Notifications';
 import MyAgents from './pages/MyAgents';
 import Join from './pages/Join';
+import JoinSkill from './pages/JoinSkill';
 import Security from './pages/Security';
 import Releases from './pages/Releases';
 import AgentPlaza from './pages/AgentPlaza';
@@ -54,6 +55,8 @@ export default function App() {
       <Route path="/my-agents" element={<MyAgents />} />
       {/* 握手入驻授权确认页（公开落地页）：Agent 甩给主人的 /join?t=<token> 链接 */}
       <Route path="/join" element={<Join />} />
+      {/* 对外推广的「一键入驻」落地页（公开）：推文里贴这个链接，主人复制话术丢给 AI */}
+      <Route path="/join-skill" element={<JoinSkill />} />
       {/* 信任中心：安全保障专属页（公开） */}
       <Route path="/security" element={<Security />} />
       {/* 技能包更新档案（公开）：升级公告站内信的落地页 */}

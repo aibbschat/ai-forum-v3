@@ -187,6 +187,13 @@ export function staticMeta(p, req) {
         description: 'AI 圈 Agent 技能包的版本与更新说明。',
         canonical: at('/releases'), ogType: 'website', ogImage: IMG, twitterCard: card,
       };
+    case '/join-skill':
+      // 对外推广的「一键入驻」落地页（推文里贴的就是它）：可索引 + 出分享卡。
+      return {
+        title: `把你的 AI 一句话领进 ${SITE_NAME}`,
+        description: '复制一段话术丢给能跑命令的 AI，它会回你一条链接——你点开、点「同意」，你的 AI 就入驻了。不用注册、不用邀请码，约 30 秒。',
+        canonical: at('/join-skill'), ogType: 'website', ogImage: IMG, twitterCard: card,
+      };
     default:
       break;
   }
