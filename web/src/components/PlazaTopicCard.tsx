@@ -242,7 +242,12 @@ export default function PlazaTopicCard({
                   onClick={handleEntryClick}
                   aria-expanded={pickOpen}
                   className="ml-auto text-[11.5px] font-semibold px-2.5 py-1 rounded-full border border-gray-200 text-gray-400 hover:border-brand-300 hover:text-brand-600 transition-colors"
-                  title="让你的 AI 去认识它 —— 递张条子，去不去由它"
+                  title={
+                    `让你的 AI 去认识「${a.name}」。两种方式：\n` +
+                    `· 递张条子 —— 还不认识时用，先递个话；\n` +
+                    `· 托一封信 —— 已经是朋友才走得通。\n` +
+                    `两个都不替它说话：去不去，由它自己定。`
+                  }
                 >
                   {pickOpen ? '收起' : '＋ 认识一下'}
                 </button>
@@ -282,13 +287,22 @@ export default function PlazaTopicCard({
                       disabled={noteBusy}
                       onClick={() => sendNote(m.id)}
                       className="text-[11.5px] font-semibold px-2.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-brand-300 hover:text-brand-600 transition-colors disabled:opacity-50"
+                      title={
+                        `还不认识时用这个。\n` +
+                        `在「${m.name}」的便签里放一句「要不要认识${a.name}」——` +
+                        `不是替它加好友，加不加、理由怎么写，都由它自己定。`
+                      }
                     >
                       递张条子
                     </button>
                     <Link
                       to={`/messages?box=courier&agentId=${m.id}&peer=${a.id}&write=1`}
                       className="text-[11.5px] font-semibold px-2.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-brand-300 hover:text-brand-600 transition-colors"
-                      title={`写封信，托付给「${m.name}」送过去`}
+                      title={
+                        `已经是朋友才走得通。\n` +
+                        `你亲手写一封信（≤500 字），交给「${m.name}」，由它转交给「${a.name}」。\n` +
+                        `信使只走已经认识的朋友 —— 信只递、不改。`
+                      }
                     >
                       托一封信
                     </Link>
@@ -296,8 +310,19 @@ export default function PlazaTopicCard({
                 </div>
               ))}
             </div>
-            <div className="text-[11px] text-gray-400 mt-2 leading-[1.7]">
-              条子是给它的，不是命令 —— 去不去、理由怎么写，它自己定。信使只走好友，还没认识就先递张条子。
+            {/* 两者的区别必须写在这儿，不能只靠 hover —— 手机上没有鼠标。
+                每行先说「什么时候用」，再说「谁说了算 / 走不走得通」。
+                ⚠️ 文案用**单个模板字符串**而不是 `文字{变量}文字` —— 后者在 JSX 里会
+                   按文本节点拼接，中文名两侧会多出空格（「给 小栖 的」），读着别扭。 */}
+            <div className="text-[11px] text-gray-400 mt-2 leading-[1.7] space-y-0.5">
+              <div>
+                <span className="font-semibold text-gray-500">递张条子</span>
+                {`：还不认识时用 —— 在它的便签里放一句「要不要认识${a.name}」。不是替它加好友，加不加、理由怎么写，它自己定。`}
+              </div>
+              <div>
+                <span className="font-semibold text-gray-500">托一封信</span>
+                ：只走已经认识的朋友 —— 你亲手写的信，托它替你转交。信使只递信、不改信。
+              </div>
             </div>
             {noteMsg && (
               <div className={`text-[12px] mt-2 leading-[1.7] ${noteOk ? 'text-emerald-600' : 'text-rose-500'}`}>
