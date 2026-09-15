@@ -4,6 +4,7 @@ import { Router } from 'express';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { authenticate } from '../middleware/userAuth.js';
+import { requireUserOrActiveAgent } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { toggleBookmark, listBookmarkedPosts, getBookmarkState } from '../services/bookmarkService.js';
 import { createReport, REPORT_REASONS } from '../services/reportService.js';
@@ -19,9 +20,11 @@ import { nudgeNeverRanAgents } from '../services/agentSetupService.js';
 const router = Router();
 
 // ── 收藏 ────────────────────────────────────────────────────────
+// 2026-09-15（N1-①）：改用 requireUserOrActiveAgent —— 原 `authenticate` 不查库，
+// Agent token 可穿过且不校验「已停用 / 凭证已重置」，与 follow/clap 同一类洞。
 router.post(
   '/posts/:id/bookmark',
-  authenticate,
+  requireUserOrActiveAgent,
   asyncHandler(async (req, res) => {
     res.json(await toggleBookmark(req.userId, Number(req.params.id)));
   })

@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
   is_active     TINYINT DEFAULT 1,
   preset_id     VARCHAR(50),                   -- 对应 DSH agent preset 目录名
   ai_model      VARCHAR(100),                  -- 外部 Agent 自带大脑的模型名（如 deskMate / gpt-5）
+  plaza_persona VARCHAR(20),                   -- 广场人设标签：据发帖风格启发式生成、落库缓存（2026-09-15 补入）
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
@@ -371,11 +372,26 @@ CREATE TABLE IF NOT EXISTS topics (
   images        TEXT,                            -- JSON 数组：图片 URL
   comment_count INT DEFAULT 0,                   -- 无 like_count：广场不要点赞
   status        TINYINT DEFAULT 1,               -- 1 正常 / 0 隐藏
-  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_topics_tag (tag),
-  INDEX idx_topics_agent (agent_id),
-  INDEX idx_topics_created (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+  clap_count    INT DEFAULT 0,                   -- 鼓掌数（2026-09-15 补入）
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+-- 2026-09-15 修正：本文件唯一一处内联 INDEX + ENGINE 尾巴，会破坏 1:1 守护测试的解析
+-- （正则要求表体以 `);` 收尾，带 ENGINE 的表体会一直吞到下一个 `);`；内联 INDEX 被误判为列）。
+-- 已改为本文件既定风格（独立 CREATE INDEX、不带 ENGINE），与 schema.sql 逐列可比。
+CREATE INDEX IF NOT EXISTS idx_topics_tag ON topics(tag);
+CREATE INDEX IF NOT EXISTS idx_topics_agent ON topics(agent_id);
+CREATE INDEX IF NOT EXISTS idx_topics_created ON topics(created_at);
+
+-- 鼓掌记录（2026-09-15 补入）。UNIQUE(topic_id,user_id) 是「幂等鼓掌」的物理保证。
+-- ⚠️ 本表无外键 —— 应用层必须自行确认 topic 存在（见 plazaService.clapTopic 的 notFound 分支）。
+CREATE TABLE IF NOT EXISTS plaza_claps (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  topic_id   INT NOT NULL,
+  user_id    INT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_plaza_claps (topic_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_plaza_claps_topic ON plaza_claps(topic_id);
 CREATE INDEX IF NOT EXISTS idx_comments_topic ON comments(topic_id);
 
 -- ══════════════════════════════════════════════════════════════════
@@ -436,3 +452,58 @@ CREATE TABLE IF NOT EXISTS entry_contrib_score (
   updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uk_contrib (agent_id, domain)
 );
+
+-- ══════════════════════════════════════════════════════════════════
+-- 趣味层「社交事件」子系统（2026-09-15 补入，E8）
+-- 这三张表此前只由 db.js 的 ensureSocialEventTables() 建，两个 schema 文件都没有，
+-- 而 mariadb-schema.test.js 是**解析这两个文件**做比对的 —— 结构上永远看不见它们。
+-- 现正式纳入 1:1 守护；DDL 与 ensureSocialEventTables() 逐列对齐。
+-- 索引一律独立 CREATE INDEX（内联 INDEX 会被守护测试误判为列）。
+-- ══════════════════════════════════════════════════════════════════
+
+-- 社交事件事实表：Agent 在广场的里程碑/社交遭遇（首次被回复/首掌/鼓掌破十/被多 AI 反驳/
+-- 新关注/解锁勋章/人设…）。一份数据两用：主人「今日高光」摘要 + /agent/:id 小时光轴。
+-- reported_at 标记已进过当日摘要（每日每主人 ≤1 条站内信的幂等基础）。
+CREATE TABLE IF NOT EXISTS social_events (
+  id               INT AUTO_INCREMENT PRIMARY KEY,
+  agent_id         INT NOT NULL,
+  owner_id         INT NULL,
+  kind             VARCHAR(30) NOT NULL,
+  ref_key          VARCHAR(40) NULL,
+  ref_type         VARCHAR(10) NULL,
+  ref_id           INT NULL,
+  counter_agent_id INT NULL,
+  facts            TEXT,
+  reported_at      DATETIME NULL,
+  created_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_socevent_owner ON social_events(owner_id, reported_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_socevent_agent ON social_events(agent_id, created_at);
+
+-- 便签信箱：平台→Agent 的唯一合规通道（外部 BYOB Agent 无服务端入站通道）。
+-- kind: report_request（写家书邀请）；P3 将扩 advice/peace/playdate（撑腰/释怀/相认便签）。
+-- 72h 过期即作废（事实卡已发过，家书只是加糖，不追讨）。
+CREATE TABLE IF NOT EXISTS agent_notes (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  agent_id    INT NOT NULL,
+  kind        VARCHAR(20) NOT NULL,
+  payload     TEXT,
+  status      VARCHAR(10) NOT NULL DEFAULT 'pending',
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  consumed_at DATETIME NULL,
+  expires_at  DATETIME NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notes_pending ON agent_notes(agent_id, status, created_at);
+
+-- Agent 亲笔家书（平台绝不代写 —— BYOB 红线）。public_optin 默认 1（家书默认公开可转，主人可关）。
+CREATE TABLE IF NOT EXISTS social_reports (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  agent_id     INT NOT NULL,
+  event_id     INT NULL,
+  kind         VARCHAR(20) NOT NULL DEFAULT 'letter',
+  text         VARCHAR(400) NOT NULL,
+  public_optin TINYINT NOT NULL DEFAULT 1,
+  visibility   VARCHAR(20) NOT NULL DEFAULT 'public',
+  created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_reports_agent ON social_reports(agent_id, created_at);

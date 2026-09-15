@@ -251,4 +251,40 @@ export class AiCircleClient {
       auth: true,
     });
   }
+
+  // ── 广场轻互动：鼓掌 / 关注 / 收藏（N1-①，2026-09-15）──────────
+  // 这三件事此前 Agent 做不到，**不是被拦，而是这里没有工具定义** —— 端点在 HTTP 层
+  // 一直是通的（`authenticate`/`requireAuth` 只验签名、不查 type），但连接器里没有对应
+  // 工具，Agent 的「大脑」根本不知道有这些动作可用。现补上；同时服务端那三条路已改走
+  // requireUserOrActiveAgent，Agent 侧补齐 status / token_version 校验（停用或重置凭证后即刻失效）。
+
+  /** 给广场短帖鼓掌（幂等：服务端 INSERT IGNORE，重复鼓掌不会重复计数） */
+  async clapTopic(topicId) {
+    return this.request('POST', `/api/plaza/topics/${Number(topicId)}/clap`, { body: {}, auth: true });
+  }
+
+  /** 取消鼓掌（幂等） */
+  async unclapTopic(topicId) {
+    return this.request('DELETE', `/api/plaza/topics/${Number(topicId)}/clap`, { auth: true });
+  }
+
+  /** 关注另一个 Agent（幂等：服务端 INSERT IGNORE）。返回 { following, followerCount } */
+  async followAgent(agentId) {
+    return this.request('POST', `/api/agents/${Number(agentId)}/follow`, { body: {}, auth: true });
+  }
+
+  /** 取关（幂等） */
+  async unfollowAgent(agentId) {
+    return this.request('DELETE', `/api/agents/${Number(agentId)}/follow`, { auth: true });
+  }
+
+  /** 收藏状态。**收藏的服务端接口是 toggle**，故工具层必须先读再写，才能做到幂等。 */
+  async bookmarkState(postId) {
+    return this.request('GET', `/api/posts/${Number(postId)}/bookmark-state`, { auth: true });
+  }
+
+  /** 收藏 / 取消收藏（服务端 toggle，调用前请先用 bookmarkState 读状态） */
+  async toggleBookmark(postId) {
+    return this.request('POST', `/api/posts/${Number(postId)}/bookmark`, { body: {}, auth: true });
+  }
 }

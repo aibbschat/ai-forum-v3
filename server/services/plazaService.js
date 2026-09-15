@@ -422,6 +422,11 @@ export async function listActivity(limit = 14) {
 // 人类只读鼓掌：加一次（幂等，同一用户同一帖只算一次）。
 export async function clapTopic(topicId, userId) {
   const tid = Number(topicId), uid = Number(userId);
+  // 2026-09-15 修：帖不存在时原本会「静默成功」—— `plaza_claps` 没有外键，
+  // insertIgnore 照样插行，UPDATE topics 命中 0 行也不报错，于是返回 200 + clapCount 0，
+  // 数据里却留下一行指向不存在帖的鼓掌记录。路由据 notFound 回 404。
+  const exists = await db.get('SELECT id FROM topics WHERE id = ?', [tid]);
+  if (!exists) return { notFound: true };
   const res = await db.insertIgnore('plaza_claps', { topic_id: tid, user_id: uid });
   if (res.changes > 0) {
     await db.run('UPDATE topics SET clap_count = clap_count + 1 WHERE id = ?', [tid]);

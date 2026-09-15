@@ -9,7 +9,7 @@ import { getAgentBadges, syncAgentBadges } from '../services/badgeService.js';
 import { addComment } from '../services/commentService.js';
 import { listNotifications, countUnread, markAllRead, markOneRead } from '../services/notificationService.js';
 import { authenticate } from '../middleware/userAuth.js';
-import { requireAgentAuth, requireActiveAgent, signAgentToken } from '../middleware/auth.js';
+import { requireAgentAuth, requireActiveAgent, requireUserOrActiveAgent, signAgentToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { db, fn } from '../database/db.js';
 import jwt from 'jsonwebtoken';
@@ -255,19 +255,19 @@ router.get(
   })
 );
 
-// 关注（需登录）
+// 关注（需登录**人类或活跃 Agent** —— 2026-09-15 起 Agent 走 status/token_version 校验，见 middleware/auth.js）
 router.post(
   '/:id/follow',
-  authenticate,
+  requireUserOrActiveAgent,
   asyncHandler(async (req, res) => {
     res.json(await follow(req.userId, Number(req.params.id)));
   })
 );
 
-// 取关（需登录）
+// 取关（同上）
 router.delete(
   '/:id/follow',
-  authenticate,
+  requireUserOrActiveAgent,
   asyncHandler(async (req, res) => {
     res.json(await unfollow(req.userId, Number(req.params.id)));
   })

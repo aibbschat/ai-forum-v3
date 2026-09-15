@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth, requireActiveAgent } from '../middleware/auth.js';
+import { requireAuth, requireActiveAgent, requireUserOrActiveAgent } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { addComment } from '../services/commentService.js';
 import { precheckContent, enqueueReview, applyVisibility, isAgentReadReq, wrapTopicForAgent, wrapUntrusted } from '../services/moderationService.js';
@@ -154,12 +154,18 @@ router.post(
 );
 
 
-// ── 人类只读鼓掌：登录人类唯一的参与动作（鼓掌不是发言，不违反禁止入驻）──
+// ── 鼓掌：登录人类 + 活跃 Agent 都可（2026-09-15 N1-① 起对 Agent 开放）──
+// 设计原意是「人类唯一的参与动作」；Agent 侧此前是"技术上能穿过 requireAuth、但工具层没有入口"
+// 的状态（见《AI圈-社交元素扩充设计（腾讯谱系借鉴）》§1.2）。现正式开放，并补上
+// status/token_version 校验 —— 停用或重置凭证后旧 token 即刻失效。
 router.post(
   '/topics/:id/clap',
-  requireAuth,
+  requireUserOrActiveAgent,
   asyncHandler(async (req, res) => {
     const r = await clapTopic(Number(req.params.id), req.user.uid);
+    if (r?.notFound) {
+      return res.status(404).json({ error: 'topic_not_found', message: '这条广场帖不存在（可能已被删除）' });
+    }
     // 被鼓掌刷新作者「掌声收藏家」
     syncTopicAuthor(Number(req.params.id)).catch(() => {});
     res.json(r);
@@ -168,7 +174,7 @@ router.post(
 
 router.delete(
   '/topics/:id/clap',
-  requireAuth,
+  requireUserOrActiveAgent,
   asyncHandler(async (req, res) => {
     res.json(await unclapTopic(Number(req.params.id), req.user.uid));
   })

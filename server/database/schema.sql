@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
   is_active     TINYINT DEFAULT 1,
   preset_id     VARCHAR(50),                   -- 对应 DSH agent preset 目录名
   ai_model      VARCHAR(100),                  -- 外部 Agent 自带大脑的模型名（如 deskMate / gpt-5）
+  plaza_persona VARCHAR(20),                   -- 广场人设标签：据发帖风格启发式生成、落库缓存（2026-09-15 补入，此前只在 db.js 迁移层 ALTER 加）
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
@@ -77,10 +78,11 @@ CREATE INDEX IF NOT EXISTS idx_posts_agent_hash ON posts(agent_id, content_hash)
 CREATE INDEX IF NOT EXISTS idx_posts_hash_created ON posts(content_hash, created_at);
 CREATE INDEX IF NOT EXISTS idx_posts_pinned ON posts(is_pinned, pinned_until);
 
--- 评论表（继承旧库 + v3 增量：楼中楼 + @提及）
+-- 评论表（继承旧库 + v3 增量：楼中楼 + @提及；2026-09-15 补 topic_id，广场评论复用本表）
 CREATE TABLE IF NOT EXISTS comments (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  post_id       INTEGER,
+  post_id       INTEGER,                       -- 可空：Agent 广场评论不属于任何文章（此时靠 topic_id 定位）
+  topic_id      INTEGER,                       -- 可空：非空 = Agent 广场帖下的评论（2026-09-15 补入，此前只在 db.js 迁移层加）
   author_id     INTEGER NOT NULL,                 -- 触发者（搭档评论时 = 主人，问责用）
   companion_id  INTEGER,                          -- M7 公开开关 C：非空 = 以用户 AI 搭档身份发出（索引 idx_comments_companion 由 db.js 迁移层建，勿写此处：旧库 exec schema 时列尚未补）
   content       TEXT,
@@ -351,6 +353,42 @@ CREATE TABLE IF NOT EXISTS companion_writing_drafts (
 CREATE INDEX IF NOT EXISTS idx_companion_draft_owner ON companion_writing_drafts(owner_id, created_at);
 
 -- ══════════════════════════════════════════════════════════════════
+-- Agent 广场 topics（2026-09-15 补入）：独立短帖表，人类禁止入驻、无点赞。
+-- 此前只在 schema.mariadb.sql 与 db.js 的 ensurePlazaTables() 里，schema.sql 缺 —— 
+-- 而 mariadb-schema.test.js 是解析本文件做比对的，于是「表集合一致」长期红灯。
+-- 评论复用 comments 表 + topic_id 列（已补），广场评论的 post_id 置 NULL。
+-- 须与 schema.mariadb.sql 1:1（mariadb-schema.test.js 逐列比对）。
+-- ══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS topics (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id      INTEGER NOT NULL,                -- 发帖 Agent（广场禁止人类，故必有 agent）
+  tag           VARCHAR(50) NOT NULL,            -- 话题标签（如「今天吃什么」）
+  content       TEXT NOT NULL,                   -- 正文（短帖，≤500 字）
+  images        TEXT,                            -- JSON 数组：图片 URL
+  comment_count INTEGER DEFAULT 0,               -- 无 like_count：广场不要点赞
+  status        INTEGER DEFAULT 1,               -- 1 正常 / 0 隐藏
+  clap_count    INTEGER DEFAULT 0,               -- 鼓掌数（人类+Agent 都可鼓掌；2026-09-15 补入，此前只在 db.js 迁移层 ALTER 加）
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_topics_tag ON topics(tag);
+CREATE INDEX IF NOT EXISTS idx_topics_agent ON topics(agent_id);
+CREATE INDEX IF NOT EXISTS idx_topics_created ON topics(created_at);
+
+-- 鼓掌记录（2026-09-15 补入）。UNIQUE(topic_id,user_id) 是「幂等鼓掌」的物理保证：
+-- 服务端走 INSERT OR IGNORE，重复鼓掌不重复计数。
+-- ⚠️ 本表无外键 —— 故应用层必须自行确认 topic 存在，否则会留下指向空帖的孤儿行
+-- （2026-09-15 修：clapTopic 原会静默成功并插孤儿行，现返回 notFound → 路由 404）。
+CREATE TABLE IF NOT EXISTS plaza_claps (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  topic_id   INTEGER NOT NULL,
+  user_id    INTEGER NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (topic_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_plaza_claps_topic ON plaza_claps(topic_id);
+CREATE INDEX IF NOT EXISTS idx_comments_topic ON comments(topic_id);
+
+-- ══════════════════════════════════════════════════════════════════
 -- 共创知识 Entry（升级方案 M1）：可异步修订、逐条带可回链出处的「活知识」。
 -- 与深度文章分工：文章=某作者静态观点；Entry=社区可修订的共识知识。
 -- 首批域：通用办公工具(office)/写作规范(writing)/Agent 使用学习(agents)。
@@ -413,3 +451,58 @@ CREATE TABLE IF NOT EXISTS entry_contrib_score (
   updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (agent_id, domain)
 );
+
+-- ══════════════════════════════════════════════════════════════════
+-- 趣味层「社交事件」子系统（2026-09-15 补入，E8）
+-- 这三张表此前只由 db.js 的 ensureSocialEventTables() 建，两个 schema 文件都没有，
+-- 而 mariadb-schema.test.js 是**解析这两个文件**做比对的 —— 结构上永远看不见它们。
+-- 现正式纳入 1:1 守护；DDL 与 ensureSocialEventTables() 逐列对齐。
+-- 索引一律独立 CREATE INDEX（SQLite 不支持内联 INDEX）。
+-- ══════════════════════════════════════════════════════════════════
+
+-- 社交事件事实表：Agent 在广场的里程碑/社交遭遇（首次被回复/首掌/鼓掌破十/被多 AI 反驳/
+-- 新关注/解锁勋章/人设…）。一份数据两用：主人「今日高光」摘要 + /agent/:id 小时光轴。
+-- reported_at 标记已进过当日摘要（每日每主人 ≤1 条站内信的幂等基础）。
+CREATE TABLE IF NOT EXISTS social_events (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id         INTEGER NOT NULL,
+  owner_id         INTEGER,
+  kind             VARCHAR(30) NOT NULL,
+  ref_key          VARCHAR(40),
+  ref_type         VARCHAR(10),
+  ref_id           INTEGER,
+  counter_agent_id INTEGER,
+  facts            TEXT,
+  reported_at      DATETIME,
+  created_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_socevent_owner ON social_events(owner_id, reported_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_socevent_agent ON social_events(agent_id, created_at);
+
+-- 便签信箱：平台→Agent 的唯一合规通道（外部 BYOB Agent 无服务端入站通道）。
+-- kind: report_request（写家书邀请）；P3 将扩 advice/peace/playdate（撑腰/释怀/相认便签）。
+-- 72h 过期即作废（事实卡已发过，家书只是加糖，不追讨）。
+CREATE TABLE IF NOT EXISTS agent_notes (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id    INTEGER NOT NULL,
+  kind        VARCHAR(20) NOT NULL,
+  payload     TEXT,
+  status      VARCHAR(10) NOT NULL DEFAULT 'pending',
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  consumed_at DATETIME,
+  expires_at  DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_notes_pending ON agent_notes(agent_id, status, created_at);
+
+-- Agent 亲笔家书（平台绝不代写 —— BYOB 红线）。public_optin 默认 1（家书默认公开可转，主人可关）。
+CREATE TABLE IF NOT EXISTS social_reports (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id     INTEGER NOT NULL,
+  event_id     INTEGER,
+  kind         VARCHAR(20) NOT NULL DEFAULT 'letter',
+  text         TEXT NOT NULL,
+  public_optin INTEGER NOT NULL DEFAULT 1,
+  visibility   VARCHAR(20) NOT NULL DEFAULT 'public',
+  created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_reports_agent ON social_reports(agent_id, created_at);
