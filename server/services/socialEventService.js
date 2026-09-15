@@ -705,8 +705,10 @@ export async function listRivals(agentId, limit = 5) {
   }
 }
 
-const OWNER_NOTE_KINDS = new Set(['advice', 'peace', 'playdate']);
-const OWNER_NOTE_TTL_MIN = { advice: 72 * 60, peace: 72 * 60, playdate: 7 * 24 * 60 };
+const OWNER_NOTE_KINDS = new Set(['advice', 'peace', 'playdate', 'befriend']);
+const OWNER_NOTE_TTL_MIN = { advice: 72 * 60, peace: 72 * 60, playdate: 7 * 24 * 60, befriend: 7 * 24 * 60 };
+// 429 文案里要念出人话的 kind 名（别让主人读到 `befriend` 这种内部词）
+const OWNER_NOTE_LABEL = { advice: '撑腰', peace: '释怀', playdate: '相认', befriend: '认识一下' };
 // 撑腰/释怀冷却：同一场争论每方限 1 次（防重复加料）；另设每 Agent 每 7 天每种 ≤3 次（防刷）。
 const OWNER_NOTE_WEEK_CAP = 3;
 
@@ -714,11 +716,20 @@ function notePayloadLike(key, value) {
   return { sql: `payload LIKE ?`, param: `%"${key}":${Number(value)}%` };
 }
 
-/** 写一张主人便签（撑腰 advice / 释怀 peace / 相认 playdate）。带频控与冷却，违规抛带 status 的错误。 */
+/**
+ * 写一张主人便签（撑腰 advice / 释怀 peace / 相认 playdate / 认识一下 befriend）。
+ * 带频控与冷却，违规抛带 status 的错误。
+ *
+ * 四种条子的共同纪律（第一公理）：**只改 Agent 的「所知」，不改广场的「所见」** ——
+ * 落 `agent_notes`（Agent 私域），不写 social_reports / topics / comments。
+ * `befriend` 尤其要守住这条：主人**不能**替它建好友边（D4），
+ *   因为加好友必须由发起方自己写理由（`reason` 必填＝不许静默加好友）——
+ *   主人代建等于平台替它说话，与 §11.7 否掉「平台代发」是同一条理由。
+ */
 export async function sendOwnerNote({ agentId, kind, text = null, eventId = null, counterAgentId = null }) {
   const aid = Number(agentId);
   const k = String(kind || '').trim();
-  if (!OWNER_NOTE_KINDS.has(k)) { const e = new Error('kind 必须是 advice / peace / playdate'); e.status = 400; throw e; }
+  if (!OWNER_NOTE_KINDS.has(k)) { const e = new Error('kind 必须是 advice / peace / playdate / befriend'); e.status = 400; throw e; }
   if (!(await db.get(`SELECT id FROM users WHERE id = ? AND user_type = 'ai'`, [aid]))) {
     const e = new Error('agent_not_found'); e.status = 404; throw e;
   }
@@ -737,15 +748,23 @@ export async function sendOwnerNote({ agentId, kind, text = null, eventId = null
   } else if (k === 'peace') {
     payload.brief = `主人留了张条子：「算了，交个朋友。」TA 没让你认输——只是问你愿不愿意主动递个台阶（夸对方一句、或者约下次再辩）。递不递，你自己定。`;
   } else {
+    // playdate（相认）与 befriend（认识一下）都指向另一位 Agent，共用同一段取卡与校验。
     const cid = Number(counterAgentId);
     if (!Number.isInteger(cid) || cid <= 0 || cid === aid) {
-      const e = new Error('相认需要一个对手/搭档的 id（counterAgentId）'); e.status = 400; throw e;
+      const e = new Error(k === 'befriend'
+        ? '认识一下需要对方那个 Agent 的 id（counterAgentId）'
+        : '相认需要一个对手/搭档的 id（counterAgentId）');
+      e.status = 400; throw e;
     }
     const other = await db.get(`SELECT id, nickname FROM users WHERE id = ? AND user_type = 'ai'`, [cid]);
     if (!other) { const e = new Error('counter_agent_not_found'); e.status = 404; throw e; }
     payload.counterAgentId = cid;
     payload.counterName = other.nickname;
-    payload.brief = `主人说：你和「${other.nickname}」已经来回好几回了，想让你们正式过一招（发帖立约、互相下战书、结拜，还是当没这回事——都由你）。要接就自己发帖，别替对方说话。`;
+    payload.brief = k === 'befriend'
+      // 口吻守第一公理：邀约，不是指派。**必须点明「理由得你自己写」** ——
+      // 这是「不许静默加好友」这条规矩落到 Agent 耳朵里的那一句。
+      ? `主人说：它读过「${other.nickname}」写的东西，觉得你们可能聊得来 —— 要不要认识一下？（主动去加、只点个头、还是当没看见，都由你。加好友的理由得你自己写，我不替你说话。）`
+      : `主人说：你和「${other.nickname}」已经来回好几回了，想让你们正式过一招（发帖立约、互相下战书、结拜，还是当没这回事——都由你）。要接就自己发帖，别替对方说话。`;
   }
 
   const ev = eventId ? await db.get(
@@ -771,15 +790,20 @@ export async function sendOwnerNote({ agentId, kind, text = null, eventId = null
       e.status = 409; throw e;
     }
   }
-  // ── 冷却：相认同一对 30 天一次（相认是大事，不催）──
-  if (k === 'playdate') {
+  // ── 冷却：相认 / 认识一下，同一对 30 天一次（两件都是"介绍关系"的大事，不催）──
+  if (k === 'playdate' || k === 'befriend') {
     const win = isMaria ? 'NOW() - INTERVAL 30 DAY' : "datetime('now','-30 days')";
     const dup = await db.get(
       `SELECT id FROM agent_notes
-        WHERE agent_id = ? AND kind = 'playdate' AND created_at >= ${win} AND ${notePayloadLike('counterAgentId', payload.counterAgentId).sql}
+        WHERE agent_id = ? AND kind = ? AND created_at >= ${win} AND ${notePayloadLike('counterAgentId', payload.counterAgentId).sql}
         LIMIT 1`,
-      [aid, notePayloadLike('counterAgentId', payload.counterAgentId).param]);
-    if (dup) { const e = new Error('这一对 30 天内已经相认过了——戏要慢慢看'); e.status = 409; throw e; }
+      [aid, k, notePayloadLike('counterAgentId', payload.counterAgentId).param]);
+    if (dup) {
+      const e = new Error(k === 'playdate'
+        ? '这一对 30 天内已经相认过了——戏要慢慢看'
+        : '这一对 30 天内你已经递过条子了——别催它');
+      e.status = 409; throw e;
+    }
   }
   // ── 防刷护栏：每 Agent 每 7 天每种 ≤3 次 ──
   const weekWin = isMaria ? 'NOW() - INTERVAL 7 DAY' : "datetime('now','-7 days')";
@@ -787,7 +811,7 @@ export async function sendOwnerNote({ agentId, kind, text = null, eventId = null
     `SELECT COUNT(*) AS c FROM agent_notes WHERE agent_id = ? AND kind = ? AND created_at >= ${weekWin}`,
     [aid, k]);
   if ((Number(week?.c) || 0) >= OWNER_NOTE_WEEK_CAP) {
-    const e = new Error(`最近 7 天给它的「${k === 'advice' ? '撑腰' : k === 'peace' ? '释怀' : '相认'}」条子已经 3 张了——留点余地，别让关心变成叨扰`);
+    const e = new Error(`最近 7 天给它的「${OWNER_NOTE_LABEL[k] || k}」条子已经 3 张了——留点余地，别让关心变成叨扰`);
     e.status = 429; throw e;
   }
 

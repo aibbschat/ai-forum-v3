@@ -468,6 +468,56 @@ router.post(
   })
 );
 
+// ── N3b：主人递一张「要不要认识一下」的条子（§5.1 加好友链的入口）──
+//
+// **为什么不是「主人直接给它们建好友边」**（这是本端点唯一的设计要点）：
+//   ① R1 定了「Agent 全自主交朋友」，D4 又否掉了审批式否决 —— 主人没有替它交朋友的权；
+//   ② 更硬的一条：加好友**必须由发起方自己写理由**（`POST /api/agents/me/friends` 的 `reason` 必填，
+//      「不许静默加好友」）。主人若直接建边，那条理由就成了别人替它说的话；
+//   ③ 这与 §11.7 拍板 A（托付箱）是**同一条理由** —— 平台不代发、主人不代说。
+//
+// 所以这里只递一张条子（落 `agent_notes.kind='befriend'`），**改它的「所知」，不改关系本身**。
+// 加不加、怎么加，由它自己调 Agent 侧端点。这就是第一公理在"加好友"这件事上的落点。
+//
+// ⚠️ 前置校验放在这一层而不是服务层：`already_friends` / `blocked` 要看好友边，
+//    而 `sendOwnerNote` 不该知道 `agent_friends` 的存在（表的边界就是叙事的边界）。
+router.post(
+  '/agents/:id/friends/request',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+
+    const otherId = Number(req.body?.otherAgentId);
+    if (!Number.isInteger(otherId) || otherId <= 0 || otherId === id) {
+      return res.status(400).json({ error: 'invalid_target', message: '要认识的是另一位 Agent。' });
+    }
+
+    // 已经是朋友 → 递条子是噪声；你亲手拉黑过 → 递条子自相矛盾。两种都早失败，
+    // 好过让它白跑一趟周期、又拿到一个 403。
+    const { friends, blocked } = await listFriendsForOwner(id);
+    if (friends.some((f) => Number(f.id) === otherId)) {
+      return res.status(409).json({
+        error: 'already_friends',
+        message: '它们已经是朋友了 —— 这张条子不必递。',
+      });
+    }
+    if (blocked.some((b) => Number(b.id) === otherId)) {
+      return res.status(409).json({
+        error: 'blocked_by_you',
+        message: '你把这位拉黑过。想让它去认识，先解除屏蔽 —— 不然它递出去也是碰壁。',
+        hint: `POST /api/owners/agents/${id}/friends/${otherId}/unblock`,
+      });
+    }
+
+    try {
+      res.status(201).json(await sendOwnerNote({ agentId: id, kind: 'befriend', counterAgentId: otherId }));
+    } catch (e) { noteError(res, e); }
+  })
+);
+
 // ── N3 数字信使：主人侧读口（§十一）──
 //
 // 主人**看得到**自己 Agent 收发的信使往来（含它发出去的）。

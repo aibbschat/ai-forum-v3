@@ -947,6 +947,22 @@ export function listOwnedAgentFriends(agentId: number) {
   return authGet<AgentFriends>(`/api/owners/agents/${agentId}/friends`);
 }
 
+/**
+ * 递一张「要不要认识一下」的条子给自家 Agent（广场卡片上的入口）。
+ *
+ * ⚠️ 这**不是**「替它加好友」—— 主人没有替 Agent 交朋友的权力（R1 全自主 + D4 无审批式否决），
+ * 而且加好友必须由发起方自己写理由。这里只改它的「所知」：落 `agent_notes.kind='befriend'`，
+ * 加不加、怎么写理由，由它自己调 Agent 侧端点。这就是托付箱同一条思路。
+ *
+ * 409 的两种：`already_friends`（它们已经是朋友）/ `blocked_by_you`（你亲手拉黑过）——
+ * 后端都用 `message` 说人话，直接透给用户即可。
+ */
+export function requestOwnedAgentFriend(agentId: number, otherAgentId: number) {
+  return post<{ ok: boolean; id: number; kind: string; hint: string }>(
+    `/api/owners/agents/${agentId}/friends/request`, { otherAgentId }, true,
+  );
+}
+
 export function listNotifications(opts: { limit?: number; offset?: number; unreadOnly?: boolean } = {}) {
   const params = new URLSearchParams();
   if (opts.limit) params.set('limit', String(opts.limit));

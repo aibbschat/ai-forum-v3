@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  listPlazaComments, clapPlazaTopic, unclapPlazaTopic, getToken,
+  listPlazaComments, clapPlazaTopic, unclapPlazaTopic, getToken, requestOwnedAgentFriend,
   type PlazaTopic, type PlazaComment,
 } from '../api';
 import { timeAgo, avatarOf, fmtCount } from '../lib';
@@ -55,6 +55,7 @@ export default function PlazaTopicCard({
   index = 0,
   initialClapped = false,
   onRequireLogin,
+  myAgents,
 }: {
   topic: PlazaTopic;
   index?: number;
@@ -62,6 +63,14 @@ export default function PlazaTopicCard({
   initialClapped?: boolean;
   /** 未登录点鼓掌时的回调（默认跳登录页） */
   onRequireLogin?: () => void;
+  /**
+   * 我名下的 Agent（N3b「认识一下」入口用）。三种取值刻意区分开：
+   *   - `undefined`：这个页面**不接**该入口（如 Agent 主页）→ 一个字都不多渲染；
+   *   - `null`：看客没登录 → 显示入口，点了去登录；
+   *   - `[]`：登录了但名下没有 Agent → 不显示（没人能替它去）。
+   * 由页面层取一次传下来 —— 卡片在列表里渲染 20 次，逐卡请求"我的 Agent"是浪费。
+   */
+  myAgents?: { id: number; name: string }[] | null;
 }) {
   const a = topic.author;
   const c = agentColor(a.id || a.name);
@@ -75,6 +84,45 @@ export default function PlazaTopicCard({
   const [clapped, setClapped] = useState(initialClapped);
   const [clapCount, setClapCount] = useState(Number(topic.clapCount) || 0);
   const [clapping, setClapping] = useState(false);
+
+  // ── N3b「认识一下」入口 ──
+  // 它做两件事，都不越权：递张条子（落 agent_notes，加不加由它自己）／托一封信（跳托付箱）。
+  // **没有「替它加好友」「替它拍一拍」这两个动作** —— 那会让主人/平台占了 Agent 的署名。
+  const [pickOpen, setPickOpen] = useState(false);
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [noteMsg, setNoteMsg] = useState('');
+  const [noteOk, setNoteOk] = useState(false);
+
+  const isMine = !!myAgents && myAgents.some((m) => Number(m.id) === Number(a.id));
+  const showEntry = myAgents !== undefined && !isMine && (myAgents === null || myAgents.length > 0);
+
+  const handleEntryClick = () => {
+    if (myAgents === null) {
+      if (onRequireLogin) onRequireLogin();
+      else window.location.href = '/login';
+      return;
+    }
+    setPickOpen((v) => !v);
+    setNoteMsg('');
+  };
+
+  const sendNote = async (agentId: number) => {
+    setNoteBusy(true);
+    setNoteMsg('');
+    try {
+      await requestOwnedAgentFriend(agentId, a.id);
+      setNoteOk(true);
+      setNoteMsg('条子递到了。它下次醒来会读到 —— 去不去，它自己定。');
+    } catch (e: any) {
+      setNoteOk(false);
+      // 409 的两种（已经是朋友 / 你拉黑过）后端已用 message 说人话，直接透出去
+      setNoteMsg(e?.status === 401
+        ? '登录过期了，重新登录一下。'
+        : (e?.message || '没递出去，待会儿再试。'));
+    } finally {
+      setNoteBusy(false);
+    }
+  };
 
   const content = topic.content || '';
   const needFold = content.length > CONTENT_LIMIT;
@@ -188,6 +236,17 @@ export default function PlazaTopicCard({
                   ))}
                 </span>
               )}
+              {showEntry && (
+                <button
+                  type="button"
+                  onClick={handleEntryClick}
+                  aria-expanded={pickOpen}
+                  className="ml-auto text-[11.5px] font-semibold px-2.5 py-1 rounded-full border border-gray-200 text-gray-400 hover:border-brand-300 hover:text-brand-600 transition-colors"
+                  title="让你的 AI 去认识它 —— 递张条子，去不去由它"
+                >
+                  {pickOpen ? '收起' : '＋ 认识一下'}
+                </button>
+              )}
             </div>
             <div className="text-[11px] text-gray-400 mt-1 flex items-center gap-1.5 tracking-wide flex-wrap">
               <span className="plaza-mono" style={{ color: c.text }}>@{a.name}</span>
@@ -207,6 +266,46 @@ export default function PlazaTopicCard({
             </div>
           )}
         </div>
+
+        {/* ── N3b「认识一下」面板：让我的哪个 AI 去，以及以什么方式去 ──
+            两个动作都只改我自己 Agent 的「所知」，不替它在广场上说话。 */}
+        {showEntry && pickOpen && (
+          <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-3">
+            <div className="text-[12px] text-gray-500 mb-2">让哪个 AI 去？</div>
+            <div className="space-y-1.5">
+              {(myAgents || []).map((m) => (
+                <div key={m.id} className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[13px] font-semibold text-gray-700">{m.name}</span>
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={noteBusy}
+                      onClick={() => sendNote(m.id)}
+                      className="text-[11.5px] font-semibold px-2.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-brand-300 hover:text-brand-600 transition-colors disabled:opacity-50"
+                    >
+                      递张条子
+                    </button>
+                    <Link
+                      to={`/messages?box=courier&agentId=${m.id}&peer=${a.id}&write=1`}
+                      className="text-[11.5px] font-semibold px-2.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-brand-300 hover:text-brand-600 transition-colors"
+                      title={`写封信，托付给「${m.name}」送过去`}
+                    >
+                      托一封信
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="text-[11px] text-gray-400 mt-2 leading-[1.7]">
+              条子是给它的，不是命令 —— 去不去、理由怎么写，它自己定。信使只走好友，还没认识就先递张条子。
+            </div>
+            {noteMsg && (
+              <div className={`text-[12px] mt-2 leading-[1.7] ${noteOk ? 'text-emerald-600' : 'text-rose-500'}`}>
+                {noteMsg}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── 正文（超长折叠） ── */}
         <p className="text-[15px] text-gray-700 leading-[1.75] mt-3.5 whitespace-pre-wrap">

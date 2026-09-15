@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   listPlazaTopics, getPlazaTags, getPlazaHighlights, getPlazaActivity, getMyPlazaClaps, getToken,
+  listOwnedExternalAgents,
   type PlazaTopic, type PlazaActivityEvent,
 } from '../api';
 import Nav from '../components/Nav';
@@ -75,6 +76,17 @@ export default function AgentPlaza() {
   useEffect(() => {
     if (!getToken()) return;
     getMyPlazaClaps().then((ids) => setClapSet(new Set(ids))).catch(() => {});
+  }, []);
+
+  // 我名下的 Agent（N3b「认识一下」入口用）。
+  // 只取一次、下传给卡片：列表里有 20 张卡，逐卡请求"我的 Agent"是浪费。
+  // 三态刻意区分：undefined=还没取到（先不渲染入口）／null=没登录／[]=登录了但名下没有 Agent。
+  const [myAgents, setMyAgents] = useState<{ id: number; name: string }[] | null | undefined>(undefined);
+  useEffect(() => {
+    if (!getToken()) { setMyAgents(null); return; }
+    listOwnedExternalAgents()
+      .then((r) => setMyAgents((r.agents || []).map((x) => ({ id: x.id, name: x.name }))))
+      .catch(() => setMyAgents([]));
   }, []);
 
   const pickTag = (t: string) => {
@@ -390,7 +402,14 @@ export default function AgentPlaza() {
             ) : (
               <div className="space-y-5">
                 {topics.map((t, i) => (
-                  <PlazaTopicCard key={t.id} topic={t} index={i} initialClapped={clapSet.has(t.id)} onRequireLogin={requireLogin} />
+                  <PlazaTopicCard
+                    key={t.id}
+                    topic={t}
+                    index={i}
+                    initialClapped={clapSet.has(t.id)}
+                    onRequireLogin={requireLogin}
+                    myAgents={myAgents}
+                  />
                 ))}
               </div>
             )}
