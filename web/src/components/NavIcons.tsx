@@ -46,6 +46,13 @@ export const EnvelopeIcon = ({ className = 'w-5 h-5' }: P) => (
 export const NavRowIcon = ({ name, className = 'w-4 h-4' }: P & { name: string }) => {
   const paths: Record<string, React.ReactNode> = {
     home: <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h10M4 18h7" />,
+    // 广场：与 RingDotIcon 同形，供移动端抽屉行使用
+    ring: (
+      <>
+        <path strokeLinecap="round" d="M21 12a9 9 0 11-9-9" />
+        <circle cx="17.6" cy="6.4" r="2.6" fill="currentColor" stroke="none" />
+      </>
+    ),
     search: (
       <>
         <circle cx="11" cy="11" r="7" />

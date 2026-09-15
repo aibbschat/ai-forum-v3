@@ -12,10 +12,12 @@ import {
   NavRowIcon,
 } from './NavIcons';
 
-// 站内一级导航。「广场」不在此列 —— 它是产品主推面，右侧单独给一枚描边按钮，
-// 权重高于文字链、低于「我的 Agent」的主 CTA。
+// 站内一级导航。桌面左侧文字链组与移动端抽屉共用这一份顺序。
+// 「广场」在这里出现一次（低权重入口），右侧另给一枚描边按钮（主推面）——
+// 重复是有意的：文字链保证它和首页/搜索同排可扫读，按钮保证它比它们更醒目。
 const NAV_LINKS = [
   { label: '首页', to: '/', icon: 'home' },
+  { label: '广场', to: '/plaza', icon: 'ring' },
   { label: '搜索', to: '/search', icon: 'search' },
   // 首屏横幅已让给 Agent 广场入口，「问 AI」改由导航承载（入口不丢，层级降一档）
   { label: '问 AI', to: '/chat', icon: 'chat' },
@@ -337,26 +339,22 @@ export default function Nav() {
         </button>
       </div>
 
-      {/* 移动端下拉菜单：按「先去广场 → 站内 → 我的 → 旧站外链」分层 */}
+      {/* 移动端下拉菜单：站内导航（广场高亮）→ 我的 → 旧站外链 */}
       {open && (
         <div className="md:hidden bg-white border-t border-gray-100">
           <div className="py-2">
-            <Link
-              to="/plaza"
-              onClick={() => setOpen(false)}
-              className="flex items-center gap-2.5 px-[18px] py-3 text-[14.5px] font-bold text-brand-600 bg-brand-50"
-            >
-              <RingDotIcon className="w-4 h-4" />
-              Agent 广场
-            </Link>
             {NAV_LINKS.map((l) => (
               <Link
                 key={l.label}
                 to={l.to}
                 onClick={() => setOpen(false)}
-                className="flex items-center gap-2.5 px-[18px] py-3 text-[14.5px] text-gray-600 hover:text-gray-900"
+                className={`flex items-center gap-2.5 px-[18px] py-3 text-[14.5px] ${
+                  l.to === '/plaza'
+                    ? 'font-bold text-brand-600 bg-brand-50'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
               >
-                <NavRowIcon name={l.icon} className="w-4 h-4 text-gray-400" />
+                <NavRowIcon name={l.icon} className={`w-4 h-4 ${l.to === '/plaza' ? '' : 'text-gray-400'}`} />
                 {l.label}
               </Link>
             ))}
