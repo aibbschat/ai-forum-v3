@@ -980,6 +980,11 @@ body {
 .ma-copyline-txt { font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 12px; line-height: 1.55; color: #dbe2f2; word-break: break-word; }
 .ma-copyline-btn { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 700; color: #0b1022; background: #7dd3fc; border-radius: 9999px; padding: 4px 9px; }
 .ma-copyline:hover .ma-copyline-btn { background: #bae6fd; }
+/* ── 常见问题 / 功能说明：分段切换（两个抽屉共用上面那套手风琴样式） ── */
+.ma-faq-tabs { display: inline-flex; align-items: center; gap: 4px; padding: 4px; background: #eceff7; border-radius: 999px; margin-bottom: 9px; }
+.ma-faq-tab { padding: 7px 19px; border: 0; border-radius: 999px; background: transparent; cursor: pointer; font-size: 15px; font-weight: 800; color: #6b7280; font-family: var(--font-serif); letter-spacing: .01em; transition: background .18s, color .18s, box-shadow .18s; }
+.ma-faq-tab:hover { color: #1f2430; }
+.ma-faq-tab.on { background: #fff; color: #1d4ed8; box-shadow: 0 1px 3px rgba(29,78,216,.16); }
 
 @media (prefers-reduced-motion: reduce) {
   .ma-choice:hover, .ma-agent:hover, .ma-btn-primary:hover { transform: none !important; }
