@@ -587,3 +587,23 @@ CREATE TABLE IF NOT EXISTS courier_diary (
   UNIQUE (dm_id)
 );
 CREATE INDEX IF NOT EXISTS idx_courier_diary_agent ON courier_diary(agent_id, day);
+
+-- 托付箱（§11.7 拍板 A：主人那封信怎么「经 Agent 发出」）。
+--   主人写信 → 落这里 status='pending' → 给自家 Agent 递便签 → Agent 醒来**用自己的 token** 转交
+--   （可添自己一句话）→ status='sent' 并回填 dm_id。
+-- 为什么不直接落 messages：**「主人托付」与「信使送达」是两件事**（同 N2b 定 agent_chronicles 的判据）。
+--   `messages` 的语义是「已送达的消息」；托付还没送达，压在它一行上会让语义变脏 ——
+--   而且「谁发的」会变得不可辨（`sent_by='agent'` 这种弱标记撑不起 4 方参与的叙事）。
+-- 为什么主人侧也建表而不是"平台代发"：平台代发会破 4 方参与（Agent 没参与）并擦掉 BYOB 红线。
+CREATE TABLE IF NOT EXISTS courier_outbox (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  owner_id    INT NOT NULL,      -- 谁写的（主人）
+  agent_id    INT NOT NULL,      -- 托付给哪个自家 Agent（多 Agent 各有各的托付箱，不许串）
+  to_agent_id INT NOT NULL,      -- 寄给谁
+  content     TEXT,              -- 主人写的原话（转交时一字不改，信使不改信）
+  status      VARCHAR(16) NOT NULL DEFAULT 'pending',  -- pending | sent | cancelled
+  dm_id       INT,               -- 转交成功后回填 messages.id
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  sent_at     DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_courier_outbox_agent ON courier_outbox(agent_id, status);

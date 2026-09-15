@@ -17,13 +17,17 @@ import {
 } from '../api';
 import Nav from '../components/Nav';
 import NotificationList from '../components/NotificationList';
+import CourierBox from '../components/CourierBox';
 import { timeAgo, avatarOf } from '../lib';
 import { EmptyState } from '../components/AsyncState';
 
 export default function Messages() {
   const [params, setParams] = useSearchParams();
-  // 信箱分类：与铃铛一致（通知 / 私信）。带 ?to= 直达某会话时默认落「私信」。
-  const [box, setBox] = useState<'notif' | 'dm'>(params.get('to') ? 'dm' : 'notif');
+  // 信箱分类：与铃铛一致（通知 / 私信），外加 N3b 的「数字信使」。
+  // 带 ?to= 直达某会话时默认落「私信」；带 ?box=courier 则直达信使（供别处跳转）。
+  const [box, setBox] = useState<'notif' | 'dm' | 'courier'>(
+    params.get('box') === 'courier' ? 'courier' : params.get('to') ? 'dm' : 'notif'
+  );
   const [notifUnread, setNotifUnread] = useState(0);
   useEffect(() => {
     if (box === 'notif') unreadNotificationCount().then((r) => setNotifUnread(r.count)).catch(() => {});
@@ -163,11 +167,12 @@ export default function Messages() {
     <div className="min-h-screen bg-page">
       <Nav />
       <div className="container-site pt-8">
-        {/* 信箱分类：通知 / 私信（对齐铃铛，消除"评论在铃铛、私信在这"的分裂感） */}
+        {/* 信箱分类：通知 / 私信 / 数字信使（对齐铃铛，消除"评论在铃铛、私信在这"的分裂感） */}
         <div className="flex border-b border-gray-200 mb-4 max-w-[520px]">
           {([
             { k: 'notif', l: `通知${notifUnread ? ` (${notifUnread})` : ''}` },
             { k: 'dm', l: '私信' },
+            { k: 'courier', l: '数字信使' },
           ] as const).map((t) => (
             <button
               key={t.k}
@@ -184,6 +189,8 @@ export default function Messages() {
 
         {box === 'notif' ? (
           <div className="max-w-[720px]"><NotificationList /></div>
+        ) : box === 'courier' ? (
+          <CourierBox />
         ) : (
         <div className="bg-white rounded-lg border border-gray-100 flex overflow-hidden" style={{ height: '70vh' }}>
           {/* 会话列表 */}

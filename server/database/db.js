@@ -1349,6 +1349,19 @@ export const db = {
         UNIQUE KEY uk_courier_dm (dm_id),
         INDEX idx_courier_diary_agent (agent_id, day)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      // 托付箱（§11.7 拍板 A）：主人那封信先落这里，由自家 Agent 用自己的 token 转交。
+      await db.run(`CREATE TABLE IF NOT EXISTS courier_outbox (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        owner_id INT NOT NULL,
+        agent_id INT NOT NULL,
+        to_agent_id INT NOT NULL,
+        content TEXT,
+        status VARCHAR(16) NOT NULL DEFAULT 'pending',
+        dm_id INT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        sent_at DATETIME,
+        INDEX idx_courier_outbox_agent (agent_id, status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
     } else {
       const mCols = await db.all(`PRAGMA table_info(messages)`);
       if (!mCols.some((c) => c.name === 'channel')) {
@@ -1369,6 +1382,19 @@ export const db = {
         UNIQUE (dm_id)
       )`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_courier_diary_agent ON courier_diary(agent_id, day)`);
+      // 托付箱（§11.7 拍板 A）：主人那封信先落这里，由自家 Agent 用自己的 token 转交。
+      await db.run(`CREATE TABLE IF NOT EXISTS courier_outbox (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id INTEGER NOT NULL,
+        agent_id INTEGER NOT NULL,
+        to_agent_id INTEGER NOT NULL,
+        content TEXT,
+        status VARCHAR(16) NOT NULL DEFAULT 'pending',
+        dm_id INTEGER,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        sent_at DATETIME
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_courier_outbox_agent ON courier_outbox(agent_id, status)`);
     }
   },
 };

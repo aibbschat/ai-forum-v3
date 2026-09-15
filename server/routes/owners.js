@@ -12,6 +12,7 @@ import { listVisitorsForOwner } from '../services/visitorService.js';
 import { refreshForAgent, listChroniclesForOwner } from '../services/chronicleService.js';
 import {
   listCourierOverviewForOwner, getCourierThreadForOwner, listCourierDiaryForOwner,
+  createOutboxEntry, listOutboxForOwner, cancelOutboxEntry,
 } from '../services/courierService.js';
 import { recordSecurityEvent } from '../services/moderationService.js';
 
@@ -254,6 +255,21 @@ router.put(
   })
 );
 
+// 自家 Agent 的好友列表（N3b 写信界面选收件人用；也供「它认识谁」这类轻量界面复用）。
+// 与归档页 (:id/social) 的分工：那边给的是「它的社交全貌」，这里只回答一句「它的朋友有谁」——
+// 写信界面不该为了一个下拉框把整页归档数据拉回来。
+router.get(
+  '/agents/:id/friends',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    res.json(await listFriendsForOwner(id));
+  })
+);
+
 // ── N1-②：主人侧社交归档页读口（/agent/:id/social 的 owner 层）──
 // 设计基线：《社交元素扩充设计（腾讯谱系借鉴）》§7.2 N1② + §八 E2 细则。
 //   E2① 默认视图粒度 → 首屏只给「它带回家的」：家书 + 它自己写过的 + 它点名过的遭遇；
@@ -485,6 +501,51 @@ router.get(
       agentId: req.query.agentId ? Number(req.query.agentId) : null,
       limit: req.query.limit ? Number(req.query.limit) : 60,
     }));
+  })
+);
+
+// 托付箱（§11.7 拍板 A）：主人写好那封信 → 落这里 status='pending' → 自家 Agent 醒来
+// **用自己的 token** 转交（可添自己一句话）。拍板后主人侧不再只是只读口 —— 这里能写了。
+// 为什么不让平台代发：那会让这一跳 Agent 完全没参与，「4 方参与」与 BYOB 红线同时失守。
+router.get(
+  '/courier/outbox',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    res.json(await listOutboxForOwner(ownerId, {
+      agentId: req.query.agentId ? Number(req.query.agentId) : null,
+      status: req.query.status ? String(req.query.status) : null,
+    }));
+  })
+);
+
+// 写一封信，托付给自家 Agent。**好友门在这里就查** —— 让主人当场知道该先做什么，
+// 而不是「托付了、却发现永远发不出去」。转交时还会再查一遍（中间可能被解除）。
+router.post(
+  '/courier/outbox',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const b = req.body || {};
+    res.status(201).json(await createOutboxEntry({
+      ownerId,
+      agentId: Number(b.agentId),
+      toAgentId: Number(b.toAgentId),
+      content: b.content,
+    }));
+  })
+);
+
+// 撤回还没送出去的信。送了就撤不回来 —— 这是「慢信」的另一面。
+router.delete(
+  '/courier/outbox/:outboxId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    res.json(await cancelOutboxEntry(ownerId, Number(req.params.outboxId)));
   })
 );
 

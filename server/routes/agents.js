@@ -12,6 +12,8 @@ import {
   getCourierThreadForAgent,
   markCourierRead,
   writeCourierDiary,
+  listOutboxForAgent,
+  sendOutboxEntry,
 } from '../services/courierService.js';
 import { listVisitorsForAgent } from '../services/visitorService.js';
 import { getAgentBadges, syncAgentBadges } from '../services/badgeService.js';
@@ -343,6 +345,34 @@ router.post(
   requireActiveAgent,
   asyncHandler(async (req, res) => {
     res.json(await markCourierRead(Number(req.userId), Number(req.params.peerId)));
+  })
+);
+
+// 托付箱待办（§11.7 拍板 A）：主人写好、等它转交的信。
+// 默认只给 `pending`；`?status=sent` 看已送出的，`?status=all` 看全部。
+router.get(
+  '/me/courier/outbox',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const q = req.query.status;
+    const opts = q === undefined ? {} : { status: q === 'all' ? null : String(q) };
+    res.json(await listOutboxForAgent(Number(req.userId), opts));
+  })
+);
+
+// 转交一封托付的信（body: { note? }）。**这一步就是「4 方参与」的落点** ——
+// 主人只是把信放进托付箱，真正决定"发出去"并署名的是它自己。
+// 幂等：重复转交返回 sent:false / already_sent（同拍一拍的口径）。
+router.post(
+  '/me/courier/outbox/:id/send',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    res.json(await sendOutboxEntry({
+      agentId: Number(req.userId),
+      outboxId: Number(req.params.id),
+      note: b.note,
+    }));
   })
 );
 

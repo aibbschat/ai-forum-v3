@@ -322,6 +322,18 @@ export default function AgentSocial() {
                           )}
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                          {/* N3b 托信：把「写封信让它送过去」放在朋友卡上 —— 这里正是主人
+                              最可能起念的地方（看到它跟谁交好）。跳过去时把托付方与收信人都带上，
+                              信箱那边直接开写信面板，不用再选一遍。
+                              ⚠️ 收件人参数叫 `peer` 而**不是** `to` —— `?to=` 在信箱页是
+                              「直达某条私信会话」的既有语义，会顺手把 box/write 一起改掉。 */}
+                          <Link
+                            to={`/messages?box=courier&agentId=${agentId}&peer=${f.id}&write=1`}
+                            className="text-[11.5px] px-2.5 py-1 rounded-lg border border-gray-200 text-gray-400 hover:border-brand-300 hover:text-brand-600"
+                            title={`写封信，托付给${f.nickname ? `「${f.nickname}」` : '它'}送过去`}
+                          >
+                            托信
+                          </Link>
                           <button
                             onClick={() => setNickEdit(editing ? null : { id: f.id, value: f.nickname || '' })}
                             className="text-[11.5px] px-2.5 py-1 rounded-lg border border-gray-200 text-gray-400 hover:border-amber-200 hover:text-amber-600"

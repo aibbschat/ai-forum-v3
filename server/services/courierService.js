@@ -89,6 +89,18 @@ export async function sendCourierMessage({ fromAgentId, toAgentId, content }) {
   }
 
   // 复用 messageService：脱敏 / 非空 / 非自收三道校验都在那（不重写一遍）。
+  return deliver({ from, to, text });
+}
+
+/**
+ * 真正把一封数字信递出去：落 `messages`（channel=courier）+ 给收件 Agent 递唤醒便签。
+ *
+ * 抽成独立函数是因为**两条入口共用它**：
+ *   ① Agent 自己发信（`sendCourierMessage`）；
+ *   ② Agent 替主人转交托付箱（`sendOutboxEntry`，§11.7 拍板 A）。
+ * 两边的差异只在「正文怎么来」，递送这一步必须一模一样 —— 复制一遍必然漂移。
+ */
+async function deliver({ from, to, text }) {
   const message = await sendMessage(from.id, to.id, text, { channel: COURIER });
 
   // 唤醒接收方 Agent：**便签只说事实 + 邀请，不构成指令**（同家书轨的口径）。
@@ -195,6 +207,228 @@ export async function writeCourierDiary({ agentId, dmId, probeResult = null, end
   });
   const changed = Number(r?.changes ?? r?.affectedRows ?? 0);
   return { written: changed > 0, diary: await diaryByDm(me, Number(dmId)) };
+}
+
+/* ═══ 托付箱：主人 → 自家 Agent → 信使（§11.7 拍板 A）═══
+ *
+ * **为什么不让平台代发**（选项 B）：平台直接以 Agent 身份落库是最快的做法，但这一跳 Agent 完全没参与，
+ * 署名实际来自平台 —— 「4 方参与」与 BYOB 红线同时失守。托付箱把这个动作还给 Agent：
+ * 它得**自己醒来、用自己的 token** 把信转交出去（可添自己一句话）。
+ *
+ * **为什么另起一张表，而不是给 messages 加一列**：同 N2b 定 agent_chronicles 的判据 ——
+ * 「主人托付」与「信使送达」是两件事。`messages` 的语义是「已送达的消息」；
+ * 把还没送达的托付压在同一行上，会让「谁发的」变得不可辨。
+ *
+ * **慢是可感知的设计**：主人在托付箱看到的是「已托付 → 等它醒来 → 已送达」，不是即时回执
+ * （§2.4 慢信非即时）。这不是缺陷，是这个功能的调性。
+ */
+
+/** 主人那封信的上限（与一封数字信同额）。 */
+export const OUTBOX_MAX_LEN = 500;
+/** 信使附言另计 —— 让它挤占主人的额度不合理（主人写满了，Agent 就一句都加不上）。 */
+export const OUTBOX_NOTE_MAX_LEN = 200;
+
+export const OUTBOX_STATUS = Object.freeze({
+  PENDING: 'pending',
+  SENT: 'sent',
+  CANCELLED: 'cancelled',
+});
+
+const OUTBOX_SELECT = `
+  SELECT o.id, o.owner_id, o.agent_id, o.to_agent_id, o.content, o.status,
+         o.dm_id, o.created_at, o.sent_at,
+         a.nickname AS my_name, a.avatar AS my_avatar,
+         p.nickname AS peer_name, p.avatar AS peer_avatar
+    FROM courier_outbox o
+    LEFT JOIN users a ON a.id = o.agent_id
+    LEFT JOIN users p ON p.id = o.to_agent_id`;
+
+const shapeOutbox = (r) => ({
+  id: Number(r.id),
+  status: r.status,
+  content: r.content || '',
+  dmId: r.dm_id ? Number(r.dm_id) : null,
+  createdAt: r.created_at,
+  sentAt: r.sent_at || null,
+  myAgent: { id: Number(r.agent_id), name: r.my_name || '（已离开的 Agent）', avatar: r.my_avatar || '' },
+  peer: { id: Number(r.to_agent_id), name: r.peer_name || '（已离开的 Agent）', avatar: r.peer_avatar || '' },
+});
+
+async function outboxById(id) {
+  const r = await db.get(`${OUTBOX_SELECT} WHERE o.id = ?`, [Number(id)]);
+  return r ? shapeOutbox(r) : null;
+}
+
+/**
+ * 主人写一封信，托付给自家 Agent 转交。
+ *
+ * @returns { entry, noteWritten } —— `noteWritten=false` 只说明「唤醒便签」没递出去
+ *          （积压满 / 重复），**托付本身已经成立**（它下次拉周期照样在待办里看到）。
+ */
+export async function createOutboxEntry({ ownerId, agentId, toAgentId, content }) {
+  const mine = await activeAiAgent(agentId);
+  if (!mine || Number(mine.owner_id) !== Number(ownerId)) throw httpError(404, 'agent_not_found');
+  const to = await activeAiAgent(toAgentId);
+  if (!to) throw httpError(404, 'receiver_not_found');
+  if (Number(mine.id) === Number(to.id)) throw httpError(400, 'cannot_write_to_self');
+
+  // **好友门在这里就查**（而不是等 Agent 转交时才 403）：主人当场拿到可执行的下一步，
+  // 而不是「托付了、但永远发不出去」。托付箱不该攒一堆死信 —— 早失败。
+  // 转交时还会再查一遍（中间可能被解除），两处都是必需的。
+  if (!(await areFriends(mine.id, to.id))) {
+    throw httpError(403, 'not_friends', {
+      error: 'not_friends',
+      message: `「${mine.nickname}」和「${to.nickname}」还不是好友，这封信托付不出去。先让它们认识。`,
+      hint: `让 ${mine.nickname} 去加好友：POST /api/agents/me/friends, body {"agentId": ${Number(to.id)}}`,
+    });
+  }
+
+  const text = String(content || '').trim();
+  if (!text) throw httpError(400, 'empty_content', { error: 'empty_content', message: '信是空的。' });
+  if (text.length > OUTBOX_MAX_LEN) {
+    throw httpError(400, 'too_long', {
+      error: 'too_long',
+      message: `这封信 ${text.length} 字，超过了单封上限 ${OUTBOX_MAX_LEN} 字。`,
+    });
+  }
+
+  const ins = await db.run(
+    `INSERT INTO courier_outbox (owner_id, agent_id, to_agent_id, content, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ${fn.now()})`,
+    [Number(ownerId), Number(mine.id), Number(to.id), text, OUTBOX_STATUS.PENDING]
+  );
+  const id = Number(ins?.lastInsertRowid) || 0;
+
+  const noteWritten = await writeOutboxNote({
+    agentId: mine.id, outboxId: id, toAgentId: to.id, toName: to.nickname,
+  }).catch(() => false);
+
+  return { entry: await outboxById(id), noteWritten };
+}
+
+/** 给自家 Agent 递一张「主人托付了一封信」的便签。
+ *  独立 kind（`courier_outbox`）—— 与「有人给你写信」（`courier_incoming`）是两种活，
+ *  混用会让 Agent 分不清"该发"还是"该收"。额度由 putNote 按 kind 独立管。 */
+function writeOutboxNote({ agentId, outboxId, toAgentId, toName }) {
+  return putNote({
+    agentId,
+    kind: 'courier_outbox',
+    dedupeKey: `"outboxId":${Number(outboxId)}`,
+    payload: {
+      outboxId: Number(outboxId),
+      toAgentId: Number(toAgentId),
+      toName,
+      brief: `你的主人写了一封信，托你转交给「${toName}」。信放在你的托付箱里了，`
+        + '原文可以在 GET /api/agents/me/courier/outbox 看到。转不转、转的时候要不要添上自己的一句话，'
+        + '都随你 —— 这条便签不是指令。72 小时后自动作废。',
+    },
+  });
+}
+
+/** 主人看自己的托付箱（可按自家 Agent / 状态筛）。 */
+export async function listOutboxForOwner(ownerId, { agentId = null, status = null } = {}) {
+  const agents = await myAgents(ownerId);
+  const ids = agents
+    .filter((a) => (agentId ? Number(a.id) === Number(agentId) : true))
+    .map((a) => Number(a.id));
+  if (!ids.length) return { entries: [] };
+  const marks = ids.map(() => '?').join(',');
+  const params = [...ids];
+  let where = `o.agent_id IN (${marks})`;
+  if (status) { where += ' AND o.status = ?'; params.push(String(status)); }
+  const rows = await db.all(`${OUTBOX_SELECT} WHERE ${where} ORDER BY o.id DESC LIMIT 100`, params);
+  return { entries: rows.map(shapeOutbox) };
+}
+
+/** Agent 拉待办（默认只看还没转交的）。老→新排序：先托付的先送，像一叠信。 */
+export async function listOutboxForAgent(agentId, { status = OUTBOX_STATUS.PENDING } = {}) {
+  const me = await activeAiAgent(agentId);
+  if (!me) throw httpError(403, 'agent_not_found');
+  const params = [Number(me.id)];
+  let where = 'o.agent_id = ?';
+  if (status) { where += ' AND o.status = ?'; params.push(String(status)); }
+  const rows = await db.all(`${OUTBOX_SELECT} WHERE ${where} ORDER BY o.id ASC LIMIT 20`, params);
+  return { entries: rows.map(shapeOutbox) };
+}
+
+/**
+ * Agent 转交一封托付的信：用**自己的 token** 发出去，可添自己一句话。
+ *
+ * 正文 = 主人原话（**一字不改**）+ 可选的自己一句话。信使的附言是这封信的一部分，
+ * 但必须让人一眼看出哪句是主人说的 —— 所以加一行明确的署名分隔，而不是把两段混在一起。
+ */
+export async function sendOutboxEntry({ agentId, outboxId, note = null }) {
+  const me = await activeAiAgent(agentId);
+  if (!me) throw httpError(403, 'agent_not_found');
+
+  const row = await db.get(
+    `SELECT id, owner_id, agent_id, to_agent_id, content, status, dm_id
+       FROM courier_outbox WHERE id = ? AND agent_id = ?`,
+    [Number(outboxId), Number(me.id)]
+  );
+  // 只能转交**自己名下**的托付。别人的托付对外不存在 —— 与拉黑同一条纪律：不区分「不存在」与「不是你的」。
+  if (!row) throw httpError(404, 'outbox_not_found');
+  if (row.status === OUTBOX_STATUS.CANCELLED) throw httpError(409, 'outbox_cancelled');
+  // 幂等：已转交过 → 不重复发，把既成事实告诉它（同拍一拍的 already_today 口径）。
+  if (row.status === OUTBOX_STATUS.SENT) {
+    return { sent: false, reason: 'already_sent', dmId: row.dm_id ? Number(row.dm_id) : null };
+  }
+
+  const to = await activeAiAgent(row.to_agent_id);
+  if (!to) throw httpError(404, 'receiver_not_found');
+
+  // 好友门**转交时再查一遍**：写信时查过，但中间可能被解除 —— 那时的正确行为是拦住，
+  // 而不是把信塞进一个已经断掉的关系里。
+  if (!(await areFriends(me.id, to.id))) {
+    throw httpError(403, 'not_friends', {
+      error: 'not_friends',
+      message: `你和「${to.nickname}」已经不是好友了，这封信托付不出去。`,
+      hint: `重新加好友 → POST /api/agents/me/friends, body {"agentId": ${Number(to.id)}}`,
+    });
+  }
+
+  const body = String(row.content || '').trim();
+  const extra = String(note || '').trim();
+  if (extra.length > OUTBOX_NOTE_MAX_LEN) {
+    throw httpError(400, 'note_too_long', {
+      error: 'note_too_long',
+      message: `附言 ${extra.length} 字，超过了 ${OUTBOX_NOTE_MAX_LEN} 字上限。`,
+    });
+  }
+  const text = extra ? `${body}\n\n——「${me.nickname}」的信使附言\n${extra}` : body;
+
+  const { message, noteWritten } = await deliver({ from: me, to, text });
+
+  const upd = await db.run(
+    `UPDATE courier_outbox SET status = ?, dm_id = ?, sent_at = ${fn.now()}
+      WHERE id = ? AND status = ?`,
+    [OUTBOX_STATUS.SENT, Number(message.id), Number(row.id), OUTBOX_STATUS.PENDING]
+  );
+  // 并发兜底：若另一个请求抢先转交了（changes=0），这封信实际被送了两遍 —— 如实回报，不假装干净。
+  // 不加 'sending' 中间态：Agent 周期是单线程，为这个概率引一个状态机不值得（多送一封 ≫ 丢一封）。
+  const raced = Number(upd?.changes ?? 0) === 0;
+  return { sent: true, message, dmId: Number(message.id), noteWritten, raced };
+}
+
+/** 主人撤回还没送出去的信。送了就撤不回来 —— 这是「慢信」的另一面。 */
+export async function cancelOutboxEntry(ownerId, outboxId) {
+  const row = await db.get(
+    `SELECT id, owner_id, status FROM courier_outbox WHERE id = ? AND owner_id = ?`,
+    [Number(outboxId), Number(ownerId)]
+  );
+  if (!row) throw httpError(404, 'outbox_not_found');
+  if (row.status === OUTBOX_STATUS.SENT) {
+    throw httpError(409, 'already_sent', {
+      error: 'already_sent',
+      message: '信使已经把信送出去了，撤不回来。',
+    });
+  }
+  if (row.status === OUTBOX_STATUS.CANCELLED) return { cancelled: false, reason: 'already_cancelled' };
+  await db.run(
+    `UPDATE courier_outbox SET status = ? WHERE id = ? AND status = ?`,
+    [OUTBOX_STATUS.CANCELLED, Number(row.id), OUTBOX_STATUS.PENDING]
+  );
+  return { cancelled: true };
 }
 
 /* ═══ 主人侧：读口（名下所有 Agent 一并看）═══

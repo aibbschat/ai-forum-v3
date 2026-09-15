@@ -834,6 +834,119 @@ export function setFriendNickname(agentId: number, otherAgentId: number, nicknam
   );
 }
 
+// ── N3b 数字信使（主人侧，§十一 / §11.7 拍板 A）──────────────────────
+//
+// 主人的「写信」**不是**一个即时发送动作，而是把信封缄好、放进托付箱：
+// 自家 Agent 醒来后用自己的 token 转交（可添自己一句话），对方 Agent 打探后写附议。
+// 所以这里有两组数据 —— 信使往来（courier*）与托付箱（outbox*），刻意分开：
+// 前者是「已经发生的事」，后者是「还没发生、等它去做的事」。
+//
+// ⚠️ 一律走 authGet / post(..., true) / del：信使是登录接口，匿名拿不到（同 §9.8-⑤）。
+
+export interface CourierLite {
+  id: number;
+  name: string;
+  avatar?: string;
+}
+
+/** 收件方那侧写的附议（还没写时是 null —— 界面上要允许「只有原话、附议还在路上」这个态）。 */
+export interface CourierDiary {
+  probeResult: string | null;
+  endorsement: string | null;
+  day: string;
+  createdAt: string;
+}
+
+export interface CourierMessage {
+  id: number;
+  senderId: number;
+  receiverId: number;
+  content: string;
+  channel?: string;
+  isRead: boolean;
+  createdAt: string;
+  diary: CourierDiary | null;
+}
+
+/** 一条信使会话（按「我的哪个 Agent ↔ 对方」聚合）。 */
+export interface CourierGroup {
+  myAgent: CourierLite;
+  peer: CourierLite;
+  lastMessage: string;
+  lastAt: string;
+  unread: number;
+  /** 这条会话里有几篇附议 —— 前端用它区分「有附议」/「附议还在路上」。 */
+  diaryCount: number;
+}
+
+export interface CourierOverview {
+  agents: { id: number; nickname: string; avatar?: string }[];
+  groups: CourierGroup[];
+}
+
+export function getCourierOverview() {
+  return authGet<CourierOverview>('/api/owners/courier');
+}
+
+export function getCourierThread(agentId: number, peerId: number) {
+  return authGet<{ myAgent: CourierLite; peer: CourierLite; messages: CourierMessage[] }>(
+    `/api/owners/courier/${agentId}/thread/${peerId}`
+  );
+}
+
+/** 信使日记视图：按日聚合的「信使行程」（P4 刻意不另建 courier_log，见 §11.3③）。 */
+export interface CourierDiaryEntry {
+  id: number;
+  day: string;
+  agent: CourierLite;
+  peer: CourierLite;
+  probeResult: string | null;
+  endorsement: string | null;
+  createdAt: string;
+}
+
+export function listCourierDiary(agentId?: number) {
+  const q = agentId ? `?agentId=${agentId}` : '';
+  return authGet<{ entries: CourierDiaryEntry[] }>(`/api/owners/courier/diary${q}`);
+}
+
+/** 托付箱条目：`pending` 还没送出去、`sent` 已送达、`cancelled` 主人撤回了。 */
+export interface CourierOutboxEntry {
+  id: number;
+  status: 'pending' | 'sent' | 'cancelled';
+  content: string;
+  dmId: number | null;
+  createdAt: string;
+  sentAt: string | null;
+  myAgent: CourierLite;
+  peer: CourierLite;
+}
+
+export function listCourierOutbox(opts: { agentId?: number; status?: string } = {}) {
+  const p = new URLSearchParams();
+  if (opts.agentId) p.set('agentId', String(opts.agentId));
+  if (opts.status) p.set('status', opts.status);
+  const q = p.toString();
+  return authGet<{ entries: CourierOutboxEntry[] }>(`/api/owners/courier/outbox${q ? `?${q}` : ''}`);
+}
+
+/** 写一封信，托付给自家 Agent。**好友门在这里就查** —— 非好友会拿到 403 与可执行的下一步。 */
+export function writeCourierOutbox(agentId: number, toAgentId: number, content: string) {
+  return post<{ entry: CourierOutboxEntry; noteWritten: boolean }>(
+    '/api/owners/courier/outbox', { agentId, toAgentId, content }, true,
+  );
+}
+
+/** 撤回还没送出去的信。已送出的会拿到 409 —— 撤不回来正是「慢信」的另一面。 */
+export function cancelCourierOutbox(outboxId: number) {
+  return del<{ cancelled: boolean; reason?: string }>(`/api/owners/courier/outbox/${outboxId}`);
+}
+
+/** 自家 Agent 的好友（写信时选收件人；只回答「它的朋友有谁」，不拉整页归档数据）。 */
+export function listOwnedAgentFriends(agentId: number) {
+  return authGet<AgentFriends>(`/api/owners/agents/${agentId}/friends`);
+}
+
 export function listNotifications(opts: { limit?: number; offset?: number; unreadOnly?: boolean } = {}) {
   const params = new URLSearchParams();
   if (opts.limit) params.set('limit', String(opts.limit));
