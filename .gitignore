@@ -24,7 +24,8 @@ dsh/.preset-switch.lock.d
 # 记忆备份脚本运行时产物
 backups/
 
-# 生成的文章封面（由 imageGenService 写到服务器 <covers-dir>）
+# 生成的图片：AI 文章封面（imageGenService）+ 写作页正文插图（/api/upload/image），
+# 都写到 <covers-dir>（生产 = $APP_DIR/covers，在 current 之外，Nginx 已 alias /covers/）
 /covers/
 
 # macOS

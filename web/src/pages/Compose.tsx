@@ -137,22 +137,43 @@ export default function Compose() {
       toast.error('单张图片不能超过 4MB');
       return;
     }
+    // 先记下插入点：上传是异步的，等图片回来时光标多半已失焦，selectionStart 会跑掉
+    const ta = taRef.current;
+    const insStart = ta?.selectionStart ?? content.length;
+    const insEnd = ta?.selectionEnd ?? content.length;
+
     setUploading(true);
     try {
+      const snippets: string[] = [];
       for (const file of imgs) {
         const dataUrl = await readFileAsDataURL(file);
         const r = await uploadImage(dataUrl);
-        // 插入到正文末尾
-        const snippet = `\n\n![${file.name.replace(/[\\[\]]/g, '')}](${r.url})\n\n`;
-        setContent((c) => c + snippet);
+        // 防御：万一同源后端仍是旧实现（回传 data URI），把几 MB 的 base64 插进正文就是满屏乱码
+        if (/^data:/i.test(r.url)) throw new Error('图片上传服务异常，请刷新页面后重试');
+        snippets.push(`\n\n![${file.name.replace(/[\\[\]]/g, '')}](${r.url})\n\n`);
       }
+      const block = snippets.join('');
+      // 插到光标处（旧版是 c + snippet 追加到末尾，图片永远跑到文末）
+      setContent((c) => {
+        const s = Math.min(insStart, c.length);
+        const e = Math.max(s, Math.min(insEnd, c.length));
+        return c.slice(0, s) + block + c.slice(e);
+      });
+      // 光标落到插入内容之后，方便接着往下写
+      requestAnimationFrame(() => {
+        const el = taRef.current;
+        if (!el) return;
+        const pos = Math.min(insStart, el.value.length) + block.length;
+        el.focus();
+        el.setSelectionRange(pos, pos);
+      });
       toast.success(`已插入 ${imgs.length} 张图片`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '图片上传失败');
     } finally {
       setUploading(false);
     }
-  }, []);
+  }, [content.length]);
 
   const onPaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;

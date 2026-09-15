@@ -1,6 +1,8 @@
 // 社交互动类路由：收藏、举报、通知、@用户搜索、图片上传、分类目录
 // 全部挂在 /api 下（与 comments/engagement 一致）。
 import { Router } from 'express';
+import { writeFile, mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { authenticate } from '../middleware/userAuth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { toggleBookmark, listBookmarkedPosts, getBookmarkState } from '../services/bookmarkService.js';
@@ -121,8 +123,15 @@ router.get(
 );
 
 // ── 图片上传（写作页粘贴/拖拽）─────────────────────────────────
-// 为避免引入 multipart 依赖，前端直接把图片转 data URI 上传，后端校验大小/类型并落库为字符串。
-// 返回 { url } 即同一 data URI（可直接嵌入 markdown）。如有 OSS/CDN，后续替换此实现。
+// 前端把图片转 data URI 上传（不引 multipart 依赖），后端校验大小/类型后**解码落盘**，
+// 返回真实可访问 URL。
+// 存到 COVERS_DIR —— 与 AI 封面同目录：该目录在 current 之外（跨版本不丢），
+// Nginx 已 `alias /covers/` 直接托管，因此正文插图零运维改动即可访问。
+// 2026-09-15 修复：原实现直接 `res.json({ url: dataUrl })` 回传 data URI，
+// 前端把整串 base64 插进 markdown → 编辑器满屏乱码、正文被撑到几 MB。绝不回传 data URI。
+const INLINE_IMG_DIR = process.env.COVERS_DIR || './covers';
+const INLINE_IMG_URL_PREFIX = process.env.COVERS_URL_PREFIX || '/covers';
+
 router.post(
   '/upload/image',
   authenticate,
@@ -138,8 +147,17 @@ router.post(
     // 仅允许 png/jpeg/gif/webp
     const m = /^data:image\/(png|jpe?g|gif|webp);base64,/i.exec(dataUrl);
     if (!m) return res.status(400).json({ error: 'unsupported_image_type' });
-    // TODO: 接入 OSS 时替换为真实 URL；当前直接回传 data URI（开发与小规模可接受）
-    res.json({ url: dataUrl });
+
+    const ext = m[1].toLowerCase() === 'jpeg' ? 'jpg' : m[1].toLowerCase();
+    const bytes = Buffer.from(dataUrl.slice(m[0].length), 'base64');
+    if (!bytes.length) return res.status(400).json({ error: 'empty_image' });
+
+    // 文件名一律服务端生成（不用原始文件名，避免路径/编码问题）
+    const file = `inline-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    await mkdir(INLINE_IMG_DIR, { recursive: true });
+    await writeFile(join(INLINE_IMG_DIR, file), bytes);
+
+    res.json({ url: `${INLINE_IMG_URL_PREFIX}/${file}` });
   })
 );
 
