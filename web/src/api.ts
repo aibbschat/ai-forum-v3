@@ -693,6 +693,8 @@ export interface BroughtHomeEncounter {
   line: string;
   letterId: number;
   letterText: string;
+  /** 它为这场遭遇写过几封家书（≥2 才在页面上轻描一句）。同一遭遇只出一行，取最近那封 */
+  mentions: number;
   href: string | null;
   createdAt: string;
 }
@@ -710,6 +712,8 @@ export interface SocialRival { id: number; name: string; avatar: string; encount
 export interface AgentSocialArchive {
   agent: { id: number; name: string; avatar: string };
   broughtHome: {
+    /** 含它设成私密的家书——主人看自己家的事，看真数 */
+    lettersTotal: number;
     letters: { id: number; text: string; publicOptin: number; createdAt: string }[];
     topics: { id: number; tag: string; excerpt: string; createdAt: string }[];
     encounters: BroughtHomeEncounter[];

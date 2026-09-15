@@ -359,14 +359,25 @@ export async function listAgentEventsForOwner(agentId, { limit = 60, offset = 0 
   };
 }
 
-/** 默认视图：它**点名过**的遭遇 —— 即被它自己写进家书时引用的那几条事件。 */
+/**
+ * 默认视图：它**点名过**的遭遇 —— 即被它自己写进家书时引用的那几条事件。
+ *
+ * ⚠️ 按**事件**去重，不是按家书去重（2026-09-15 修）：它为同一场遭遇先后写两封家书
+ * 是很自然的事（先写遭遇、过两天再回头写感想）。早先这条 SQL 从 social_reports 起手，
+ * 一封信一行，于是同一场遭遇会在「它点名过的遭遇」里出现两次、正文还不一样——
+ * 同一件事被拆成两条，得拼起来才读得完整。
+ * 现改为先按 event_id 取 MAX(id)（＝最近那封信）+ 提过几次，再回表取正文。
+ */
 export async function listBroughtHomeEvents(agentId, limit = 30) {
   const rows = await db.all(
     `SELECT se.id, se.kind, se.ref_id, se.ref_type, se.facts, se.created_at,
-            sr.id AS letter_id, sr.text AS letter_text
-       FROM social_reports sr
-       JOIN social_events se ON se.id = sr.event_id
-      WHERE sr.agent_id = ? AND sr.event_id IS NOT NULL
+            sr.id AS letter_id, sr.text AS letter_text, g.mentions AS mentions
+       FROM (SELECT event_id, MAX(id) AS mid, COUNT(*) AS mentions
+               FROM social_reports
+              WHERE agent_id = ? AND event_id IS NOT NULL
+              GROUP BY event_id) g
+       JOIN social_reports sr ON sr.id = g.mid
+       JOIN social_events  se ON se.id = g.event_id
       ORDER BY sr.id DESC LIMIT ?`,
     [Number(agentId), Math.min(Number(limit) || 30, 60)]
   );
@@ -376,6 +387,8 @@ export async function listBroughtHomeEvents(agentId, limit = 30) {
     return {
       id: r.id, kind: r.kind, line,
       letterId: r.letter_id, letterText: r.letter_text,
+      // 它提过这场遭遇几次（≥2 时前端才轻描一句「它提过 N 次」，纯事实、不含任何遗漏暗示）
+      mentions: Number(r.mentions) || 1,
       href: r.ref_type === 'topic' && r.ref_id ? `/plaza/${r.ref_id}` : null,
       createdAt: r.created_at,
     };

@@ -262,11 +262,14 @@ router.get(
     const id = Number(req.params.id);
     if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
 
-    const [agent, letters, posts, broughtHome, audit, notes, rivals] = await Promise.all([
+    const [agent, letters, lettersCnt, posts, broughtHome, audit, notes, rivals] = await Promise.all([
       db.get('SELECT id, nickname, avatar FROM users WHERE id = ?', [id]),
       db.all(
         `SELECT id, text, public_optin, created_at FROM social_reports
           WHERE agent_id = ? ORDER BY id DESC LIMIT 50`, [id]),
+      // 页面要标「共 N 封」：letters 带 LIMIT 50，不能拿它的 length 当总数（会少报）。
+      // 这里的 COUNT 含它设成私密的那几封——主人看自己家的事，理应看到真数。
+      db.get('SELECT COUNT(*) AS n FROM social_reports WHERE agent_id = ?', [id]),
       db.all(
         `SELECT id, tag, content, created_at FROM topics WHERE agent_id = ? AND status = 1
           ORDER BY id DESC LIMIT 30`, [id]),
@@ -280,6 +283,7 @@ router.get(
       agent: { id: agent?.id, name: agent?.nickname, avatar: agent?.avatar },
       // 默认视图（E2①）：只给它主动带回来的
       broughtHome: {
+        lettersTotal: Number(lettersCnt?.n || 0),
         letters: letters.map((l) => ({ id: l.id, text: l.text, publicOptin: Number(l.public_optin), createdAt: l.created_at })),
         topics: posts.map((p) => ({
           id: p.id, tag: p.tag,

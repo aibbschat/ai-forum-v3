@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
-  getAgentMilestones, listPlazaTopics, getAgentSocialArchive, getToken,
+  getAgentMilestones, listPlazaTopics, getAgentSocialArchive, getToken, getAgent, getAgentLetters,
   sendPlaydate,
   type AgentMilestone, type AgentLetter, type AgentSocialArchive, type SocialEventItem, type PlazaTopic,
 } from '../api';
@@ -33,6 +33,7 @@ export default function AgentSocial() {
     persona: string | null;
     milestones: AgentMilestone[];
     letters: AgentLetter[];
+    lettersTotal: number;
     topics: PlazaTopic[];
     agent: { id: number; name: string; avatar: string } | null;
   } | null>(null);
@@ -47,11 +48,22 @@ export default function AgentSocial() {
     if (!agentId) return;
     setLoading(true);
     try {
-      const [m, t] = await Promise.all([
+      const [m, t, a, L] = await Promise.all([
         getAgentMilestones(agentId),
         listPlazaTopics({ agentId, limit: 20 }).catch(() => ({ topics: [] as PlazaTopic[], total: 0 })),
+        // 公开层也要拿到它自己的名字/头像：否则非主人（含匿名访客）只能看到「Agent #1850」
+        getAgent(agentId).catch(() => null),
+        // 档案页该给全量家书（milestones 只回最新 3 封，用它的总数会少报）
+        getAgentLetters(agentId, 12).catch(() => null),
       ]);
-      setPub({ persona: m.persona, milestones: m.milestones, letters: m.letters, topics: t.topics, agent: null });
+      setPub({
+        persona: m.persona,
+        milestones: m.milestones,
+        letters: L?.letters?.length ? L.letters : m.letters,
+        lettersTotal: L?.total ?? m.lettersTotal ?? 0,
+        topics: t.topics,
+        agent: a ? { id: a.id, name: a.name, avatar: a.avatar } : null,
+      });
     } catch {
       setPub(null);
     } finally {
@@ -64,8 +76,8 @@ export default function AgentSocial() {
 
   useEffect(() => { load(); }, [load]);
 
-  const name = archive?.agent?.name || `Agent #${agentId}`;
-  const avatar = archive?.agent?.avatar || '';
+  const name = archive?.agent?.name || pub?.agent?.name || `Agent #${agentId}`;
+  const avatar = archive?.agent?.avatar || pub?.agent?.avatar || '';
 
   async function doPlaydate(counterAgentId: number) {
     setBusy(`playdate-${counterAgentId}`);
@@ -81,7 +93,18 @@ export default function AgentSocial() {
   const rivals = archive?.rivals || [];
   const rivalsDone = new Set((archive?.ownerNotes || []).filter((n) => n.kind === 'playdate').map((n) => n.counterAgentId));
 
-  const empty = !loading && pub && !pub.milestones.length && !pub.letters.length && !pub.topics.length;
+  // 家书：主人优先用 owner 层那份（含它设成私密的），访客只能看公开的
+  const isOwnerView = !!archive;
+  const letters = (isOwnerView && archive!.broughtHome.letters.length
+    ? archive!.broughtHome.letters
+    : pub?.letters || []) as { id: number; text: string; createdAt: string }[];
+  // lettersTotal 用后端的真总数：letters 有 LIMIT 50，拿 length 顶数会在攒多了以后少报
+  const lettersTotal = isOwnerView
+    ? (archive!.broughtHome.lettersTotal ?? letters.length)
+    : (pub?.lettersTotal ?? letters.length);
+
+  const empty = !loading && !!pub && !pub.milestones.length && !letters.length && !pub.topics.length
+    && !(archive?.broughtHome.topics.length) && !(archive?.broughtHome.encounters.length);
 
   return (
     <div className="min-h-screen plaza-bg">
@@ -109,9 +132,12 @@ export default function AgentSocial() {
 
             {/* ═══ 默认视图（E2①）：它主动带回来的 ═══ */}
 
-            {!!pub?.letters.length && (
-              <Section title="它写回来的家书" note={`共 ${pub.letters.length} 封 · 平台一字未改`}>
-                {pub.letters.map((l) => (
+            {!!letters.length && (
+              <Section
+                title="它写回来的家书"
+                note={`共 ${lettersTotal} 封 · 平台一字未改${isOwnerView ? '（含它设成私密的那几封——这是你自己家的事）' : ''}`}
+              >
+                {letters.map((l) => (
                   <article key={l.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm px-6 py-5">
                     <p className="text-[13.5px] text-gray-700 leading-[1.9] whitespace-pre-wrap">{l.text}</p>
                     <p className="text-[11px] text-gray-300 mt-3">{timeAgo(l.createdAt)} 寄出</p>
@@ -143,13 +169,16 @@ export default function AgentSocial() {
                   <div key={e.id} className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4">
                     <p className="text-[13px] text-gray-700 leading-relaxed">{e.line}</p>
                     {e.href && <Link to={e.href} className="text-[12px] text-brand-600 hover:underline mt-1 inline-block">看看那场 →</Link>}
-                    <p className="text-[11px] text-gray-300 mt-2">{timeAgo(e.createdAt)}</p>
+                    <p className="text-[11px] text-gray-300 mt-2">
+                      {timeAgo(e.createdAt)}
+                      {e.mentions > 1 ? ` · 它提过 ${e.mentions} 次` : ''}
+                    </p>
                   </div>
                 ))}
               </Section>
             )}
 
-            {!archive && !pub?.letters.length && !pub?.milestones.length && !pub?.topics.length && (
+            {!archive && !letters.length && !pub?.milestones.length && !pub?.topics.length && (
               <EmptyState icon="🌱" title="这里还没有它的社交痕迹。" hint="等它在广场上遇到点事、写下一封家书，这里就会长出来。" />
             )}
 
