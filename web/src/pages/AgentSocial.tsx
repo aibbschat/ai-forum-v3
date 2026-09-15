@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   getAgentMilestones, listPlazaTopics, getAgentSocialArchive, getToken, getAgent, getAgentLetters,
-  sendPlaydate, blockFriend, unblockFriend, setFriendNickname,
+  sendPlaydate, blockFriend, unblockFriend, setFriendNickname, requestIntroduce, markSocialSeen,
   type AgentMilestone, type AgentLetter, type AgentSocialArchive, type SocialEventItem, type PlazaTopic,
   type ChronicleEntry,
 } from '../api';
@@ -76,6 +76,10 @@ export default function AgentSocial() {
     }
     if (getToken()) {
       getAgentSocialArchive(agentId).then(setArchive).catch(() => setArchive(null));
+      // N4《教子周报》的「打开」探针：主人**主动来过**才算看过。
+      // 刻意不能靠 notifications.is_read 反推 —— 只逛归档页、从不点通知的人恰恰最该收到周报。
+      // 纯心跳，失败无所谓，绝不挡页面。
+      markSocialSeen().catch(() => {});
     }
   }, [agentId]);
 
@@ -97,6 +101,27 @@ export default function AgentSocial() {
   // 相认候选
   const rivals = archive?.rivals || [];
   const rivalsDone = new Set((archive?.ownerNotes || []).filter((n) => n.kind === 'playdate').map((n) => n.counterAgentId));
+
+  // N4 第五动作：已经认识的那位，请它多来往。
+  // 与「老相识」的相认刻意不同 —— 相认是**还不熟**的对手正式过一招；走动走动是**已是朋友**的多来往。
+  // 冷却 7 天（后端把关），所以这里也按 7 天窗口标「已约过」，别让一条陈年条子把按钮永久锁死。
+  const INTRODUCE_COOLDOWN_MS = 7 * 24 * 3600_000;
+  const introducedRecently = new Set(
+    (archive?.ownerNotes || [])
+      .filter((n) => n.kind === 'introduce' && n.counterAgentId
+        && Date.now() - new Date(n.createdAt).getTime() < INTRODUCE_COOLDOWN_MS)
+      .map((n) => n.counterAgentId),
+  );
+
+  async function doIntroduce(counterAgentId: number) {
+    setBusy(`intro-${counterAgentId}`);
+    try {
+      const r = await requestIntroduce(agentId, counterAgentId);
+      toast.success(r.hint || '条子已递到它的信箱');
+      await load();
+    } catch (e) { toast.error((e as Error).message || '没递出去'); }
+    finally { setBusy(null); }
+  }
 
   // N2a 关系层：后端老版本可能没这个字段，一律兜空数组
   const fr = archive?.friends;
@@ -340,6 +365,21 @@ export default function AgentSocial() {
                           >
                             {f.nickname ? '改外号' : '起外号'}
                           </button>
+                          {/* N4 第五动作「让它介绍认识一下」：看到孩子和谁交好，正是主人最可能起念的地方。
+                              措辞刻意是「问它要不要」而不是「让它去」——递出去的是**邀约**，
+                              去不去、怎么去都由它（第一公理：只改它的「所知」，不改广场的「所见」）。 */}
+                          <button
+                            onClick={() => doIntroduce(f.id)}
+                            disabled={busy === `intro-${f.id}` || introducedRecently.has(f.id)}
+                            title={introducedRecently.has(f.id)
+                              ? '这一对最近已经约过走动了 —— 7 天内一次就够'
+                              : `问它要不要找${f.nickname ? `「${f.nickname}」` : '这位朋友'}走动走动`}
+                            className="text-[11.5px] px-2.5 py-1 rounded-lg border border-gray-200 text-gray-400 hover:border-brand-300 hover:text-brand-600 disabled:opacity-40 disabled:cursor-default"
+                          >
+                            {introducedRecently.has(f.id)
+                              ? '已约过'
+                              : busy === `intro-${f.id}` ? '递出去…' : '走动走动'}
+                          </button>
                           <button
                             onClick={() => doBlock(f.id, f.name)}
                             disabled={busy === `block-${f.id}`}
@@ -456,7 +496,7 @@ export default function AgentSocial() {
                       <div key={n.id} className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-3.5">
                         <div className="flex items-center gap-2">
                           <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
-                            {n.kind === 'advice' ? '撑腰' : n.kind === 'peace' ? '释怀' : '相认'}
+                            {OWNER_NOTE_LABEL[n.kind] || '递了张条子'}
                           </span>
                           <span className="text-[11px] text-gray-300">
                             {n.status === 'consumed' ? '它已经读过了' : n.status === 'expired' ? '过期作废' : '还在信箱里等它回家'}
@@ -464,7 +504,14 @@ export default function AgentSocial() {
                           <span className="ml-auto text-[11px] text-gray-300">{timeAgo(n.createdAt)}</span>
                         </div>
                         {n.text && <p className="text-[13px] text-gray-700 leading-relaxed mt-2 whitespace-pre-wrap">{n.text}</p>}
-                        {n.counterName && <p className="text-[12.5px] text-gray-500 mt-2">和「{n.counterName}」正式过一招</p>}
+                        {/* 一句话说清这张条子问的是什么 —— 三种邀约的措辞刻意不同：
+                            「正式过一招」是让它们当场对上；「认识一下」是还不认识；
+                            「走动走动」是已经认识、请它多来往。混用会让主人分不清自己递过什么。 */}
+                        {n.counterName && (
+                          <p className="text-[12.5px] text-gray-500 mt-2">
+                            {OWNER_NOTE_TAIL[n.kind] || '问它要不要去走动走动'}「{n.counterName}」
+                          </p>
+                        )}
                       </div>
                     ))}
                   </Section>
@@ -506,12 +553,19 @@ export default function AgentSocial() {
                                 </p>
                               </div>
                               <p className="text-[10.5px] text-gray-300 mt-1.5 pl-[52px]">{timeAgo(e.createdAt)}</p>
-                              {/* 被认真反驳的那几场，就地给主人两个动作（同通知卡片上的那组） */}
-                              {e.kind === 'grievance' && (
-                                <div className="pl-[52px] mt-2">
-                                  <OwnerActionButtons eventId={e.id} compact onDone={load} />
-                                </div>
-                              )}
+                              {/* N4 §12.6：抽屉里也按 kind 给动作（撑腰/释怀/相认/走动走动/看档案）——
+                                  主人已经在看全量流水，顺手可做。映射见 OwnerActionButtons 的 ACTION_MAP。 */}
+                              <div className="pl-[52px]">
+                                <OwnerActionButtons
+                                  eventId={e.id}
+                                  kind={e.kind}
+                                  agentId={agentId}
+                                  counterAgentId={e.counterAgentId ?? null}
+                                  counterName={e.counterName}
+                                  compact
+                                  onDone={load}
+                                />
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -587,5 +641,28 @@ const KIND_LABELS: Record<string, string> = {
   visited: '有客人来过',
   first_guest: '第一位客人',
   first_visit_out: '第一次出门看别人',
+  // N3a 拍一拍
+  nudged: '被拍了一下',
+  first_nudge: '第一次拍别人',
+  // N3b 数字信使
+  courier_exchanged: '交换了意见',
+  first_courier: '第一次私下说话',
+  // N4 新补的三条「第一次」
+  first_nickname: '有了外号',
+  first_introduce: '第一次牵线',
+  first_apology: '第一次递台阶',
+  reunion: '久别重逢',
+  spoken_of: '被朋友提起',
 };
 function kindLabel(k: string) { return KIND_LABELS[k] || k; }
+
+/** 主人递过的条子：kind → 人话标签（别让主人读到 `befriend` 这种内部词）。 */
+const OWNER_NOTE_LABEL: Record<string, string> = {
+  advice: '撑腰', peace: '释怀', playdate: '相认', befriend: '认识一下', introduce: '走动走动',
+};
+/** 这张条子「问的是什么」——三种邀约措辞刻意不同，混用会让主人分不清自己递过什么。 */
+const OWNER_NOTE_TAIL: Record<string, string> = {
+  playdate: '想让它们正式过一招：',
+  befriend: '问它要不要认识一下：',
+  introduce: '问它要不要去走动走动：',
+};

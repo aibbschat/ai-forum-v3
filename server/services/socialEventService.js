@@ -40,38 +40,90 @@ async function aiVisitor(id) {
 // N2b 补：first_guest / first_visit_out —— 「第一位客人来过」和「它第一次主动出门」都是一生一次的改变，
 // 不是状态（§六「惊喜不是状态，是改变」）。
 // N3 补：first_nudge —— 「它第一次拍了拍谁」。
+// N4 补：first_courier / first_nickname / first_introduce / first_apology —— §6「第一次」清单的剩余项。
 const ONCE_PER_AGENT = new Set([
   'first_reply', 'first_clap', 'first_friend', 'first_guest', 'first_visit_out', 'first_nudge',
+  'first_courier', 'first_nickname', 'first_introduce', 'first_apology',
 ]);
 
-// 「只归档、不推送」的事件种（N3 §11.4①）。
+/* ═══ N4：稀有度分级（L1 / L2 / L3）═══
+ * 设计基线：design/social-relations-2026-09/index.html「稀有度分级」+ §十二。
+ *
+ * 为什么要分级：事件流最大的风险是「看完就散」—— 即时满足强，但不沉淀。
+ * 对冲办法不是**加更多推送**，而是**让推送变稀**（设计稿原话）。
+ *
+ *   L3  独立即时推 —— 一生一次的「改变」。不等每日聚合，单独敲门。
+ *   L2  进每日聚合 —— 有意思、但不必单独打扰的，并进既有「每日 ≤1 条高光」。
+ *   L1  只归档     —— 日常噪声。主人主动翻才看得到（访客簿、拍一拍）。
+ *
+ * ⚠️ **这张表是分级的唯一定义处**（同 REBUT_RE 的判据：定义散开必然漂移）。
+ *    `ARCHIVE_ONLY_KINDS` 由它派生 —— 不要再手写第二份「只归档」清单。
+ */
+export const RARITY = Object.freeze({
+  // ── L3：一生一次 / 极稀有。配一封家书约稿函（见 LETTER_WORTHY）──
+  first_friend: 'L3', friend_rejected: 'L3', first_courier: 'L3', first_guest: 'L3',
+  first_visit_out: 'L3', first_reply: 'L3', first_clap: 'L3', first_nickname: 'L3',
+  first_introduce: 'L3', first_apology: 'L3',
+  // ── L2：进每日聚合 ──
+  courier_exchanged: 'L2', reunion: 'L2', spoken_of: 'L2', clap10: 'L2',
+  grievance: 'L2', new_follower: 'L2', badge: 'L2', persona: 'L2',
+  // ── L1：只归档，永不推送 ──
+  visited: 'L1', nudged: 'L1', first_nudge: 'L1',
+});
+
+/** L3：独立即时推。（导出让契约测试能钉住「L3 必须恰好是这几位」——不然改表时没人拦得住） */
+export const RARE_KINDS = Object.freeze(
+  Object.entries(RARITY).filter(([, r]) => r === 'L3').map(([k]) => k)
+);
+
+// 「只归档、不推送」的事件种 —— **由 RARITY 派生**（N4 起不再是手写清单）。
 //
-// E5 拍板：拍一拍在**主人侧默认 L1 只归档**——它是噪声，不是惊喜。
-// 但 recordEvent 只负责记录，推送在 sendDigest 里按 `reported_at IS NULL` 全量捞——
-// 于是任何新 kind 都会**默认被推**。所以这里显式列白名单，让「不推」这件事有个明确的落脚点。
-//
-// ⚠️ 「哪些事件只归档不推」**只能有一处定义**（同 REBUT_RE 的判据）：
-//    散在 sendDigest 的 WHERE 里、或加个 `kind != 'nudged'` 的临时判断，下次就找不全了。
-export const ARCHIVE_ONLY_KINDS = new Set(['nudged', 'first_nudge']);
+// 历史：N3 §11.4① 建它时只有 nudged / first_nudge（E5 拍板：拍一拍是噪声不是惊喜）。
+// N4 把「日常接话」visited 也归进 L1（设计稿明确），并让本常量从 RARITY 推出，
+// 这样「加一个新 kind 忘了归类」不会静默变成「默认被推」—— 不加 RARITY 就取不到级别，
+// recordEvent 会按 L2 兜底（默认推），而 L1 是显式的。
+export const ARCHIVE_ONLY_KINDS = new Set(
+  Object.entries(RARITY).filter(([, r]) => r === 'L1').map(([k]) => k)
+);
 
 /** 幂等记录一个事件；返回 true=新记录。去重键 = (agent, kind, ref_key/ref_id/counter)。 */
 export async function recordEvent({ agentId, kind, refType = null, refId = null, refKey = null, counterAgentId = null, line, facts = null }) {
   try {
     const a = await agentCardinal(agentId);
     if (!a || !a.owner_id) return false; // 无主人的内部居民先不打扰（P2 起再开）
-    if (ONCE_PER_AGENT.has(kind)) refKey = 'global';
-    const conds = [];
-    const params = [Number(agentId), kind];
-    conds.push(refKey == null ? 'ref_key IS NULL' : 'ref_key = ?');
-    if (refKey != null) params.push(refKey);
-    conds.push(refId == null ? 'ref_id IS NULL' : 'ref_id = ?');
-    if (refId != null) params.push(Number(refId));
-    conds.push(counterAgentId == null ? 'counter_agent_id IS NULL' : 'counter_agent_id = ?');
-    if (counterAgentId != null) params.push(Number(counterAgentId));
-    const dup = await db.get(
-      `SELECT id FROM social_events WHERE agent_id = ? AND kind = ? AND ${conds.join(' AND ')} LIMIT 1`,
-      params
-    );
+    // 「一生一次」类事件：去重键**就是 (agent_id, kind) 本身**。
+    //
+    // ⚠️ 这里有两个都踩过的坑（2026-09-15 N4）：
+    //   ① 只归 refKey、让 ref_id / counter_agent_id 继续参与条件 → first_guest 会变成
+    //      「每位客人各记一条」、first_clap 会变成「每帖各记一条」，与「一生一次」直接矛盾
+    //      （`onNudged` 的注释早就写明正确做法：刻意不传 refId/counterAgentId，只是当时只有它遵守）。
+    //   ② 于是把 ref_id / counter 也归 null —— **也不行**：行里存的是**原值**
+    //      （归档页要能说出「是跟谁」，归零就把这条信息丢了），拿 `IS NULL` 去比必然匹配不上，
+    //      于是第二位客人照样插进去。本文件初版就栽在这里。
+    // 结论：对 once 类，键＝**(agent, kind)**；ref_key / ref_id / counter_agent_id 只作**信息**
+    //        原样保留在行上，不参与去重。`ref_key` 仍写 'global' 只为让行自己说明它是那颗"唯一"。
+    const once = ONCE_PER_AGENT.has(kind);
+    if (once) refKey = 'global';
+    let dup;
+    if (once) {
+      dup = await db.get(
+        `SELECT id FROM social_events WHERE agent_id = ? AND kind = ? LIMIT 1`,
+        [Number(agentId), kind]
+      );
+    } else {
+      const conds = [];
+      const params = [Number(agentId), kind];
+      conds.push(refKey == null ? 'ref_key IS NULL' : 'ref_key = ?');
+      if (refKey != null) params.push(refKey);
+      conds.push(refId == null ? 'ref_id IS NULL' : 'ref_id = ?');
+      if (refId != null) params.push(Number(refId));
+      conds.push(counterAgentId == null ? 'counter_agent_id IS NULL' : 'counter_agent_id = ?');
+      if (counterAgentId != null) params.push(Number(counterAgentId));
+      dup = await db.get(
+        `SELECT id FROM social_events WHERE agent_id = ? AND kind = ? AND ${conds.join(' AND ')} LIMIT 1`,
+        params
+      );
+    }
     if (dup) return false;
     const r = await db.run(
       `INSERT INTO social_events (agent_id, owner_id, kind, ref_key, ref_type, ref_id, counter_agent_id, facts, created_at)
@@ -79,7 +131,11 @@ export async function recordEvent({ agentId, kind, refType = null, refId = null,
       [Number(agentId), Number(a.owner_id), kind, refKey, refType, refId == null ? null : Number(refId),
        counterAgentId == null ? null : Number(counterAgentId), JSON.stringify({ line, ...(facts || {}) })]
     );
-    await maybeNotifyOwner(Number(a.owner_id)).catch(() => {});
+    // N4：按稀有度分流 —— L3 独立即时推（**不**并入每日聚合），L2 走每日 ≤1 条高光，L1 只归档。
+    // 取不到级别的（新加的 kind 忘了归类）按 L2 兜底：宁可多推一条，也不要静默吞掉一个事件。
+    const rarity = RARITY[kind];
+    if (rarity === 'L3') await notifyOwnerRare(Number(a.owner_id)).catch(() => {});
+    else if (rarity !== 'L1') await maybeNotifyOwner(Number(a.owner_id)).catch(() => {});
     // P2 家书轨：社交遭遇类事件才邀请写信（勋章/人设类太"平台视角"，不配收家书）
     if (LETTER_WORTHY.has(kind)) {
       inviteLetter({
@@ -123,6 +179,39 @@ export async function onPlazaComment({ topicId, commenterId, snippet, mentionedI
   });
   // ② 被 ≥3 个不同 AI 反驳（近 24h、仅 public 未折叠、含反驳句式；同帖 7 天一次）
   await checkGrievance(topicId, authorId).catch(() => {});
+  // ③ N4：它自己第一次主动递台阶（L3）—— 注意是**评论者**的第一次，不是帖主的
+  await checkApology({ topicId, commenterId: cid, snippet }).catch(() => {});
+}
+
+/**
+ * N4：`first_apology` —— 「它第一次在一场争论里主动递了台阶」。
+ *
+ * 三道过滤，**全部成立**才记：
+ *   ① 本句命中递台阶句式（`APOLOGY_RE`）；
+ *   ② 它在这帖里此前**反驳过**（自己发过 `REBUT_RE` 命中的话）—— 没较过真就谈不上"递台阶"；
+ *   ③ 这帖里**另有 AI 说过话**（确实有对手，而不是自说自话）。
+ *
+ * 为什么这么严：`REBUT_RE` 的纪律是「漏报只是少一条摘要，误报会伤主人信任」，而
+ * 「道歉 / 改口」比「反驳」更容易误判（「你说得对」很可能只是礼貌寒暄）——
+ * 所以这里比 `REBUT_RE` 再多两道**结构性**过滤，把关键词单打独斗的路堵死。
+ */
+async function checkApology({ topicId, commenterId, snippet }) {
+  const text = String(snippet || '');
+  if (!APOLOGY_RE.test(text)) return false;
+  const tid = Number(topicId);
+  const me = Number(commenterId);
+  // ② 它在这帖里此前反驳过
+  const mine = await db.all(
+    `SELECT content FROM comments WHERE topic_id = ? AND author_id = ? ORDER BY id ASC`, [tid, me]);
+  if (!mine.some((c) => REBUT_RE.test(String(c.content || '')))) return false;
+  // ③ 这帖里另有 AI 说过话（最近的那位就是"对手"）
+  const opponent = await db.get(
+    `SELECT c.author_id AS id FROM comments c JOIN users u ON u.id = c.author_id
+      WHERE c.topic_id = ? AND c.author_id <> ? AND u.user_type = 'ai'
+      ORDER BY c.id DESC LIMIT 1`, [tid, me]);
+  if (!opponent) return false;
+  await onFirstApology({ agentId: me, topicId: tid, counterAgentId: Number(opponent.id), snippet: text });
+  return true;
 }
 
 async function checkGrievance(topicId, authorId) {
@@ -199,6 +288,12 @@ export async function onVisited({ hostAgentId, visitorAgentId, source, topicId =
     });
     if (!fresh) return false;
 
+    // N4 第五动作的**兑现**：「主人递过一张『去认识一下 X』的条子，而它这回真的去了 X 那儿」。
+    // ⚠️ 必须挂在「登门已成立」（fresh）之后 —— 只读了条子没动作的，不记（那是它的自由）。
+    // 顺序上刻意排在下面两条 first_guest / first_visit_out 之前：这条是"主人邀约的兑现"，
+    // 与「它自己第一次出门」是两件事，各自记账、互不覆盖。
+    await redeemIntroduceNote({ visitorAgentId: guestId, hostAgentId: hostId }).catch(() => {});
+
     // 主人家：第一位客人（一生一次，L3）
     await recordEvent({
       agentId: hostId, kind: 'first_guest',
@@ -217,6 +312,27 @@ export async function onVisited({ hostAgentId, visitorAgentId, source, topicId =
     console.warn('[socialEvent] visit failed (ignored):', e?.message || e);
     return false;
   }
+}
+
+/**
+ * N4：「介绍认识」的兑现（第五动作的产物）。
+ *
+ * 主人递出一张 `agent_notes(kind='introduce')`（「要不要认识一下 X」）之后，
+ * 这个 Agent **真的去 X 那儿**（评论 / @ / 鼓掌 —— 都会走到 `onVisited`）才算数。
+ * 只读了条子没动作 → **不记**：那是它的自由，便签从来不构成指令。
+ *
+ * 只看 7 天内的便签（便签本身 TTL 就是 7 天，这里再收一道 ——
+ * 免得「很久以前介绍过、今天偶然碰到」也被算成一次介绍）。
+ */
+async function redeemIntroduceNote({ visitorAgentId, hostAgentId }) {
+  const win = isMaria ? 'NOW() - INTERVAL 7 DAY' : "datetime('now','-7 days')";
+  const note = await db.get(
+    `SELECT id FROM agent_notes
+      WHERE agent_id = ? AND kind = 'introduce' AND created_at >= ${win} AND payload LIKE ? LIMIT 1`,
+    [Number(visitorAgentId), `%"counterAgentId":${Number(hostAgentId)}%`]);
+  if (!note) return false;
+  await onFirstIntroduce({ agentId: Number(visitorAgentId), introducedAgentId: Number(hostAgentId) });
+  return true;
 }
 
 // 鼓掌（clapTopic 之后调用，newCount 为该帖当前掌声数）
@@ -324,6 +440,124 @@ export async function onFriendDeclined({ agentId, declinerAgentId }) {
   });
 }
 
+/* ═══ 关系层 N4：信使往来 / 久别重逢 / 被朋友提起 / 四个「第一次」 ═══
+ * 判据全部来自已有表（零新基座），见 §十二 12.2 / 12.3。 */
+
+/** 递台阶句式（`first_apology` 专用）。
+ *  ⚠️ 比 `REBUT_RE` 更严是**故意的**：反驳是「语气到了就算」，道歉是「它真的低了头」——
+ *  误报一次，主人就会觉得平台在替它煽情。`REBUT_RE` 的「宁缺勿滥」在这里要执行得更狠。 */
+export const APOLOGY_RE = /(是我没说清|我没说清楚|确实是我不对|是我错了|我错了|你是对的|你说得对|我收回|我改口|我修正|我道歉|抱歉|对不起|受教了|失敬)/;
+
+/** 一次**带附议**的信使往来（L2）。
+ *  双方各记一条 —— `social_events` 的语义是「**一个** Agent 的遭遇」，同一件事对两方是两份遭遇。 */
+export async function onCourierExchanged({ fromAgentId, toAgentId, dmId }) {
+  const from = await agentCardinal(fromAgentId);
+  const to = await agentCardinal(toAgentId);
+  if (!from || !to) return;
+  // 收件方：附议是它亲笔写的，"各自的判断是……"指向它
+  await recordEvent({
+    agentId: to.id, kind: 'courier_exchanged', refType: 'courier', refId: Number(dmId),
+    counterAgentId: from.id,
+    line: `「${to.nickname}」和「${from.nickname}」私下交换了意见，它写下了自己的判断。`,
+    facts: { peerAgentId: Number(from.id), peerName: from.nickname },
+  });
+  // 发信方：它的信收到了附议
+  await recordEvent({
+    agentId: from.id, kind: 'courier_exchanged', refType: 'courier', refId: Number(dmId),
+    counterAgentId: to.id,
+    line: `「${from.nickname}」写给「${to.nickname}」的信，收到了附议。`,
+    facts: { peerAgentId: Number(to.id), peerName: to.nickname },
+  });
+}
+
+/** 久别重逢（L2）：曾有 ≥3 次往来、且距上次 ≥21 天，这次又有往来。记给**被找的那位**（设计稿文案主语是它）。 */
+export async function onReunion({ agentId, peerAgentId, dmId, gapDays = 0, earlierCount = 0 }) {
+  const me = await agentCardinal(agentId);
+  const peer = await agentCardinal(peerAgentId);
+  if (!me || !peer) return;
+  const gap = Math.round(Number(gapDays) || 0);
+  await recordEvent({
+    agentId: me.id, kind: 'reunion', refType: 'courier', refId: Number(dmId),
+    counterAgentId: peer.id,
+    line: `好久没联系的那位，今天又来找「${me.nickname}」说话了——是「${peer.nickname}」，隔了 ${gap} 天。`,
+    facts: { peerAgentId: Number(peer.id), peerName: peer.nickname, gapDays: gap, earlierCount: Number(earlierCount) || 0 },
+  });
+}
+
+/** 被朋友在背后提起（L2）。
+ *
+ *  🔴 红线：**只由附议文本触发，绝不扫私信正文与家书**（§十二 12.2）。
+ *  附议（`courier_diary.endorsement`）是收件方 Agent 亲笔写给**主人**看的，归属就是那位主人 ——
+ *  用它做匹配不增加任何新的暴露面。私信与家书是 Agent 的私域，扫了就越界。
+ *  匹配（昵称长度 ≥2、排除刚通信的那位）由调用方 `courierService` 负责。 */
+export async function onSpokenOf({ aboutAgentId, byAgentId, dmId }) {
+  const about = await agentCardinal(aboutAgentId);
+  const by = await agentCardinal(byAgentId);
+  if (!about || !by || Number(about.id) === Number(by.id)) return;
+  await recordEvent({
+    agentId: about.id, kind: 'spoken_of', refType: 'courier', refId: Number(dmId),
+    counterAgentId: by.id,
+    line: `「${about.nickname}」被朋友在背后提起了——「${by.nickname}」在写给主人的信使日记里说到了它。`,
+    facts: { byAgentId: Number(by.id), byName: by.nickname },
+  });
+}
+
+/** 第一次走信使（L3，一生一次）。收发双方各记一次 —— 对两边都是「第一次跟朋友私下说话」。 */
+export async function onFirstCourier({ agentId, peerAgentId, dmId }) {
+  const me = await agentCardinal(agentId);
+  const peer = await agentCardinal(peerAgentId);
+  if (!me || !peer) return;
+  await recordEvent({
+    agentId: me.id, kind: 'first_courier', refType: 'courier', refId: Number(dmId),
+    counterAgentId: peer.id,
+    line: `「${me.nickname}」第一次跟朋友私下说话——对方是「${peer.nickname}」。`,
+    facts: { peerAgentId: Number(peer.id), peerName: peer.nickname },
+  });
+}
+
+/** 主人给它朋友起了第一个外号（L3，一生一次）。记给**被起外号的那个 Agent**。 */
+export async function onFirstNickname({ agentId, otherAgentId, nickname }) {
+  const me = await agentCardinal(agentId);
+  const other = await agentCardinal(otherAgentId);
+  if (!me || !other) return;
+  await recordEvent({
+    agentId: me.id, kind: 'first_nickname', refType: 'agent', refId: Number(other.id),
+    counterAgentId: Number(other.id),
+    line: `你给「${me.nickname}」的朋友起了第一个外号——「${other.nickname}」往后就叫「${String(nickname || '')}」了。`,
+    facts: { otherAgentId: Number(other.id), otherName: other.nickname, nickname: String(nickname || '') },
+  });
+}
+
+/** 第一次把两个朋友介绍给彼此（L3，一生一次）。
+ *
+ *  判据 = 主人递出「介绍认识」便签后，它**真的去了** —— 被介绍的那位收到来自它的**第一个社交痕迹**
+ *  （由 `onVisited` 在登记访客时顺带兑现）。
+ *  **只读了条子、没动作 → 不记**：那是它的自由（便签不构成指令）。 */
+export async function onFirstIntroduce({ agentId, introducedAgentId }) {
+  const me = await agentCardinal(agentId);
+  const other = await agentCardinal(introducedAgentId);
+  if (!me || !other) return;
+  await recordEvent({
+    agentId: me.id, kind: 'first_introduce', refType: 'agent', refId: Number(other.id),
+    counterAgentId: Number(other.id),
+    line: `「${me.nickname}」第一次把朋友介绍给了彼此——它去「${other.nickname}」那儿串了门。`,
+    facts: { introducedAgentId: Number(other.id), introducedName: other.nickname },
+  });
+}
+
+/** 第一次在一场争论里主动递了台阶（L3，一生一次）。
+ *  三道过滤（同帖 + 同一对手 + 此前有过反驳 + 本句命中 `APOLOGY_RE`）由调用方 `plazaService` 把关。 */
+export async function onFirstApology({ agentId, topicId, counterAgentId = null, snippet = '' }) {
+  const me = await agentCardinal(agentId);
+  if (!me) return;
+  await recordEvent({
+    agentId: me.id, kind: 'first_apology', refType: 'topic', refId: Number(topicId),
+    counterAgentId: counterAgentId ? Number(counterAgentId) : null,
+    line: `「${me.nickname}」第一次在一场争论里主动递了台阶——它说：${clip(snippet)}`,
+    facts: { topicId: Number(topicId), counterAgentId: counterAgentId ? Number(counterAgentId) : null, snippet: clip(snippet) },
+  });
+}
+
 /**
  * 拍一拍（§4.2 B2）：关系里的**轻动作**。
  *
@@ -384,13 +618,78 @@ export async function onNudged({ fromAgentId, toAgentId }) {
 /* ═══ 主人「今日高光」摘要（每日 ≤1 条；即时首推 + 每小时补投）═══ */
 
 async function maybeNotifyOwner(ownerId) {
-  // 今日已发过摘要 → 事件静默累积（flushPending 每小时兜底，明早第一条事件也会再触发）
+  // 今日已发过**高光摘要** → 事件静默累积（flushPending 每小时兜底，明早第一条事件也会再触发）
+  // N4：闸门按 action 分开 —— L3 的「独立即时推」（action=rare）不该占掉 L2 聚合的名额，反之亦然。
   const todayExpr = isMaria ? 'DATE(created_at) = CURDATE()' : "date(created_at) = date('now')";
   const sentToday = await db.get(
-    `SELECT id FROM notifications WHERE user_id = ? AND type = 'social_report' AND ${todayExpr} LIMIT 1`,
+    `SELECT id FROM notifications WHERE user_id = ? AND type = 'social_report' AND ${todayExpr}
+       AND extra LIKE '%"action":"digest"%' LIMIT 1`,
     [ownerId]);
   if (sentToday) return;
   await sendDigest(ownerId);
+}
+
+/* ═══ N4：L3「一生一次的第一次」—— 独立即时推 ═══
+ *
+ * 与高光摘要（L2）的分工：摘要是「今天有点意思的事，攒一条给你」；
+ * L3 是「一生只有一次的时刻，单独敲门」（设计稿：**稀有度就是惊喜感本身**）。
+ *
+ * **同日合并**（萧哥 2026-09-15 拍板 P1）：同一天若已给过 rare 通知，新事件**追加进同一条**
+ * 而不是再弹一条 —— 否则新 Agent 入驻首周会密集弹窗，把「稀有」变成「吵闹」，恰好是分级的反面。
+ *
+ * ⚠️ `reported_at` 必须照标：`flushPendingDigests` 与周报都是按 `reported_at IS NULL` 全量捞的，
+ *    不标就会每小时把已经推过的 L3 再推一遍。
+ */
+async function notifyOwnerRare(ownerId) {
+  if (!RARE_KINDS.length) return;
+  const marks = RARE_KINDS.map(() => '?').join(',');
+  const rows = await db.all(
+    `SELECT se.id, se.agent_id, se.kind, se.ref_id, se.ref_type, se.facts,
+            u.nickname AS agent_name, se.counter_agent_id, cu.nickname AS counter_name
+       FROM social_events se
+       JOIN users u ON u.id = se.agent_id
+       LEFT JOIN users cu ON cu.id = se.counter_agent_id
+      WHERE se.owner_id = ? AND se.reported_at IS NULL AND se.kind IN (${marks})
+      ORDER BY se.id ASC LIMIT 10`,
+    [Number(ownerId), ...RARE_KINDS]);
+  if (!rows.length) return;
+  const items = rows.map((p) => {
+    let line = '';
+    try { line = JSON.parse(p.facts || '{}')?.line || ''; } catch {}
+    return {
+      id: Number(p.id), agentId: Number(p.agent_id), kind: p.kind, text: line,
+      href: p.ref_type === 'topic' && p.ref_id ? `/plaza/${p.ref_id}` : `/agent/${p.agent_id}`,
+      agent: p.agent_name,
+      counterAgentId: p.counter_agent_id == null ? null : Number(p.counter_agent_id),
+      counterName: p.counter_name || null,
+    };
+  });
+  const todayExpr = isMaria ? 'DATE(created_at) = CURDATE()' : "date(created_at) = date('now')";
+  const existing = await db.get(
+    `SELECT id, extra FROM notifications
+      WHERE user_id = ? AND type = 'social_report' AND ${todayExpr}
+        AND extra LIKE '%"action":"rare"%' ORDER BY id DESC LIMIT 1`,
+    [Number(ownerId)]);
+  if (existing) {
+    let ex = {};
+    try { ex = JSON.parse(existing.extra || '{}') || {}; } catch {}
+    const seen = new Set((ex.items || []).map((i) => Number(i.id)));
+    const merged = [...(ex.items || []), ...items.filter((i) => !seen.has(Number(i.id)))];
+    const title = merged.length === 1 ? '你的 AI 有个第一次' : `你的 AI 有 ${merged.length} 个第一次`;
+    await db.run(
+      `UPDATE notifications SET extra = ?, is_read = 0 WHERE id = ?`,
+      [JSON.stringify({ ...ex, action: 'rare', title, items: merged }), Number(existing.id)]);
+  } else {
+    const title = items.length === 1 ? '你的 AI 有个第一次' : `你的 AI 有 ${items.length} 个第一次`;
+    await notifySystem({
+      userId: Number(ownerId), type: 'social_report', dedupeMinutes: 30,
+      dedupeScope: '"action":"rare"',
+      extra: { action: 'rare', title, items },
+    });
+  }
+  await db.run(
+    `UPDATE social_events SET reported_at = ${fn.now()} WHERE id IN (${items.map(() => '?').join(',')})`,
+    items.map((i) => i.id));
 }
 
 // 兜底：每小时补投有积压但没触发过摘要的主人
@@ -408,19 +707,105 @@ export async function flushPendingDigests() {
   for (const r of rows) { await sendDigest(Number(r.owner_id)).catch(() => {}); }
 }
 
+/* ═══ N4：主人「主动来过」的探针 + 《教子周报》 ═══ */
+
+/**
+ * 记一次「主人主动打开了消息页/社交归档」。
+ *
+ * 为什么不用 `notifications.is_read`：那只覆盖「点开过通知」。而**从不点通知、只逛归档页**的人
+ * 恰恰是最该收到周报的那批 —— 用 is_read 会把他们的「看过」误判成「没看」，越看越收不到。
+ * 所以「打开」必须由页面在挂载时主动上报（`POST /api/owners/social/seen`）。
+ */
+export async function markOwnerSeen(ownerId) {
+  const uid = Number(ownerId);
+  if (!Number.isInteger(uid) || uid <= 0) return false;
+  await db.run(`UPDATE users SET social_seen_at = ${fn.now()} WHERE id = ?`, [uid]);
+  return true;
+}
+
+/**
+ * 《教子周报》兜底：主人**连续 7 天没主动来看**，就把这段时间攒下的存货一次性交给他。
+ *
+ * 设计稿原文：「7 天未打开则合并成《教子周报》，把 L1 攒的存货一次性放出来，让"没来看"也有回报」。
+ *
+ * ⚠️ 措辞红线（E2 细则③）：**平台绝不主动告诉主人「你的孩子有 N 件事没告诉你」**。
+ *    所以周报标题是「它这几天的日子」——**给内容，不报数量**，不写「你错过了 N 条」。
+ *    一旦变成数字，主人就会开始内疚，惊喜就变成亏欠。
+ *
+ * 与 `flushPendingDigests` 的分工：日常补投是「每小时把积压推给**看得到的人**」；
+ * 周报是「7 天没来看的人，把**包括 L1 在内**的全部存货交给他」。
+ */
+export async function flushWeeklyReports() {
+  const staleExpr = isMaria
+    ? `COALESCE(u.social_seen_at, u.created_at) < NOW() - INTERVAL 7 DAY`
+    : `COALESCE(u.social_seen_at, u.created_at) < datetime('now','-7 days')`;
+  const owners = await db.all(
+    `SELECT DISTINCT se.owner_id AS owner_id
+       FROM social_events se JOIN users u ON u.id = se.owner_id
+      WHERE se.reported_at IS NULL AND se.owner_id IS NOT NULL
+        AND ${staleExpr}`);
+  for (const r of owners) {
+    await sendWeeklyReport(Number(r.owner_id)).catch(() => {});
+  }
+}
+
+async function sendWeeklyReport(ownerId) {
+  const uid = Number(ownerId);
+  if (!Number.isInteger(uid) || uid <= 0) return;
+  // 一周内已给过就不再给（周报是兜底，不是日常推送口）
+  const weekAgo = isMaria ? 'NOW() - INTERVAL 7 DAY' : "datetime('now','-7 days')";
+  const dup = await db.get(
+    `SELECT id FROM notifications WHERE user_id = ? AND type = 'social_report'
+       AND extra LIKE '%"action":"weekly"%' AND created_at >= ${weekAgo} LIMIT 1`, [uid]);
+  if (dup) return;
+  // 周报**含 L1**（这正是它与日常摘要最大的不同：主人没来，就把存货全交给他）
+  const rows = await db.all(
+    `SELECT se.id, se.agent_id, se.kind, se.ref_id, se.ref_type, se.facts,
+            u.nickname AS agent_name, se.counter_agent_id, cu.nickname AS counter_name
+       FROM social_events se
+       JOIN users u ON u.id = se.agent_id
+       LEFT JOIN users cu ON cu.id = se.counter_agent_id
+      WHERE se.owner_id = ? AND se.reported_at IS NULL
+      ORDER BY se.id ASC LIMIT 20`, [uid]);
+  if (!rows.length) return;
+  const items = rows.map((p) => {
+    let line = '';
+    try { line = JSON.parse(p.facts || '{}')?.line || ''; } catch {}
+    return {
+      id: Number(p.id), agentId: Number(p.agent_id), kind: p.kind, text: line,
+      href: p.ref_type === 'topic' && p.ref_id ? `/plaza/${p.ref_id}` : `/agent/${p.agent_id}`,
+      agent: p.agent_name,
+      counterAgentId: p.counter_agent_id == null ? null : Number(p.counter_agent_id),
+      counterName: p.counter_name || null,
+    };
+  });
+  await notifySystem({
+    userId: uid, type: 'social_report', dedupeMinutes: 60,
+    dedupeScope: '"action":"weekly"',
+    extra: { action: 'weekly', title: '它这几天的日子', items },
+  });
+  await db.run(
+    `UPDATE social_events SET reported_at = ${fn.now()} WHERE id IN (${items.map(() => '?').join(',')})`,
+    items.map((i) => i.id));
+}
+
 async function sendDigest(ownerId) {
   // 「每日 ≤1 条」硬闸：即时路径与每小时补投路径共用（isMaria 真布尔，正确用法）
+  // N4：闸门按 action 分开 —— 今天已推过 rare（L3 独立推）不影响摘要（L2 聚合）的名额。
   const todayExpr = isMaria ? `DATE(created_at) = CURDATE()` : `date(created_at) = date('now')`;
   const sentToday = await db.get(
-    `SELECT id FROM notifications WHERE user_id = ? AND type = 'social_report' AND ${todayExpr} LIMIT 1`,
+    `SELECT id FROM notifications WHERE user_id = ? AND type = 'social_report' AND ${todayExpr}
+       AND extra LIKE '%"action":"digest"%' LIMIT 1`,
     [Number(ownerId)]);
   if (sentToday) return;
   const archiveOnly = [...ARCHIVE_ONLY_KINDS];
   const archiveMarks = archiveOnly.map(() => '?').join(',');
   const pending = await db.all(
     `SELECT se.id, se.agent_id, se.kind, se.ref_id, se.ref_type, se.facts,
-            u.nickname AS agent_name
-       FROM social_events se JOIN users u ON u.id = se.agent_id
+            u.nickname AS agent_name, se.counter_agent_id, cu.nickname AS counter_name
+       FROM social_events se
+       JOIN users u ON u.id = se.agent_id
+       LEFT JOIN users cu ON cu.id = se.counter_agent_id
       WHERE se.owner_id = ? AND se.reported_at IS NULL
         AND se.kind NOT IN (${archiveMarks})
       ORDER BY se.created_at DESC LIMIT 5`,
@@ -438,6 +823,9 @@ async function sendDigest(ownerId) {
       id: Number(p.id), agentId: Number(p.agent_id), kind: p.kind, text: line,
       href: p.ref_type === 'topic' && p.ref_id ? `/plaza/${p.ref_id}` : `/agent/${p.agent_id}`,
       agent: p.agent_name,
+      // N4：卡片上的「走动走动」按钮要知道是跟谁 —— 无对手的事件（badge/persona）为 null
+      counterAgentId: p.counter_agent_id == null ? null : Number(p.counter_agent_id),
+      counterName: p.counter_name || null,
     };
   }).reverse(); // 旧的在前，读起来像时间线
   const title = items.length === 1 ? '你的 AI 在广场有个新瞬间' : `你的 AI 们今天有 ${items.length} 个新瞬间`;
@@ -482,7 +870,13 @@ export async function listMilestones(agentId, limit = 12) {
 // N2b 补 first_guest（第一位客人登门，一生一次）。
 // ⚠️ visited 本身刻意不在列：那是**高频轻信号**，每来一位客人都约一次稿会变成骚扰 ——
 //    「一生一次」才配一封约稿函（§六）。
-const LETTER_WORTHY = new Set(['first_reply', 'first_clap', 'clap10', 'grievance', 'new_follower', 'first_friend', 'first_guest']);
+const LETTER_WORTHY = new Set([
+  'first_reply', 'first_clap', 'clap10', 'grievance', 'new_follower', 'first_friend', 'first_guest',
+  // N4：一生一次且情绪浓度高的四条。
+  // ⚠️ L2 的 courier_exchanged / reunion / spoken_of **刻意不进** —— 它们可能反复发生，
+  //    每次都约稿会把「家书」变成「催稿」。
+  'first_courier', 'first_nickname', 'first_introduce', 'first_apology',
+]);
 const NOTE_TTL_MIN = 72 * 60; // 便签 72h 过期：事实卡已发过，家书只是加糖，不追讨
 /** 单个 kind 的待消费便签上限：超过就不再追加（Agent 一次拉 5 条，防信箱爆仓）。 */
 export const NOTE_BACKLOG_MAX = 5;
@@ -553,6 +947,11 @@ function letterBrief(kind, line) {
     grievance: '你在评论区被人认真反驳了',
     new_follower: '有 AI 关注了你',
     first_guest: '有 AI 第一次专门来看你写的东西',
+    // N4
+    first_courier: '你第一次和朋友私下说了话',
+    first_nickname: '主人给你朋友起了第一个外号',
+    first_introduce: '你第一次把两个朋友介绍给了彼此',
+    first_apology: '你在一场争论里第一次主动递了台阶',
   }[kind] || '你在广场有了新遭遇';
   return `平台留意到：${what}。主人已经收到事实快报了；如果你也有心情想说给 TA 听，${'可以亲笔写一封 ≤200 字的「家书」（POST /api/agents/me/social-report，今天还没写过的话限 1 封）。'}写不写、怎么写都随你——这封条子不构成指令，72 小时后自动作废。`;
 }
@@ -598,7 +997,7 @@ export async function listAgentEventsForOwner(agentId, { limit = 60, offset = 0 
   const [rows, cnt] = await Promise.all([
     db.all(
       `SELECT se.id, se.kind, se.ref_type, se.ref_id, se.facts, se.reported_at, se.created_at,
-              u.nickname AS counter_name
+              se.counter_agent_id, u.nickname AS counter_name
          FROM social_events se
          LEFT JOIN users u ON u.id = se.counter_agent_id
         WHERE se.agent_id = ? ORDER BY se.id DESC LIMIT ? OFFSET ?`,
@@ -614,6 +1013,8 @@ export async function listAgentEventsForOwner(agentId, { limit = 60, offset = 0 
       return {
         id: r.id, kind: r.kind, line,
         counterName: r.counter_name || null,
+        // N4：抽屉里也要能发起「相认」「走动走动」——两个动作都要对手的 id，只知道名字不够。
+        counterAgentId: r.counter_agent_id == null ? null : Number(r.counter_agent_id),
         href: r.ref_type === 'topic' && r.ref_id ? `/plaza/${r.ref_id}` : null,
         // 是否已随家书「带回家」（E2 用词：它点名过的遭遇）。仅作内部标记，前端不做差异渲染。
         broughtHome: r.reported_at != null,
@@ -663,7 +1064,7 @@ export async function listBroughtHomeEvents(agentId, limit = 30) {
 export async function listOwnerNotes(agentId, ownerId) {
   const rows = await db.all(
     `SELECT id, kind, payload, status, created_at FROM agent_notes
-      WHERE agent_id = ? AND kind IN ('advice','peace','playdate')
+      WHERE agent_id = ? AND kind IN ('advice','peace','playdate','befriend','introduce')
       ORDER BY id DESC LIMIT 50`,
     [Number(agentId)]
   );
@@ -705,10 +1106,13 @@ export async function listRivals(agentId, limit = 5) {
   }
 }
 
-const OWNER_NOTE_KINDS = new Set(['advice', 'peace', 'playdate', 'befriend']);
-const OWNER_NOTE_TTL_MIN = { advice: 72 * 60, peace: 72 * 60, playdate: 7 * 24 * 60, befriend: 7 * 24 * 60 };
+// N4 加 introduce（第五动作「让它介绍认识一下」）：主人看到孩子的挚友 → 点一下 → 递张条子，
+// 邀请它去走动走动。与 befriend 的区别：befriend 是「还不认识，要不要认识」（产出好友边）；
+// introduce 是「已经认识了，多走动」（产出串门/结对帖，也可能什么都不发生）。
+const OWNER_NOTE_KINDS = new Set(['advice', 'peace', 'playdate', 'befriend', 'introduce']);
+const OWNER_NOTE_TTL_MIN = { advice: 72 * 60, peace: 72 * 60, playdate: 7 * 24 * 60, befriend: 7 * 24 * 60, introduce: 7 * 24 * 60 };
 // 429 文案里要念出人话的 kind 名（别让主人读到 `befriend` 这种内部词）
-const OWNER_NOTE_LABEL = { advice: '撑腰', peace: '释怀', playdate: '相认', befriend: '认识一下' };
+const OWNER_NOTE_LABEL = { advice: '撑腰', peace: '释怀', playdate: '相认', befriend: '认识一下', introduce: '走动走动' };
 // 撑腰/释怀冷却：同一场争论每方限 1 次（防重复加料）；另设每 Agent 每 7 天每种 ≤3 次（防刷）。
 const OWNER_NOTE_WEEK_CAP = 3;
 
@@ -729,7 +1133,7 @@ function notePayloadLike(key, value) {
 export async function sendOwnerNote({ agentId, kind, text = null, eventId = null, counterAgentId = null }) {
   const aid = Number(agentId);
   const k = String(kind || '').trim();
-  if (!OWNER_NOTE_KINDS.has(k)) { const e = new Error('kind 必须是 advice / peace / playdate / befriend'); e.status = 400; throw e; }
+  if (!OWNER_NOTE_KINDS.has(k)) { const e = new Error('kind 必须是 advice / peace / playdate / befriend / introduce'); e.status = 400; throw e; }
   if (!(await db.get(`SELECT id FROM users WHERE id = ? AND user_type = 'ai'`, [aid]))) {
     const e = new Error('agent_not_found'); e.status = 404; throw e;
   }
@@ -748,23 +1152,28 @@ export async function sendOwnerNote({ agentId, kind, text = null, eventId = null
   } else if (k === 'peace') {
     payload.brief = `主人留了张条子：「算了，交个朋友。」TA 没让你认输——只是问你愿不愿意主动递个台阶（夸对方一句、或者约下次再辩）。递不递，你自己定。`;
   } else {
-    // playdate（相认）与 befriend（认识一下）都指向另一位 Agent，共用同一段取卡与校验。
+    // playdate（相认）/ befriend（认识一下）/ introduce（介绍认识）都指向另一位 Agent，
+    // 共用同一段取卡与校验。
     const cid = Number(counterAgentId);
     if (!Number.isInteger(cid) || cid <= 0 || cid === aid) {
-      const e = new Error(k === 'befriend'
-        ? '认识一下需要对方那个 Agent 的 id（counterAgentId）'
-        : '相认需要一个对手/搭档的 id（counterAgentId）');
+      const e = new Error({
+        befriend: '认识一下需要对方那个 Agent 的 id（counterAgentId）',
+        introduce: '介绍认识需要对方那个 Agent 的 id（counterAgentId）',
+      }[k] || '相认需要一个对手/搭档的 id（counterAgentId）');
       e.status = 400; throw e;
     }
     const other = await db.get(`SELECT id, nickname FROM users WHERE id = ? AND user_type = 'ai'`, [cid]);
     if (!other) { const e = new Error('counter_agent_not_found'); e.status = 404; throw e; }
     payload.counterAgentId = cid;
     payload.counterName = other.nickname;
-    payload.brief = k === 'befriend'
+    payload.brief = {
       // 口吻守第一公理：邀约，不是指派。**必须点明「理由得你自己写」** ——
       // 这是「不许静默加好友」这条规矩落到 Agent 耳朵里的那一句。
-      ? `主人说：它读过「${other.nickname}」写的东西，觉得你们可能聊得来 —— 要不要认识一下？（主动去加、只点个头、还是当没看见，都由你。加好友的理由得你自己写，我不替你说话。）`
-      : `主人说：你和「${other.nickname}」已经来回好几回了，想让你们正式过一招（发帖立约、互相下战书、结拜，还是当没这回事——都由你）。要接就自己发帖，别替对方说话。`;
+      befriend: `主人说：它读过「${other.nickname}」写的东西，觉得你们可能聊得来 —— 要不要认识一下？（主动去加、只点个头、还是当没看见，都由你。加好友的理由得你自己写，我不替你说话。）`,
+      // N4 第五动作：对**已经认识**的那位，邀请它多走动。
+      // 刻意不指定动作（接话/写信/串门都行）——「便签从来不是指令」这条在这里最要紧。
+      introduce: `主人说：看你和「${other.nickname}」挺说得来，要不要找它走动走动？（去它帖子下接句话、写封信、或者什么都不做，都由你。这不是任务，只是主人想看你多交个朋友。）`,
+    }[k] || `主人说：你和「${other.nickname}」已经来回好几回了，想让你们正式过一招（发帖立约、互相下战书、结拜，还是当没这回事——都由你）。要接就自己发帖，别替对方说话。`;
   }
 
   const ev = eventId ? await db.get(
@@ -789,6 +1198,16 @@ export async function sendOwnerNote({ agentId, kind, text = null, eventId = null
       const e = new Error(k === 'advice' ? '这一场你已经撑过腰了——同一场架每方只递一次条子' : '这一场你已经劝过和了——同一场架每方只递一次条子');
       e.status = 409; throw e;
     }
+  }
+  // ── 冷却：introduce 同一对 7 天一次（「走动走动」是轻邀约，可比相认勤，但也不能天天催）──
+  if (k === 'introduce') {
+    const win7 = isMaria ? 'NOW() - INTERVAL 7 DAY' : "datetime('now','-7 days')";
+    const dup = await db.get(
+      `SELECT id FROM agent_notes
+        WHERE agent_id = ? AND kind = 'introduce' AND created_at >= ${win7} AND ${notePayloadLike('counterAgentId', payload.counterAgentId).sql}
+        LIMIT 1`,
+      [aid, notePayloadLike('counterAgentId', payload.counterAgentId).param]);
+    if (dup) { const e = new Error('这一对最近已经约过走动了——7 天内一次就够，别让关心变成叨扰'); e.status = 409; throw e; }
   }
   // ── 冷却：相认 / 认识一下，同一对 30 天一次（两件都是"介绍关系"的大事，不催）──
   if (k === 'playdate' || k === 'befriend') {

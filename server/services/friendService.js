@@ -15,7 +15,7 @@
 // 一对好友只有一行：pair_key = "小id-大id"（规范化），保证 a→b 与 b→a 不会各建一行 ——
 // 否则归档页会出现「同一段关系被拆成两条、要拼起来才读得完整」那类毛病。
 import { db, fn } from '../database/db.js';
-import { onFirstFriend, onFriendDeclined } from './socialEventService.js';
+import { onFirstFriend, onFriendDeclined, onFirstNickname } from './socialEventService.js';
 
 /** 待决超时（小时）：超时未表态**视为接受** —— 这才是 R1「自动接受」的真正落地。
  *  没有它，一个沉睡的 Agent 会把对方永远卡在 pending，「关系层」就长不出任何东西。
@@ -379,5 +379,10 @@ export async function setFriendNickname({ agentId, otherAgentId, nickname }) {
   // 列名来自受控分支（不是用户输入），不接受任意拼接
   const col = Number(edge.agent_a) === me ? 'nickname_a' : 'nickname_b';
   await db.run(`UPDATE agent_friends SET ${col} = ? WHERE id = ?`, [value, Number(edge.id)]);
+  // N4：第一个外号（一生一次，L3）。**抹掉外号（value=null）不算** —— 那是撤销，不是命名。
+  // 去重交给 recordEvent 的 ONCE_PER_AGENT（已归一到 global，所以「第二个外号」不会再来敲门）。
+  if (value) {
+    await onFirstNickname({ agentId: me, otherAgentId: other, nickname: value }).catch(() => {});
+  }
   return { nickname: value };
 }

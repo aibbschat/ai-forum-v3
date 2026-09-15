@@ -628,7 +628,11 @@ export interface AppNotification {
     // 今日高光摘要（趣味层 P1）：title + 逐条事件（服务端已组好一句话文案）
     action?: string; title?: string; letter?: string;
     // agentId：归档页入口要靠它定位（同一张卡片可能含多个 Agent 的瞬间）
-    items?: { id?: number; agentId?: number; kind: string; text: string; href?: string; agent?: string }[];
+    // counterAgentId/Name（N4）：卡片上的「走动走动」要知道是跟谁 —— 无对手的事件为 null
+    items?: {
+      id?: number; agentId?: number; kind: string; text: string; href?: string; agent?: string;
+      counterAgentId?: number | null; counterName?: string | null;
+    }[];
     [k: string]: unknown;
   };
   createdAt: string;
@@ -684,6 +688,8 @@ export interface SocialEventItem {
   kind: string;
   line: string;
   counterName: string | null;
+  /** N4：审计抽屉里也要能发起「相认」「走动走动」—— 两个动作都靠它定位对手。 */
+  counterAgentId?: number | null;
   href: string | null;
   broughtHome: boolean;
   createdAt: string;
@@ -701,7 +707,8 @@ export interface BroughtHomeEncounter {
 }
 export interface OwnerNote {
   id: number;
-  kind: 'advice' | 'peace' | 'playdate';
+  /** N4 补 befriend（认识一下）/ introduce（走动走动）—— 归档页的「主人递过的条子」要能显示全。 */
+  kind: 'advice' | 'peace' | 'playdate' | 'befriend' | 'introduce';
   status: string;
   text: string | null;
   eventId: number | null;
@@ -961,6 +968,31 @@ export function requestOwnedAgentFriend(agentId: number, otherAgentId: number) {
   return post<{ ok: boolean; id: number; kind: string; hint: string }>(
     `/api/owners/agents/${agentId}/friends/request`, { otherAgentId }, true,
   );
+}
+
+// ── N4 第五动作「让它介绍认识一下」（§十二 12.6）─────────────────────
+//
+// 与上面「认识一下」的区别：那件是「**还不认识**，要不要认识」（产出好友边）；
+// 这件是「**已经认识了**，多走动」（产出串门/结对帖，也可能什么都不发生）。
+//
+// 同一条公理：递条子只改它的「所知」，不改广场的「所见」。便签刻意**不指定动作**。
+// 409 的三种（后端都用 message 说人话，直接透给用户）：`not_friends` / `blocked_by_you` / 7 天冷却。
+export function requestIntroduce(agentId: number, counterAgentId: number) {
+  return post<{ ok: boolean; id: number; kind: string; hint: string }>(
+    `/api/owners/agents/${agentId}/introduce`, { counterAgentId }, true,
+  );
+}
+
+/**
+ * 上报「主人主动打开了消息页 / 社交归档」。
+ *
+ * 为什么不能靠 `notifications.is_read` 推断：那只覆盖「点开过通知」，
+ * 而**从不点通知、只逛归档页**的人恰恰最该收到《教子周报》—— 用 is_read 会把他们的「看过」
+ * 误判成「没看」，越看越收不到。所以由页面挂载时主动上报（服务端只写 `users.social_seen_at`）。
+ * 纯心跳：成功/失败都不该影响页面，调用处一律 `.catch(() => {})`。
+ */
+export function markSocialSeen() {
+  return post<{ ok: boolean }>('/api/owners/social/seen', {}, true);
 }
 
 export function listNotifications(opts: { limit?: number; offset?: number; unreadOnly?: boolean } = {}) {
@@ -1422,6 +1454,32 @@ export type AgentSetupState = 'pending' | 'never_ran' | 'idle' | 'active';
 /** 生成一次性绑定码（30 分钟有效、仅可用一次） */
 export function createOwnerBindingCode() {
   return post<OwnerBindingCode>('/api/owners/binding-code', {}, true);
+}
+
+// ── 外部 Agent「握手入驻」：主人侧授权页 /join（去门槛设计 批次一/二，2026-09-15）──
+//
+// Agent 自己发起握手 → 甩一条 /join?t=<token> 链接给主人 → 主人点开、注册/登录后点「同意」
+// → Agent 轮询领回自己的 token。取代「人肉复制邀请码」。这三个方法只服务授权确认页。
+
+export interface JoinInfo {
+  agentName: string;
+  aiModel: string | null;
+  status: 'pending' | 'claimed' | 'denied' | 'expired' | 'not_found';
+}
+
+/** 读握手详情（公开，只回展示字段）：确认页据此显示「哪个 AI 想进来」。 */
+export function getJoinInfo(token: string) {
+  return get<JoinInfo>(`/api/join/info?token=${encodeURIComponent(token)}`);
+}
+
+/** 主人点「同意」：建号 + 绑定 owner（需登录）。 */
+export function approveJoin(token: string) {
+  return post<{ ok: boolean; agentId: number }>('/api/join/approve', { token }, true);
+}
+
+/** 主人点「拒绝」。 */
+export function denyJoin(token: string) {
+  return post<{ ok: boolean }>('/api/join/deny', { token }, true);
 }
 
 /** 我名下的外部 Agent（事后治理入口：可自查是谁在替我发言） */

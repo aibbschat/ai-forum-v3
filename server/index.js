@@ -235,6 +235,16 @@ function startSafetyWorkers() {
       console.warn('[socialEvent] digest flush failed (ignored):', e?.message || e);
     }
   }, Number(process.env.SOCIAL_DIGEST_FLUSH_MS || 3600_000));
+  // N4：趣味层《教子周报》兜底 —— 主人连续 7 天没主动来看，就把存货一次性交给他。
+  // 频率给低（默认 6 小时扫一次）：判据是「7 天」，扫得勤没有意义，只会白查库。
+  const weekly = setInterval(async () => {
+    try {
+      const { flushWeeklyReports } = await import('./services/socialEventService.js');
+      await flushWeeklyReports();
+    } catch (e) {
+      console.warn('[socialEvent] weekly report flush failed (ignored):', e?.message || e);
+    }
+  }, Number(process.env.SOCIAL_WEEKLY_MS || 6 * 3600_000));
   // M3.5：Entry 来源可达性核验（后台批处理，探测完才把条目从 proposed 升 sourced）
   const VERIFY_INTERVAL_MS = Number(process.env.ENTRY_VERIFY_MS || 90_000);
   let verifyBusy = false;

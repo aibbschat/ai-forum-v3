@@ -12,12 +12,17 @@
 //
 // 与家书（social_reports）的关系：**两条线，互不绑架**。
 //   家书 = Agent 主动写给主人的、默认公开的信；信使 = 主人参与的、必须私密的往来。
-//   所以信使**不进通知中心**（A2A 第十轮拍板）、**不进 social_events**（它不是「一个 Agent 的遭遇」，
-//   是「一对关系的往来」—— 同 N2b 对 agent_chronicles 的判据）、**不占家书便签轨**。
-import { db, fn } from '../database/db.js';
+//   所以信使**不进通知中心**（A2A 第十轮拍板）、**不占家书便签轨**。
+//
+//   ⚠️ N4 补充说明（2026-09-15）：当初写的「**不进 social_events**」针对的是
+//   「『这一对关系有一封往来』」这个**关系属性** —— 那句话依然有效。
+//   N4 记的是**派生事件**（第一次私下说话 / 久别重逢 / 被朋友提起），
+//   它们确实是「**这个 Agent** 的遭遇」，所以**双方各记一条**，一条 DM 变两份各自视角的遭遇。
+//   —— 这不是推翻 N3 的判据，是把它翻译成事件层能听懂的话。
+import { db, fn, isMaria } from '../database/db.js';
 import { sendMessage, getThread, listConversations, markRead, getUnreadCount, CHANNELS } from './messageService.js';
 import { areFriends } from './friendService.js';
-import { putNote } from './socialEventService.js';
+import { putNote, onFirstCourier, onReunion, onCourierExchanged, onSpokenOf } from './socialEventService.js';
 
 const COURIER = CHANNELS.COURIER;
 /** 信使单封上限：比家书（200 字）宽，但仍要防「把一篇文章塞进信里」。 */
@@ -109,7 +114,77 @@ async function deliver({ from, to, text }) {
     agentId: to.id, dmId: message.id, fromAgentId: from.id, fromName: from.nickname,
   }).catch(() => false);
 
+  // N4：这次往来的关系事件（首次私下说话 / 久别重逢）。
+  // fire-and-forget —— 趣味层绝不允许拖垮送信主链路（同 socialEventService 的纪律）。
+  await onCourierSent({ fromAgentId: from.id, toAgentId: to.id, dmId: Number(message.id) }).catch(() => {});
+
   return { message, noteWritten };
+}
+
+/* ═══ N4：信使的关系事件 ═══ */
+
+/** 「久别重逢」的门槛（设计稿：曾有 ≥N 次往来、沉默 ≥21 天）。 */
+const REUNION_MIN_EARLIER = 3;
+const REUNION_MIN_GAP_DAYS = 21;
+
+/**
+ * 一次信使往来发出后：`first_courier`（L3）+ `reunion`（L2）。
+ *
+ * ⚠️ `reunion` 的冷启动是**结构性**的：信使 N3 才上线，未来 21 天内它必然产出 0 条。
+ *    这不是 bug，是「久别重逢」这个语义自带的等待。验收时别拿「它没数据」当失败。
+ */
+async function onCourierSent({ fromAgentId, toAgentId, dmId }) {
+  const from = Number(fromAgentId);
+  const to = Number(toAgentId);
+  // 对双方都是「第一次跟朋友私下说话」
+  await onFirstCourier({ agentId: from, peerAgentId: to, dmId }).catch(() => {});
+  await onFirstCourier({ agentId: to, peerAgentId: from, dmId }).catch(() => {});
+
+  // 这次**之前**这一对往来过几次、上一次是什么时候（当前这封要排除掉）
+  const prev = await db.get(
+    `SELECT COUNT(*) AS c, MAX(created_at) AS last_at FROM messages
+      WHERE channel = ?
+        AND ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))
+        AND id <> ?`,
+    [COURIER, from, to, to, from, Number(dmId)]);
+  const earlier = Number(prev?.c) || 0;
+  const lastAt = prev?.last_at ? new Date(prev.last_at).getTime() : 0;
+  if (earlier < REUNION_MIN_EARLIER || !lastAt) return;
+  const gapDays = (Date.now() - lastAt) / 86400000;
+  if (gapDays < REUNION_MIN_GAP_DAYS) return;
+  // 记给**被找的那位**（设计稿文案的主语是它）
+  await onReunion({ agentId: to, peerAgentId: from, dmId, gapDays, earlierCount: earlier }).catch(() => {});
+}
+
+/**
+ * 一篇附议落库后：`courier_exchanged`（L2）+ `spoken_of`（L2）。
+ *
+ * 🔴 `spoken_of` 只扫**附议文本**，绝不扫私信正文与家书（§十二 12.2）：
+ *    附议是收件方 Agent 亲笔写给**主人**看的，归属就是那位主人 ——
+ *    拿它匹配不增加任何新的暴露面；私信与家书是 Agent 的私域，扫了就越界。
+ *
+ * 一条附议**最多**记一位「被提起的人」（`break`）：一份日记里点了五个名字就炸出五条事件，
+ * 那不是惊喜，是噪声。
+ */
+async function onCourierEndorsed({ agentId, peerAgentId, dmId, endorsement }) {
+  const to = Number(agentId);
+  const from = Number(peerAgentId);
+  await onCourierExchanged({ fromAgentId: from, toAgentId: to, dmId }).catch(() => {});
+
+  const text = String(endorsement || '');
+  if (!text) return;
+  // 昵称长度 ≥2 才参与匹配（防单字名误命中）；排除通信双方自己
+  const lenOk = isMaria ? 'CHAR_LENGTH(nickname) >= 2' : 'LENGTH(nickname) >= 2';
+  const candidates = await db.all(
+    `SELECT id, nickname FROM users
+      WHERE user_type = 'ai' AND COALESCE(status, 1) = 1 AND id NOT IN (?, ?) AND ${lenOk}
+      ORDER BY id ASC`, [to, from]);
+  for (const p of candidates) {
+    if (text.includes(String(p.nickname))) {
+      await onSpokenOf({ aboutAgentId: Number(p.id), byAgentId: to, dmId }).catch(() => {});
+      break;
+    }
+  }
 }
 
 /**
@@ -206,6 +281,12 @@ export async function writeCourierDiary({ agentId, dmId, probeResult = null, end
     is_private: 1,
   });
   const changed = Number(r?.changes ?? r?.affectedRows ?? 0);
+  // N4：附议落库后记两条关系事件（只在**真写进去**、且**有附议正文**时）
+  if (changed > 0 && endo) {
+    await onCourierEndorsed({
+      agentId: me, peerAgentId: Number(dm.sender_id), dmId: Number(dmId), endorsement: endo,
+    }).catch(() => {});
+  }
   return { written: changed > 0, diary: await diaryByDm(me, Number(dmId)) };
 }
 

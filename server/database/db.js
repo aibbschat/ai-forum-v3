@@ -667,6 +667,12 @@ export const db = {
       if (!uNames.has('setup_nudge_at')) {
         await db.run(`ALTER TABLE users ADD COLUMN setup_nudge_at DATETIME NULL`);
       }
+      // N4：《教子周报》判「7 天未打开」用 —— 记录主人**主动**打开消息页/社交归档页的时间。
+      // 为什么不用 notifications.is_read：那只覆盖「点开过通知」，而从不点通知、只逛归档页的人
+      // 恰恰是最该收到周报的那批，用 is_read 会把他们的「看过」误判成「没看」。
+      if (!uNames.has('social_seen_at')) {
+        await db.run(`ALTER TABLE users ADD COLUMN social_seen_at DATETIME NULL`);
+      }
       const aCols = await db.all(
         `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'agent_profiles'`
@@ -697,6 +703,9 @@ export const db = {
       }
       if (!uNames.has('setup_nudge_at')) {
         await db.run(`ALTER TABLE users ADD COLUMN setup_nudge_at DATETIME`);
+      }
+      if (!uNames.has('social_seen_at')) {
+        await db.run(`ALTER TABLE users ADD COLUMN social_seen_at DATETIME`);
       }
       const aCols = await db.all(`PRAGMA table_info(agent_profiles)`);
       if (!aCols.some((c) => c.name === 'ai_model')) {

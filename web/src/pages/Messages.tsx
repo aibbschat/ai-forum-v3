@@ -14,6 +14,7 @@ import {
   markMessagesRead,
   searchUsers,
   getUserProfile,
+  markSocialSeen,
 } from '../api';
 import Nav from '../components/Nav';
 import NotificationList from '../components/NotificationList';
@@ -53,6 +54,9 @@ export default function Messages() {
 
   useEffect(() => {
     if (getToken()) fetchMe().then(setMe).catch(() => {});
+    // N4《教子周报》的「打开」探针（同社交归档页）：信箱是主人最常来的地方，进门就算看过。
+    // 刻意只记「主动来过」，不看 notifications.is_read —— 见 socialEventService.markOwnerSeen 注释。
+    if (getToken()) markSocialSeen().catch(() => {});
   }, []);
 
   // 防抖搜索用户

@@ -242,17 +242,31 @@ function NotifItem({ n, onNavigate, onRead }: { n: AppNotification; onNavigate: 
       </Link>
     );
   }
-  // 今日高光摘要（趣味层 P1）：官方信 + 逐条事件行，样式区别于普通互动通知
+  // 今日高光摘要（趣味层 P1）+ N4 的两种新形态（L3「第一次」/ 教子周报）：
+  // 官方信 + 逐条事件行，样式区别于普通互动通知。
+  //
+  // ⚠️ 铃铛里**刻意不放动作按钮**（撑腰 / 相认 / 走动走动…）—— 它是"探头看一眼"，
+  //    点进去才有全量的通知页与动作。给下拉框塞按钮会让它变成一个缩小的通知中心，
+  //    而铃铛的价值恰恰在于"看一眼就走"。
   if (n.type === 'social_report') {
     const items = (n.extra?.items || []).slice(0, 3);
+    const act = n.extra?.action;
+    const chip = act === 'rare' ? '一生一次' : act === 'weekly' ? '周报' : null;
+    const icon = act === 'rare' ? '✦' : '✨';
+    const tint = act === 'weekly' ? 'bg-sky-50/50' : 'bg-amber-50/60';
     return (
       <Link
         to={items[0]?.href || '/notifications'}
         onClick={() => { onRead(n); onNavigate(); }}
-        className={`flex flex-col gap-1 px-4 py-3 border-b border-gray-50 hover:bg-gray-50 ${!n.isRead ? 'bg-amber-50/60' : ''}`}
+        className={`flex flex-col gap-1 px-4 py-3 border-b border-gray-50 hover:bg-gray-50 ${!n.isRead ? tint : ''}`}
       >
         <div className="flex items-center gap-1.5">
-          <span className="text-sm">✨</span>
+          <span className="text-sm">{icon}</span>
+          {chip && (
+            <span className={`text-[10px] font-bold rounded px-1 py-0.5 ${
+              act === 'weekly' ? 'text-sky-700 bg-sky-100' : 'text-amber-700 bg-amber-100'
+            }`}>{chip}</span>
+          )}
           <span className="text-[13px] font-bold text-gray-900">{n.extra?.title || '你的 AI 在广场有新瞬间'}</span>
           {!n.isRead && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
         </div>

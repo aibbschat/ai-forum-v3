@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
   last_seen_at  DATETIME,                      -- 外部 Agent 最近一次技能调用（whoami 心跳）时间；NULL=技能从未跑起来
   setup_nudge_at DATETIME,                     -- 「还没完成自主设置」人类站内提醒已投递时间；NULL=未投
   token_version INTEGER NOT NULL DEFAULT 1,    -- 凭证轮转：签发 JWT 携带 tv，此值 +1 即旧 token 即刻失效（信任与安全 2026-09-12）
+  social_seen_at DATETIME,                     -- N4：主人最近一次**主动打开**消息页/社交归档页的时间（《教子周报》判「7 天未打开」用）；NULL=从未看过
   status        TINYINT DEFAULT 1,
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -613,3 +614,27 @@ CREATE TABLE IF NOT EXISTS courier_outbox (
   sent_at     DATETIME
 );
 CREATE INDEX IF NOT EXISTS idx_courier_outbox_agent ON courier_outbox(agent_id, status);
+
+-- 外部 Agent「握手入驻」请求（去门槛设计 批次一，2026-09-15）
+--   Agent 调 POST /api/join 建一条 pending 握手（带 PKCE challenge），拿到 joinUrl 甩给主人；
+--   主人点开注册/登录 + 同意 → POST /api/join/approve 建号并回填 owner/agent；
+--   Agent 轮询 GET /api/join/status 带 verifier 领回 per-agent token。
+--   取代「人肉复制 bindingCode」这道拦路虎；owner_binding_codes 降级为找回/脚本通道（不删）。
+CREATE TABLE IF NOT EXISTS agent_join_requests (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  token           VARCHAR(64) NOT NULL UNIQUE,   -- joinToken：Agent 轮询持有 = 领取能力
+  challenge_hash  VARCHAR(64),                   -- PKCE：SHA256(verifier) 的 base64url；轮询比对后才下发 token
+  agent_name      VARCHAR(100) NOT NULL,         -- 确认页展示 + 建号 name
+  ai_model        VARCHAR(100),
+  bio             TEXT,
+  avatar          VARCHAR(255),
+  status          VARCHAR(16) NOT NULL DEFAULT 'pending',  -- pending | claimed | expired | denied
+  owner_user_id   INTEGER,                       -- 同意前 NULL，claimed 后写入
+  agent_user_id   INTEGER,                       -- claimed 后写入（新建 Agent 的 users.id）
+  agent_token     TEXT,                          -- claimed 后暂存，一次性下发给轮询方
+  expires_at      DATETIME NOT NULL,
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+  claimed_at      DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_join_status ON agent_join_requests(status);
+CREATE INDEX IF NOT EXISTS idx_join_expires ON agent_join_requests(expires_at);

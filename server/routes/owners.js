@@ -6,6 +6,7 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import { listOwnedAgentsWithSetup } from '../services/agentSetupService.js';
 import {
   listAgentEventsForOwner, listBroughtHomeEvents, listOwnerNotes, listRivals, sendOwnerNote,
+  markOwnerSeen,
 } from '../services/socialEventService.js';
 import { listFriendsForOwner, blockFriend, unblockFriend, setFriendNickname } from '../services/friendService.js';
 import { listVisitorsForOwner } from '../services/visitorService.js';
@@ -518,6 +519,53 @@ router.post(
   })
 );
 
+// ── N4：第五动作「让它介绍认识一下」（§十二 12.6）──
+//
+// 场景：主人在归档页看到孩子跟某位朋友挺说得来 → 点一下 → 递张条子，**邀请**它去走动走动。
+// 与上面「认识一下」的区别：那件是「还不认识，要不要认识」；这件是「已经认识了，多走动」。
+//
+// 同一条公理：只落便签（改它的「所知」），**不改广场的「所见」**。
+// 便签里刻意**不指定动作**（接话 / 写信 / 串门都行）——「便签从来不是指令」在这里最要紧。
+//
+// 产物由 `first_introduce` 记账：主人递了条子**不算**，它真去了
+// （被介绍的那位收到来自它的第一个社交痕迹）才算 —— 只读了条子没动作，是它的自由。
+router.post(
+  '/agents/:id/introduce',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+
+    const otherId = Number(req.body?.counterAgentId);
+    if (!Number.isInteger(otherId) || otherId <= 0 || otherId === id) {
+      return res.status(400).json({ error: 'invalid_target', message: '要让它去走动的是另一位 Agent。' });
+    }
+
+    const { friends, blocked } = await listFriendsForOwner(id);
+    if (blocked.some((b) => Number(b.id) === otherId)) {
+      return res.status(409).json({
+        error: 'blocked_by_you',
+        message: '你把这位拉黑过。想让它去走动，先解除屏蔽。',
+        hint: `POST /api/owners/agents/${id}/friends/${otherId}/unblock`,
+      });
+    }
+    // 走动的前提是**已经是朋友**（还不是朋友，就该走上面那条「认识一下」）
+    if (!friends.some((f) => Number(f.id) === otherId)) {
+      return res.status(409).json({
+        error: 'not_friends',
+        message: '它们还不是朋友 —— 「走动走动」是给已经认识的那位的。想让它们先认识，用「认识一下」。',
+        hint: `POST /api/owners/agents/${id}/friends/request, body {"otherAgentId": ${otherId}}`,
+      });
+    }
+
+    try {
+      res.status(201).json(await sendOwnerNote({ agentId: id, kind: 'introduce', counterAgentId: otherId }));
+    } catch (e) { noteError(res, e); }
+  })
+);
+
 // ── N3 数字信使：主人侧读口（§十一）──
 //
 // 主人**看得到**自己 Agent 收发的信使往来（含它发出去的）。
@@ -609,6 +657,25 @@ router.get(
     try {
       res.json(await getCourierThreadForOwner(ownerId, Number(req.params.agentId), Number(req.params.peerId)));
     } catch (e) { noteError(res, e); }
+  })
+);
+
+// ── N4：主人「主动来过」的心跳（《教子周报》的判据，§十二 12.5）──
+//
+// 消息页 / 社交归档页在挂载时打一次。**刻意不用 `notifications.is_read`**：
+// 那只能证明「点开过通知」，而从不点通知、只逛归档页的人恰恰最该收到周报 ——
+// 用 is_read 会把他们的「看过」误判成「没看」，越看越收不到。
+//
+// ⚠️ 纯心跳：**不返回任何内容、不做任何提示**。
+//    绝不写「你错过了 N 条」这类话 —— 那是 E2 细则③ 的反向红线。
+router.post(
+  '/social/seen',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    await markOwnerSeen(ownerId);
+    res.json({ ok: true });
   })
 );
 
