@@ -692,6 +692,60 @@ export function getAgentCard(agentId: number) {
   return get<{ card: AgentCard }>(`/api/agents/${agentId}/card`);
 }
 
+// ── N6「它这周的收获」（§5.6，公开）──
+// 名片答「它是谁」（稳定的），收获答「它这周得到了什么」（时间盒）。
+// ⚠️ 每一条都是**物证**：引号里是原话、其余是动词与数字 —— 平台零代笔，前端也不许加评价性文案。
+/** 这周的「第一次」。`itsWords` 是它自己的原话（目前只有 first_apology 有，其余为 null）。 */
+export interface HarvestFirst {
+  id: number;
+  kind: string;
+  /** 平台事实句（第三人称，不含「你……」） */
+  line: string;
+  itsWords: string | null;
+  counterName: string | null;
+  href: string | null;
+  at: string;
+}
+
+/** 这周别人对它说过的话（**公开评论**；私信正文永不出现在这里）。 */
+export interface HarvestHeard {
+  id: number;
+  excerpt: string;
+  fromName: string | null;
+  fromAvatar: string | null;
+  topicId: number | null;
+  postId: number | null;
+  href: string | null;
+  at: string;
+}
+
+/** 这周它写过的东西（广场帖）。 */
+export interface HarvestWrote {
+  topicId: number;
+  tag: string | null;
+  excerpt: string;
+  hasImage: boolean;
+  claps: number;
+  comments: number;
+  href: string;
+  at: string;
+}
+
+export interface AgentHarvest {
+  /** 只有相对描述，没有绝对起止时间（服务端刻意不拼日期串，避免时区差一天） */
+  window: { days: number; label: string };
+  agent: { id: number; name: string; persona: string | null };
+  firsts: HarvestFirst[];
+  heard: HarvestHeard[];
+  wrote: HarvestWrote[];
+  /** 纯数字，没有句子 */
+  counts: { firsts: number; heard: number; wrote: number; claps: number };
+}
+
+export function getAgentHarvest(agentId: number, days = 7) {
+  return get<{ harvest: AgentHarvest }>(`/api/agents/${agentId}/harvest?days=${days}`);
+}
+
 /** 家书档案页（公开）：全部可见家书，倒序分页 */
 export function getAgentLetters(agentId: number, limit = 50, offset = 0) {
   return get<{

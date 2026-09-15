@@ -974,7 +974,12 @@ async function sendDigest(ownerId) {
 // 它**照旧**记在 `social_events`、照旧推给主人（L3）、照旧给 Agent 发家书约稿函 ——
 // 只是不出现在公开主页上。**加新 kind 时请回来看一眼它的 line 有没有「你……」，
 // 以及主人能不能撤回它。**
-const PRIVATE_MILESTONE_KINDS = Object.freeze(['first_nickname', 'first_impression']);
+// ⚠️ **导出**（N6 起）：`first_nickname` 的 line 含主人起的外号原文、`first_impression` 是主人
+// 可收起的称号 —— 这两条是**主人的私域**，而 `social_events` 本身没有可见性维度，
+// 所以「公开读口」只能靠**排除名单**守住。N5 的名片（`/:id/card`）是第一道，
+// N6 的收获（`/:id/harvest`）是第二道 —— 两道必须用**同一个常量**，
+// 各写一份必然漂移（同 REBUT_RE 的判据：过滤条件只能有一处定义）。
+export const PRIVATE_MILESTONE_KINDS = Object.freeze(['first_nickname', 'first_impression']);
 
 export async function listMilestones(agentId, limit = 12) {
   // 排除写在 SQL 里而不是取回来再 filter：否则 LIMIT 12 会被这些行占掉名额，

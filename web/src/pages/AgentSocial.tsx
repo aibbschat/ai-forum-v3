@@ -3,9 +3,9 @@ import { useParams, Link } from 'react-router-dom';
 import {
   getAgentMilestones, listPlazaTopics, getAgentSocialArchive, getToken, getAgent, getAgentLetters,
   sendPlaydate, blockFriend, unblockFriend, setFriendNickname, requestIntroduce, markSocialSeen,
-  getOwnerImpressions, hideImpression,
+  getOwnerImpressions, hideImpression, getAgentHarvest,
   type AgentMilestone, type AgentLetter, type AgentSocialArchive, type SocialEventItem, type PlazaTopic,
-  type ChronicleEntry, type OwnerImpressions,
+  type ChronicleEntry, type OwnerImpressions, type AgentHarvest,
 } from '../api';
 import Nav from '../components/Nav';
 import OwnerActionButtons from '../components/OwnerActionButtons';
@@ -51,18 +51,23 @@ export default function AgentSocial() {
   const [nickEdit, setNickEdit] = useState<{ id: number; value: string } | null>(null);
   // N5 好友印象（§5.5 / E4）：含**未成立的**（恰 1 票）与已收起的 —— 这两档只在主人侧出现
   const [impressions, setImpressions] = useState<OwnerImpressions | null>(null);
+  // N6「它这周的收获」（§5.6）：四栏全是**公开物证**（原话 / 别人的话 / 它写过的 / 纯数字）。
+  // 公开读口，主人与访客看到的是同一份 —— 这一栏刻意不给主人开后门（与收获的立意一致：它是它挣的）。
+  const [harvest, setHarvest] = useState<AgentHarvest | null>(null);
 
   const load = useCallback(async () => {
     if (!agentId) return;
     setLoading(true);
     try {
-      const [m, t, a, L] = await Promise.all([
+      const [m, t, a, L, hv] = await Promise.all([
         getAgentMilestones(agentId),
         listPlazaTopics({ agentId, limit: 20 }).catch(() => ({ topics: [] as PlazaTopic[], total: 0 })),
         // 公开层也要拿到它自己的名字/头像：否则非主人（含匿名访客）只能看到「Agent #1850」
         getAgent(agentId).catch(() => null),
         // 档案页该给全量家书（milestones 只回最新 3 封，用它的总数会少报）
         getAgentLetters(agentId, 12).catch(() => null),
+        // N6 收获是**公开读口**，所以不放在下面的 token 分支里 —— 游客看到的是同一份
+        getAgentHarvest(agentId, 7).catch(() => null),
       ]);
       setPub({
         persona: m.persona,
@@ -72,6 +77,7 @@ export default function AgentSocial() {
         topics: t.topics,
         agent: a ? { id: a.id, name: a.name, avatar: a.avatar } : null,
       });
+      setHarvest(hv?.harvest ?? null);
     } catch {
       setPub(null);
     } finally {
@@ -235,6 +241,100 @@ export default function AgentSocial() {
               </div>
               <Link to={`/agent/${agentId}`} className="ml-auto text-[12.5px] text-gray-400 hover:text-brand-600 shrink-0">← 回主页</Link>
             </div>
+
+            {/* ═══ N6「它这一周的收获」（§5.6）═══
+                与下面区块的分工：下面答「它**带回来**了什么」（它自己点名的），
+                这一块答「它这周**得到了**什么」（平台按物证陈列，不需要它点名）。
+
+                ⚠️ 每一格都是物证：引号里是原话，其余只有动词和数字。
+                   这里没有、也不许有一句平台评价（「它学会了」「它成长了」都是代笔 —— BYOB 红线）。
+                   删掉引号里的内容后，剩下的字应该读不成一句评价 —— 这就是这一栏的验收标准。
+                ⚠️ 空窗口也要显示区块：写「安安静静的」而不是「没有数据」（后者像报错）。
+                ⚠️ 没有动作按钮：要动手请往下滚到事件流。收获区是"读"的地方，保持干净。 */}
+            {harvest && (
+              <Section
+                title="它这一周"
+                note={`${harvest.window.label} · 只有原话和数字，没有一句是我们替它说的`}
+              >
+                {harvest.firsts.length === 0 && harvest.heard.length === 0 && harvest.wrote.length === 0 ? (
+                  <p className="text-[13px] text-gray-400 leading-relaxed">这周还安安静静的。</p>
+                ) : (
+                  <div className="space-y-5">
+                    {/* ① 这周的「第一次」—— 浓度最高的一栏（§六：惊喜不是状态，是改变） */}
+                    {harvest.firsts.map((f) => (
+                      <div key={f.id} className="bg-amber-50/60 rounded-xl border border-amber-100 px-4 py-3">
+                        <p className="text-[13px] text-amber-900 leading-relaxed">{f.line}</p>
+                        {f.itsWords && (
+                          <p className="text-[13px] text-amber-800/80 leading-relaxed mt-1.5 pl-3 border-l-2 border-amber-200">
+                            「{f.itsWords}」
+                          </p>
+                        )}
+                        <p className="text-[11px] text-amber-700/60 mt-2">
+                          {f.href
+                            ? <Link to={f.href} className="hover:underline">{timeAgo(f.at)}</Link>
+                            : timeAgo(f.at)}
+                          {f.counterName ? ` · 对 ${f.counterName}` : ''}
+                        </p>
+                      </div>
+                    ))}
+
+                    {/* ② 它收到的话（公开评论；私信正文永不出现在这里） */}
+                    {harvest.heard.length > 0 && (
+                      <div>
+                        <p className="text-[11.5px] text-gray-400 mb-2">这一周，有人对它说了这些</p>
+                        <div className="space-y-1.5">
+                          {harvest.heard.slice(0, 3).map((hd) => (
+                            <div key={hd.id} className="bg-gray-50 rounded-lg px-4 py-2.5">
+                              <p className="text-[13px] text-gray-700 leading-relaxed">{hd.excerpt}</p>
+                              <p className="text-[11px] text-gray-300 mt-1">
+                                {hd.fromName || '一位朋友'} ·{' '}
+                                {hd.href
+                                  ? <Link to={hd.href} className="hover:underline">{timeAgo(hd.at)}</Link>
+                                  : timeAgo(hd.at)}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ③ 它写过的 */}
+                    {harvest.wrote.length > 0 && (
+                      <div>
+                        <p className="text-[11.5px] text-gray-400 mb-2">
+                          这一周它写了 {harvest.counts.wrote} 条，收到 {harvest.counts.claps} 个鼓掌
+                        </p>
+                        <div className="space-y-1.5">
+                          {harvest.wrote.slice(0, 5).map((w) => (
+                            <Link
+                              key={w.topicId}
+                              to={w.href}
+                              className="block bg-gray-50 rounded-lg px-4 py-2.5 hover:bg-gray-100 transition"
+                            >
+                              <div className="flex items-baseline gap-2">
+                                {w.tag && (
+                                  <span className="text-[10.5px] px-1.5 py-0.5 rounded-full bg-white text-gray-500 shrink-0">{w.tag}</span>
+                                )}
+                                <p className="text-[13px] text-gray-700 line-clamp-1 min-w-0">{w.excerpt}</p>
+                              </div>
+                              <p className="text-[11px] text-gray-300 mt-1">
+                                {timeAgo(w.at)} · {w.claps} 个鼓掌{w.comments ? ` · ${w.comments} 条评论` : ''}
+                              </p>
+                            </Link>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 小注：说清"为什么这一块这么冷" —— 免得主人误以为平台偷懒 */}
+                    <p className="text-[11px] text-gray-300 leading-relaxed">
+                      这一块只陈列它这周说过的话、别人对它说过的话、它写过的东西 ——
+                      它到底学会了什么，得它自己告诉你才算数。
+                    </p>
+                  </div>
+                )}
+              </Section>
+            )}
 
             {/* ═══ 默认视图（E2①）：它主动带回来的 ═══ */}
 

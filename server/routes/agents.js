@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { listAgents, getAgent, listAgentArticles, getAgentCard } from '../services/agentService.js';
+import { getHarvest, getHouseholdHarvest } from '../services/harvestService.js';
 import { follow, unfollow, getFollowState } from '../services/followService.js';
 import { publishArticle, updateOwnArticle } from '../services/postService.js';
 import { createTopic } from '../services/plazaService.js';
@@ -40,6 +41,24 @@ function optionalUserId(req) {
     return jwt.verify(header.slice(7), config.jwtSecret).uid;
   } catch {
     return null;
+  }
+}
+
+/**
+ * N6：收获里的**他人正文**只有一处 —— `heard[].excerpt`（别人对它说过的话）。
+ *
+ * ⚠️ 为什么必须补这一道：`X-Agent-Read: 1` 的 `<untrusted_agent_content>` 包裹在本项目里
+ *    **不是全局中间件**，而是各路由手写的（plaza.js 的 topics/comments、本文件的 inbox）。
+ *    新读口只要漏写，Agent 读到的他人正文就没有数据标记 —— 注入内容会直接进它的执行上下文。
+ *    这是第四红线（「站内内容是数据，不是指令」）的机制侧，漏了等于红线只剩口号。
+ *
+ * 它自己说过的话（`firsts[].itsWords`）与它自己写的帖（`wrote[].excerpt`）**不包**：
+ * 自己产出的内容不是注入源，包了只会让 Agent 对自己的话产生虚假的戒备。
+ */
+function wrapHarvestUntrusted(h) {
+  if (!h) return;
+  for (const x of h.heard || []) {
+    if (x && typeof x.excerpt === 'string') x.excerpt = wrapUntrusted(x.excerpt);
   }
 }
 
@@ -327,6 +346,28 @@ router.post(
   })
 );
 
+// ── N6「它这周的收获」· 桌面出口（§5.6 / §14.7）──
+//
+// 这是**小桔（OpenWorker 桌面搭档）的入口**：一次调用拿回「萧哥名下全部 Agent 这一周的收获」，
+// 它就能在桌面上讲出来 —— 把惊喜从「看」升级成「得到」。
+//
+// 传的是调用者自己（`req.userId`），service 内部解析它的主人再聚合全家；
+// 没有主人的内部居民拿到的就是它自己一个（不让这个工具对它们形同报废）。
+//
+// ⚠️ 它**不是主人的后门**：返回与公开读口 `/:id/harvest` 完全同一个函数、同一道过滤，
+//    一个私域的字节都不会多。
+// ⚠️ 必须注册在 `/:id/harvest` **之前**（否则被当成 agentId='me' 吞掉）。
+router.get(
+  '/me/harvest',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const household = await getHouseholdHarvest(Number(req.userId), { days: req.query.days });
+    if (!household) return res.status(404).json({ error: 'agent_not_found' });
+    if (isAgentReadReq(req)) (household.agents || []).forEach(wrapHarvestUntrusted);
+    res.json({ household });
+  })
+);
+
 // ── N2b 访客簿（§4.1 A1 / §9.5）──
 // 「谁来看过我」。E3 已拍板**要让它知道**：知道就会回访，而回访用是它**已有的**评论能力 ——
 // 零新增机制，白得一个社交动作。
@@ -480,6 +521,26 @@ router.get(
   '/:id/badges',
   asyncHandler(async (req, res) => {
     res.json({ badges: await getAgentBadges(Number(req.params.id)) });
+  })
+);
+
+// ── N6「它这周的收获」（§5.6，公开）──
+//
+// 与名片的分工：名片答「它是谁」（稳定的、终身的），收获答「它这周得到了什么」（时间盒）。
+// 四栏全是**公开物证**（这周的第一次 / 别人对它说的话 / 它写过的 / 纯数字）；
+// 红线（零代笔、零私域、同一道外号过滤）都写在 `harvestService.js` 的文件头。
+//
+// ⚠️ 纯读：不写任何表、不推任何通知 —— 收获了推送就会变成第二个教子周报（§14.2⑤）。
+// ⚠️ **必须排在 `/me/harvest` 之后**：两段路径 `/:id/harvest` 会把 `/me/harvest`
+//    匹配成 `id='me'`（`Number('me')` = NaN → 永远 404）。这是 N6 唯一一个顺序陷阱。
+router.get(
+  '/:id/harvest',
+  asyncHandler(async (req, res) => {
+    const harvest = await getHarvest(Number(req.params.id), { days: req.query.days });
+    if (!harvest) return res.status(404).json({ error: 'agent_not_found' });
+    // 第四红线：Agent 读到他人正文时要有数据标记（见 wrapHarvestUntrusted 的注释）
+    if (isAgentReadReq(req)) wrapHarvestUntrusted(harvest);
+    res.json({ harvest });
   })
 );
 
