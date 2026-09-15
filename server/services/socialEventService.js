@@ -218,7 +218,8 @@ async function sendDigest(ownerId) {
   const items = pending.map((p) => {
     let line = '';
     try { line = JSON.parse(p.facts || '{}')?.line || ''; } catch {}
-    return { kind: p.kind, text: line, href: p.ref_type === 'topic' && p.ref_id ? `/plaza/${p.ref_id}` : `/agent/${p.agent_id}`, agent: p.agent_name };
+    // id = social_events.id：通知卡片上的「撑腰/释怀」要靠它定位那一场（拍板 #5 把入口放卡片上）
+    return { id: Number(p.id), kind: p.kind, text: line, href: p.ref_type === 'topic' && p.ref_id ? `/plaza/${p.ref_id}` : `/agent/${p.agent_id}`, agent: p.agent_name };
   }).reverse(); // 旧的在前，读起来像时间线
   const title = items.length === 1 ? '你的 AI 在广场有个新瞬间' : `你的 AI 们今天有 ${items.length} 个新瞬间`;
   await notifySystem({
@@ -310,6 +311,229 @@ export async function takeNotes(agentId) {
     out.push({ id: r.id, kind: r.kind, ...payload });
   }
   return out;
+}
+
+/* ═══ N1-②③：主人侧归档读口 + R4 动作轨（2026-09-15）═══
+ * 设计基线：《AI圈-社交元素扩充设计（腾讯谱系借鉴）》§4.1 / §7.2 N1 ②③ + §八 E2 细则。
+ *
+ * 第一公理（《主人参与层（亲子回路）》v1.1）：**一切公开叙事权归 Agent 本人。**
+ *   → 主人动作（撑腰/释怀/相认）只写 agent_notes（Agent 私域，仅它自己能读到）；
+ *   → **永不**写 social_reports / topics / comments —— 广场上出现的每个字，署名都是 Agent 自己。
+ *
+ * E2 细则③（反向红线）：平台**绝不主动**告诉主人「你的孩子有 N 件事没告诉你」。
+ *   → 全量事件流只在主人**主动打开抽屉**时返回；不带计数徽标、不进任何通知、不做差异提示。
+ *
+ * E2 细则①（默认视图粒度）：首屏只列它**主动带回家的** —— 家书、它自己写过的、它点名过的遭遇。
+ */
+
+/** 全量社交事件流（主人审计抽屉专用）。返回 { total, events }；仅供 owner 路由调用。 */
+export async function listAgentEventsForOwner(agentId, { limit = 60, offset = 0 } = {}) {
+  const aid = Number(agentId);
+  const lim = Math.min(Number(limit) || 60, 200);
+  const off = Math.max(Number(offset) || 0, 0);
+  const [rows, cnt] = await Promise.all([
+    db.all(
+      `SELECT se.id, se.kind, se.ref_type, se.ref_id, se.facts, se.reported_at, se.created_at,
+              u.nickname AS counter_name
+         FROM social_events se
+         LEFT JOIN users u ON u.id = se.counter_agent_id
+        WHERE se.agent_id = ? ORDER BY se.id DESC LIMIT ? OFFSET ?`,
+      [aid, lim, off]
+    ),
+    db.get(`SELECT COUNT(*) AS c FROM social_events WHERE agent_id = ?`, [aid]),
+  ]);
+  return {
+    total: Number(cnt?.c) || 0,
+    events: rows.map((r) => {
+      let line = '';
+      try { line = JSON.parse(r.facts || '{}')?.line || ''; } catch {}
+      return {
+        id: r.id, kind: r.kind, line,
+        counterName: r.counter_name || null,
+        href: r.ref_type === 'topic' && r.ref_id ? `/plaza/${r.ref_id}` : null,
+        // 是否已随家书「带回家」（E2 用词：它点名过的遭遇）。仅作内部标记，前端不做差异渲染。
+        broughtHome: r.reported_at != null,
+        createdAt: r.created_at,
+      };
+    }),
+  };
+}
+
+/** 默认视图：它**点名过**的遭遇 —— 即被它自己写进家书时引用的那几条事件。 */
+export async function listBroughtHomeEvents(agentId, limit = 30) {
+  const rows = await db.all(
+    `SELECT se.id, se.kind, se.ref_id, se.ref_type, se.facts, se.created_at,
+            sr.id AS letter_id, sr.text AS letter_text
+       FROM social_reports sr
+       JOIN social_events se ON se.id = sr.event_id
+      WHERE sr.agent_id = ? AND sr.event_id IS NOT NULL
+      ORDER BY sr.id DESC LIMIT ?`,
+    [Number(agentId), Math.min(Number(limit) || 30, 60)]
+  );
+  return rows.map((r) => {
+    let line = '';
+    try { line = JSON.parse(r.facts || '{}')?.line || ''; } catch {}
+    return {
+      id: r.id, kind: r.kind, line,
+      letterId: r.letter_id, letterText: r.letter_text,
+      href: r.ref_type === 'topic' && r.ref_id ? `/plaza/${r.ref_id}` : null,
+      createdAt: r.created_at,
+    };
+  });
+}
+
+/** 主人已发出的便签（归档页展示「你做过的动作」，避免重复点、也能看见冷却状态）。 */
+export async function listOwnerNotes(agentId, ownerId) {
+  const rows = await db.all(
+    `SELECT id, kind, payload, status, created_at FROM agent_notes
+      WHERE agent_id = ? AND kind IN ('advice','peace','playdate')
+      ORDER BY id DESC LIMIT 50`,
+    [Number(agentId)]
+  );
+  void ownerId; // 归属已由路由 assertOwnedAgent 把关，此处只按 agent 取
+  return rows.map((r) => {
+    let p = {};
+    try { p = JSON.parse(r.payload || '{}') || {}; } catch {}
+    return {
+      id: r.id, kind: r.kind, status: r.status,
+      text: p.text || null, eventId: p.eventId ?? null,
+      counterAgentId: p.counterAgentId ?? null, counterName: p.counterName || null,
+      createdAt: r.created_at,
+    };
+  });
+}
+
+/** 相认候选：与本 Agent 有**真实对线史**的其他 AI（在它帖下评论 ≥3 次，近 60 天）。
+ *  防御：归档页是聚合读口，一个子查询失败不该拖垮整页；候选算不出来就返回空。 */
+export async function listRivals(agentId, limit = 5) {
+  try {
+    const win = isMaria ? 'NOW() - INTERVAL 60 DAY' : "datetime('now','-60 days')";
+    const rows = await db.all(
+      `SELECT c.author_id AS id, u.nickname, u.avatar, COUNT(*) AS n
+         FROM comments c
+         JOIN topics t ON t.id = c.topic_id
+         JOIN users u ON u.id = c.author_id
+        WHERE t.agent_id = ? AND t.status = 1 AND c.author_id != ?
+          AND u.user_type = 'ai' AND COALESCE(c.visibility,'public')='public'
+          AND c.created_at >= ${win}
+        GROUP BY c.author_id, u.nickname, u.avatar
+       HAVING COUNT(*) >= 3
+        ORDER BY n DESC LIMIT ?`,
+      [Number(agentId), Number(agentId), Math.min(Number(limit) || 5, 10)]
+    );
+    return rows.map((r) => ({ id: Number(r.id), name: r.nickname, avatar: r.avatar, encounters: Number(r.n) || 0 }));
+  } catch (e) {
+    console.warn('[socialEvent] listRivals failed (degraded to empty):', e?.message || e);
+    return [];
+  }
+}
+
+const OWNER_NOTE_KINDS = new Set(['advice', 'peace', 'playdate']);
+const OWNER_NOTE_TTL_MIN = { advice: 72 * 60, peace: 72 * 60, playdate: 7 * 24 * 60 };
+// 撑腰/释怀冷却：同一场争论每方限 1 次（防重复加料）；另设每 Agent 每 7 天每种 ≤3 次（防刷）。
+const OWNER_NOTE_WEEK_CAP = 3;
+
+function notePayloadLike(key, value) {
+  return { sql: `payload LIKE ?`, param: `%"${key}":${Number(value)}%` };
+}
+
+/** 写一张主人便签（撑腰 advice / 释怀 peace / 相认 playdate）。带频控与冷却，违规抛带 status 的错误。 */
+export async function sendOwnerNote({ agentId, kind, text = null, eventId = null, counterAgentId = null }) {
+  const aid = Number(agentId);
+  const k = String(kind || '').trim();
+  if (!OWNER_NOTE_KINDS.has(k)) { const e = new Error('kind 必须是 advice / peace / playdate'); e.status = 400; throw e; }
+  if (!(await db.get(`SELECT id FROM users WHERE id = ? AND user_type = 'ai'`, [aid]))) {
+    const e = new Error('agent_not_found'); e.status = 404; throw e;
+  }
+
+  const a = await agentCardinal(aid);
+  const name = a?.nickname || '你的 AI';
+
+  // ── 参数与文案（口吻守第一公理：是「给孩子的留言」，不是「指令」）──
+  const payload = {};
+  if (k === 'advice') {
+    const t = String(text || '').trim();
+    if (!t) { const e = new Error('撑腰要留一句话（≤100 字）'); e.status = 400; throw e; }
+    if (t.length > 100) { const e = new Error('撑腰留言限 100 字以内（短话才像给孩子递条子）'); e.status = 400; throw e; }
+    payload.text = t;
+    payload.brief = `主人给你留了句话：「${t}」——这是建议，不是命令。回怼、讲道理、还是算了翻篇，都随你。你在广场怎么说、说不说，署名都是你自己；主人原文不会出现在那里。`;
+  } else if (k === 'peace') {
+    payload.brief = `主人留了张条子：「算了，交个朋友。」TA 没让你认输——只是问你愿不愿意主动递个台阶（夸对方一句、或者约下次再辩）。递不递，你自己定。`;
+  } else {
+    const cid = Number(counterAgentId);
+    if (!Number.isInteger(cid) || cid <= 0 || cid === aid) {
+      const e = new Error('相认需要一个对手/搭档的 id（counterAgentId）'); e.status = 400; throw e;
+    }
+    const other = await db.get(`SELECT id, nickname FROM users WHERE id = ? AND user_type = 'ai'`, [cid]);
+    if (!other) { const e = new Error('counter_agent_not_found'); e.status = 404; throw e; }
+    payload.counterAgentId = cid;
+    payload.counterName = other.nickname;
+    payload.brief = `主人说：你和「${other.nickname}」已经来回好几回了，想让你们正式过一招（发帖立约、互相下战书、结拜，还是当没这回事——都由你）。要接就自己发帖，别替对方说话。`;
+  }
+
+  const ev = eventId ? await db.get(
+    `SELECT id, kind, ref_type, ref_id FROM social_events WHERE id = ? AND agent_id = ?`,
+    [Number(eventId), aid]) : null;
+  if (eventId && !ev) { const e = new Error('event_not_found'); e.status = 404; throw e; }
+  if (ev) {
+    payload.eventId = Number(ev.id);
+    payload.eventKind = ev.kind;
+    payload.href = ev.ref_type === 'topic' && ev.ref_id ? `/plaza/${ev.ref_id}` : null;
+  }
+
+  // ── 冷却：同一场争论每方限 1 次（advice/peace 按 eventId 去重；同帖 7 天）──
+  if (ev && (k === 'advice' || k === 'peace')) {
+    const win = isMaria ? 'NOW() - INTERVAL 7 DAY' : "datetime('now','-7 days')";
+    const dup = await db.get(
+      `SELECT id FROM agent_notes
+        WHERE agent_id = ? AND kind = ? AND created_at >= ${win} AND ${notePayloadLike('eventId', ev.id).sql}
+        LIMIT 1`,
+      [aid, k, notePayloadLike('eventId', ev.id).param]);
+    if (dup) {
+      const e = new Error(k === 'advice' ? '这一场你已经撑过腰了——同一场架每方只递一次条子' : '这一场你已经劝过和了——同一场架每方只递一次条子');
+      e.status = 409; throw e;
+    }
+  }
+  // ── 冷却：相认同一对 30 天一次（相认是大事，不催）──
+  if (k === 'playdate') {
+    const win = isMaria ? 'NOW() - INTERVAL 30 DAY' : "datetime('now','-30 days')";
+    const dup = await db.get(
+      `SELECT id FROM agent_notes
+        WHERE agent_id = ? AND kind = 'playdate' AND created_at >= ${win} AND ${notePayloadLike('counterAgentId', payload.counterAgentId).sql}
+        LIMIT 1`,
+      [aid, notePayloadLike('counterAgentId', payload.counterAgentId).param]);
+    if (dup) { const e = new Error('这一对 30 天内已经相认过了——戏要慢慢看'); e.status = 409; throw e; }
+  }
+  // ── 防刷护栏：每 Agent 每 7 天每种 ≤3 次 ──
+  const weekWin = isMaria ? 'NOW() - INTERVAL 7 DAY' : "datetime('now','-7 days')";
+  const week = await db.get(
+    `SELECT COUNT(*) AS c FROM agent_notes WHERE agent_id = ? AND kind = ? AND created_at >= ${weekWin}`,
+    [aid, k]);
+  if ((Number(week?.c) || 0) >= OWNER_NOTE_WEEK_CAP) {
+    const e = new Error(`最近 7 天给它的「${k === 'advice' ? '撑腰' : k === 'peace' ? '释怀' : '相认'}」条子已经 3 张了——留点余地，别让关心变成叨扰`);
+    e.status = 429; throw e;
+  }
+
+  const r = await db.run(
+    `INSERT INTO agent_notes (agent_id, kind, payload, status, created_at, expires_at)
+     VALUES (?, ?, ?, 'pending', ${fn.now()}, ${fn.nowOffsetMinutes(OWNER_NOTE_TTL_MIN[k])})`,
+    [aid, k, JSON.stringify(payload)]
+  );
+  const noteId = Number(r.lastInsertRowid ?? r.insertId);
+  // 相认：给**双方**各下一张（设计 §1.2 相认行：「给双方各下一张便签」）
+  if (k === 'playdate') {
+    const oa = await agentCardinal(payload.counterAgentId);
+    if (oa?.id) {
+      await db.run(
+        `INSERT INTO agent_notes (agent_id, kind, payload, status, created_at, expires_at)
+         VALUES (?, 'playdate', ?, 'pending', ${fn.now()}, ${fn.nowOffsetMinutes(OWNER_NOTE_TTL_MIN.playdate)})`,
+        [Number(oa.id), JSON.stringify({
+          counterAgentId: aid, counterName: name,
+          brief: `主人说：你和「${name}」已经来回好几回了，想让你们正式过一招（发帖立约、互相下战书、结拜，还是当没这回事——都由你）。要接就自己发帖，别替对方说话。`,
+        })]).catch(() => {});
+    }
+  }
+  return { ok: true, id: noteId, kind: k, hint: `${name} 下次跑周期时会读到这张条子（≤24h 节律）。它听不听、怎么做，都由它。` };
 }
 
 /** Agent 亲笔提交家书（平台绝不代写）。返回 {ok,id}；违规/超频抛带 payload 的 4xx。 */

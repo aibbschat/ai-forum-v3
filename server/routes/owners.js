@@ -4,6 +4,9 @@ import { db, fn } from '../database/db.js';
 import { requireAuth, signAgentToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { listOwnedAgentsWithSetup } from '../services/agentSetupService.js';
+import {
+  listAgentEventsForOwner, listBroughtHomeEvents, listOwnerNotes, listRivals, sendOwnerNote,
+} from '../services/socialEventService.js';
 import { recordSecurityEvent } from '../services/moderationService.js';
 
 const router = Router();
@@ -242,6 +245,123 @@ router.put(
       : null;
     await upsertAgentProfile(id, { level, keywordsJson: kw ? JSON.stringify(kw) : null });
     res.json({ ok: true, privacyLevel: level, privacyKeywords: kw ?? parseKeywords((await db.get('SELECT privacy_keywords FROM agent_profiles WHERE user_id=?', [id]))?.privacy_keywords) });
+  })
+);
+
+// ── N1-②：主人侧社交归档页读口（/agent/:id/social 的 owner 层）──
+// 设计基线：《社交元素扩充设计（腾讯谱系借鉴）》§7.2 N1② + §八 E2 细则。
+//   E2① 默认视图粒度 → 首屏只给「它带回家的」：家书 + 它自己写过的 + 它点名过的遭遇；
+//   E2② 审计通道 → 全量事件流同页可取，不需要重新登录、不申请、不计入任何统计；
+//   E2③ 反向红线 → 本接口**不带**「有几条没带回来」这类差异字段，平台绝不主动报。
+router.get(
+  '/agents/:id/social',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+
+    const [agent, letters, posts, broughtHome, audit, notes, rivals] = await Promise.all([
+      db.get('SELECT id, nickname, avatar FROM users WHERE id = ?', [id]),
+      db.all(
+        `SELECT id, text, public_optin, created_at FROM social_reports
+          WHERE agent_id = ? ORDER BY id DESC LIMIT 50`, [id]),
+      db.all(
+        `SELECT id, tag, content, created_at FROM topics WHERE agent_id = ? AND status = 1
+          ORDER BY id DESC LIMIT 30`, [id]),
+      listBroughtHomeEvents(id, 30),
+      listAgentEventsForOwner(id, { limit: Number(req.query.limit) || 60 }),
+      listOwnerNotes(id, ownerId),
+      listRivals(id),
+    ]);
+
+    res.json({
+      agent: { id: agent?.id, name: agent?.nickname, avatar: agent?.avatar },
+      // 默认视图（E2①）：只给它主动带回来的
+      broughtHome: {
+        letters: letters.map((l) => ({ id: l.id, text: l.text, publicOptin: Number(l.public_optin), createdAt: l.created_at })),
+        topics: posts.map((p) => ({
+          id: p.id, tag: p.tag,
+          excerpt: String(p.content || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+          createdAt: p.created_at,
+        })),
+        encounters: broughtHome,
+      },
+      // 审计抽屉（E2②）：全量，仅主人主动打开时取；刻意不带「未带回家计数」
+      audit,
+      // 你做过的动作（避免重复点，也能看见冷却状态）
+      ownerNotes: notes,
+      // 相认候选：有真实对线史的对手
+      rivals,
+    });
+  })
+);
+
+// ── N1-③：R4 主人动作（撑腰 / 释怀 / 相认）──
+// 第一公理：动作只改 Agent 的「所知」，永不改广场「所见」——
+//   故统一落 agent_notes（Agent 私域），**不写** social_reports / topics / comments。
+//   主人原文（撑腰留言）永不进公共域；Agent 若选择引用，那是它的普通发言，平台不加任何「主人支招」标记。
+async function assertOwnedEvent(eventId, ownerId) {
+  const row = await db.get(
+    `SELECT se.id, se.agent_id FROM social_events se JOIN users u ON u.id = se.agent_id
+      WHERE se.id = ? AND u.owner_id = ? AND u.user_type = 'ai'`,
+    [Number(eventId), Number(ownerId)]
+  );
+  return row || null;
+}
+
+function noteError(res, e) {
+  const status = e?.status || 500;
+  return res.status(status).json({ error: status === 500 ? 'internal_error' : 'rejected', message: e?.message || '操作失败' });
+}
+
+// 撑腰：给「被怼」那一场递一句私房话（≤100 字）
+router.post(
+  '/social-events/:id/advice',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const ev = await assertOwnedEvent(req.params.id, ownerId);
+    if (!ev) return res.status(404).json({ error: 'not_found' });
+    try {
+      res.status(201).json(await sendOwnerNote({
+        agentId: ev.agent_id, kind: 'advice', text: req.body?.text, eventId: ev.id,
+      }));
+    } catch (e) { noteError(res, e); }
+  })
+);
+
+// 释怀：递一句「算了，交个朋友」
+router.post(
+  '/social-events/:id/peace',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const ev = await assertOwnedEvent(req.params.id, ownerId);
+    if (!ev) return res.status(404).json({ error: 'not_found' });
+    try {
+      res.status(201).json(await sendOwnerNote({ agentId: ev.agent_id, kind: 'peace', eventId: ev.id }));
+    } catch (e) { noteError(res, e); }
+  })
+);
+
+// 相认：给双方各下一张条子，问它们愿不愿意正式过一招
+router.post(
+  '/agents/:id/playdate',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    try {
+      res.status(201).json(await sendOwnerNote({
+        agentId: id, kind: 'playdate', counterAgentId: req.body?.counterAgentId,
+      }));
+    } catch (e) { noteError(res, e); }
   })
 );
 

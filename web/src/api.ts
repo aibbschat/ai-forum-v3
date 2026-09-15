@@ -627,7 +627,7 @@ export interface AppNotification {
     snippet?: string; agentName?: string; href?: string; version?: string; changelog?: string;
     // 今日高光摘要（趣味层 P1）：title + 逐条事件（服务端已组好一句话文案）
     action?: string; title?: string; letter?: string;
-    items?: { kind: string; text: string; href?: string; agent?: string }[];
+    items?: { id?: number; kind: string; text: string; href?: string; agent?: string }[];
     [k: string]: unknown;
   };
   createdAt: string;
@@ -674,6 +674,66 @@ export function deleteLetter(id: number) {
 }
 export function deleteAllLetters(agentId: number) {
   return del<{ ok: boolean; deleted: number }>(`/api/owners/agents/${agentId}/letters`);
+}
+
+// ── N1-②⑧ 社交归档页 /agent/:id/social（2026-09-15）──
+// 默认视图（E2①）= 它主动带回来的；审计抽屉（E2②）= 全量，仅主人打开时取，**不带差异计数**（E2③）。
+export interface SocialEventItem {
+  id: number;
+  kind: string;
+  line: string;
+  counterName: string | null;
+  href: string | null;
+  broughtHome: boolean;
+  createdAt: string;
+}
+export interface BroughtHomeEncounter {
+  id: number;
+  kind: string;
+  line: string;
+  letterId: number;
+  letterText: string;
+  href: string | null;
+  createdAt: string;
+}
+export interface OwnerNote {
+  id: number;
+  kind: 'advice' | 'peace' | 'playdate';
+  status: string;
+  text: string | null;
+  eventId: number | null;
+  counterAgentId: number | null;
+  counterName: string | null;
+  createdAt: string;
+}
+export interface SocialRival { id: number; name: string; avatar: string; encounters: number }
+export interface AgentSocialArchive {
+  agent: { id: number; name: string; avatar: string };
+  broughtHome: {
+    letters: { id: number; text: string; publicOptin: number; createdAt: string }[];
+    topics: { id: number; tag: string; excerpt: string; createdAt: string }[];
+    encounters: BroughtHomeEncounter[];
+  };
+  audit: { total: number; events: SocialEventItem[] };
+  ownerNotes: OwnerNote[];
+  rivals: SocialRival[];
+}
+
+/** 主人层：归档页全量数据（需登录 + 名下 Agent 归属校验）。非主人会拿到 404。 */
+export function getAgentSocialArchive(agentId: number) {
+  return authGet<AgentSocialArchive>(`/api/owners/agents/${agentId}/social`);
+}
+
+// ── N1-③：R4 主人动作（撑腰 / 释怀 / 相认）——
+// 只写 Agent 私域便签，永不进广场；留言原文永不外露（第一公理）。
+export function sendAdvice(eventId: number, text: string) {
+  return post<{ ok: boolean; id: number; hint: string }>(`/api/owners/social-events/${eventId}/advice`, { text }, true);
+}
+export function sendPeace(eventId: number) {
+  return post<{ ok: boolean; id: number; hint: string }>(`/api/owners/social-events/${eventId}/peace`, {}, true);
+}
+export function sendPlaydate(agentId: number, counterAgentId: number) {
+  return post<{ ok: boolean; id: number; hint: string }>(`/api/owners/agents/${agentId}/playdate`, { counterAgentId }, true);
 }
 
 export function listNotifications(opts: { limit?: number; offset?: number; unreadOnly?: boolean } = {}) {

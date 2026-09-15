@@ -8,6 +8,7 @@ import {
 } from '../api';
 import { avatarOf, timeAgo } from '../lib';
 import { ListSkeleton, EmptyState } from './AsyncState';
+import OwnerActionButtons from './OwnerActionButtons';
 
 /**
  * 通知列表（共享组件，2026-09-12）：
@@ -68,6 +69,13 @@ export default function NotificationList() {
     } catch { /* ignore */ }
   };
 
+  // 递过条子后静默刷新（不闪骨架）：只为让「已递过」状态可见，避免同一场重复点。
+  const refresh = useCallback(() => {
+    listNotifications({ limit: 50, unreadOnly: tab === 'unread' })
+      .then((r) => { setItems(r.notifications); setUnread(r.unread); })
+      .catch(() => { /* ignore */ });
+  }, [tab]);
+
   return (
     <>
       <div className="flex items-center justify-between mb-1">
@@ -109,7 +117,7 @@ export default function NotificationList() {
       ) : (
         <div className="bg-white border border-gray-100 rounded-lg divide-y divide-gray-50">
           {items.map((n) => (
-            <NotifRow key={n.id} n={n} onOpen={open} />
+            <NotifRow key={n.id} n={n} onOpen={open} onChanged={refresh} />
           ))}
         </div>
       )}
@@ -117,7 +125,7 @@ export default function NotificationList() {
   );
 }
 
-function NotifRow({ n, onOpen }: { n: AppNotification; onOpen: (n: AppNotification) => void }) {
+function NotifRow({ n, onOpen, onChanged }: { n: AppNotification; onOpen: (n: AppNotification) => void; onChanged: () => void }) {
   // 亲笔家书（趣味层 P2）
   if (n.type === 'social_report' && n.extra?.action === 'letter') {
     return (
@@ -154,13 +162,22 @@ function NotifRow({ n, onOpen }: { n: AppNotification; onOpen: (n: AppNotificati
         </div>
         <div className="mt-2 space-y-1.5">
           {items.map((it, i) => (
-            <p key={i} className="text-[13px] text-gray-600 leading-snug">
-              {it.href ? (
-                <Link to={it.href} className="hover:text-brand-600" onClick={(e) => e.stopPropagation()}>· {it.text}</Link>
-              ) : (
-                <>· {it.text}</>
-              )}
-            </p>
+            <div key={i}>
+              <p className="text-[13px] text-gray-600 leading-snug">
+                {it.href ? (
+                  <Link to={it.href} className="hover:text-brand-600" onClick={(e) => e.stopPropagation()}>· {it.text}</Link>
+                ) : (
+                  <>· {it.text}</>
+                )}
+              </p>
+              {/* 拍板 #5：撑腰/释怀入口放通知卡片上（即时打扰换即时参与）。
+                  只对「被认真反驳」这一类给动作——别的瞬间不需要主人出手。 */}
+              {it.kind === 'grievance' && it.id ? (
+                <div className="pl-3 mt-1.5">
+                  <OwnerActionButtons eventId={it.id} compact onDone={onChanged} />
+                </div>
+              ) : null}
+            </div>
           ))}
         </div>
       </div>

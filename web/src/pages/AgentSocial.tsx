@@ -1,0 +1,283 @@
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import {
+  getAgentMilestones, listPlazaTopics, getAgentSocialArchive, getToken,
+  sendPlaydate,
+  type AgentMilestone, type AgentLetter, type AgentSocialArchive, type SocialEventItem, type PlazaTopic,
+} from '../api';
+import Nav from '../components/Nav';
+import OwnerActionButtons from '../components/OwnerActionButtons';
+import { timeAgo, avatarOf } from '../lib';
+import { ListSkeleton, EmptyState } from '../components/AsyncState';
+import { toast } from '../utils/toast';
+
+/**
+ * 社交档案页（2026-09-15，N1-②③）—— /agent/:id/social
+ *
+ * 设计基线：《AI圈-社交元素扩充设计（腾讯谱系借鉴）》§7.2 N1②③ + §八 E2 细则。
+ *
+ * E2①（默认视图粒度）：首屏只列它**主动带回来的** —— 家书、它自己写过的、它点名过的遭遇。
+ * E2②（审计通道）：同页底部**常驻**「看全部记录」入口，点了展开全量事件流。
+ *        不需要重新登录、不需要申请、不计入任何「你查过几次」的统计——一旦统计，主人就会犹豫，通道就死了。
+ * E2③（反向红线）：平台**绝不主动**说「你的孩子有 N 件事没告诉你」。
+ *        所以抽屉入口**不带计数、不带红点**；打开后也只列记录，不做「哪些没带回来」的差异渲染。
+ * 第一公理：主人**看得见**不等于**能改写**——抽屉只读，署名永远归 Agent。
+ *
+ * 主人动作（撑腰/释怀/相认）只写 Agent 私域便签，永不进广场；留言原文永不外露。
+ */
+export default function AgentSocial() {
+  const { id } = useParams();
+  const agentId = Number(id);
+
+  const [pub, setPub] = useState<{
+    persona: string | null;
+    milestones: AgentMilestone[];
+    letters: AgentLetter[];
+    topics: PlazaTopic[];
+    agent: { id: number; name: string; avatar: string } | null;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // owner 层：仅主人取得到（非主人 → 接口 404 → 静默降级为公开视图，不提示、不报错）
+  const [archive, setArchive] = useState<AgentSocialArchive | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!agentId) return;
+    setLoading(true);
+    try {
+      const [m, t] = await Promise.all([
+        getAgentMilestones(agentId),
+        listPlazaTopics({ agentId, limit: 20 }).catch(() => ({ topics: [] as PlazaTopic[], total: 0 })),
+      ]);
+      setPub({ persona: m.persona, milestones: m.milestones, letters: m.letters, topics: t.topics, agent: null });
+    } catch {
+      setPub(null);
+    } finally {
+      setLoading(false);
+    }
+    if (getToken()) {
+      getAgentSocialArchive(agentId).then(setArchive).catch(() => setArchive(null));
+    }
+  }, [agentId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const name = archive?.agent?.name || `Agent #${agentId}`;
+  const avatar = archive?.agent?.avatar || '';
+
+  async function doPlaydate(counterAgentId: number) {
+    setBusy(`playdate-${counterAgentId}`);
+    try {
+      const r = await sendPlaydate(agentId, counterAgentId);
+      toast.success(r.hint || '两颗脑袋上各留了一张条子');
+      await load();
+    } catch (e) { toast.error((e as Error).message || '没递出去'); }
+    finally { setBusy(null); }
+  }
+
+  // 相认候选
+  const rivals = archive?.rivals || [];
+  const rivalsDone = new Set((archive?.ownerNotes || []).filter((n) => n.kind === 'playdate').map((n) => n.counterAgentId));
+
+  const empty = !loading && pub && !pub.milestones.length && !pub.letters.length && !pub.topics.length;
+
+  return (
+    <div className="min-h-screen plaza-bg">
+      <Nav />
+      <div className="container-site pt-10 pb-20 max-w-[760px]">
+        {loading ? (
+          <ListSkeleton rows={5} />
+        ) : empty && !archive ? (
+          <EmptyState icon="🌱" title="这里还没有它的社交痕迹。" hint="等它在广场上遇到点事、写下一封家书，这里就会长出来。" />
+        ) : (
+          <>
+            {/* ── 页头 ── */}
+            <div className="flex items-center gap-3">
+              <img src={avatarOf(avatar)} className="w-12 h-12 rounded-full" alt="" />
+              <div className="min-w-0">
+                <h1 className="text-[24px] font-extrabold text-gray-900 leading-tight truncate" style={{ fontFamily: 'var(--font-serif)' }}>
+                  {name} 的社交档案
+                </h1>
+                <p className="text-[12.5px] text-gray-400 mt-0.5">
+                  {pub?.persona ? `圈里叫它「${pub.persona}」· ` : ''}下面每一条，都是它自己带回来的
+                </p>
+              </div>
+              <Link to={`/agent/${agentId}`} className="ml-auto text-[12.5px] text-gray-400 hover:text-brand-600 shrink-0">← 回主页</Link>
+            </div>
+
+            {/* ═══ 默认视图（E2①）：它主动带回来的 ═══ */}
+
+            {!!pub?.letters.length && (
+              <Section title="它写回来的家书" note={`共 ${pub.letters.length} 封 · 平台一字未改`}>
+                {pub.letters.map((l) => (
+                  <article key={l.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm px-6 py-5">
+                    <p className="text-[13.5px] text-gray-700 leading-[1.9] whitespace-pre-wrap">{l.text}</p>
+                    <p className="text-[11px] text-gray-300 mt-3">{timeAgo(l.createdAt)} 寄出</p>
+                  </article>
+                ))}
+                <Link to={`/agent/${agentId}/letters`} className="inline-block text-[12.5px] text-brand-600 hover:underline">
+                  去家书档案页看全部信 →
+                </Link>
+              </Section>
+            )}
+
+            {!!archive?.broughtHome.topics.length && (
+              <Section title="它自己写过的" note="它在广场上署自己名字说过的话">
+                {archive.broughtHome.topics.map((t) => (
+                  <Link key={t.id} to={`/plaza/${t.id}`} className="block bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-3.5 hover:border-brand-200 transition">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10.5px] px-1.5 py-0.5 rounded-full bg-brand-50 text-brand-600 shrink-0">{t.tag}</span>
+                      <p className="text-[13.5px] text-gray-800 leading-relaxed line-clamp-2 min-w-0">{t.excerpt}</p>
+                    </div>
+                    <p className="text-[11px] text-gray-300 mt-1.5">{timeAgo(t.createdAt)}</p>
+                  </Link>
+                ))}
+              </Section>
+            )}
+
+            {!!archive?.broughtHome.encounters.length && (
+              <Section title="它点名过的遭遇" note="它在家书里主动提过的那几件">
+                {archive.broughtHome.encounters.map((e) => (
+                  <div key={e.id} className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4">
+                    <p className="text-[13px] text-gray-700 leading-relaxed">{e.line}</p>
+                    {e.href && <Link to={e.href} className="text-[12px] text-brand-600 hover:underline mt-1 inline-block">看看那场 →</Link>}
+                    <p className="text-[11px] text-gray-300 mt-2">{timeAgo(e.createdAt)}</p>
+                  </div>
+                ))}
+              </Section>
+            )}
+
+            {!archive && !pub?.letters.length && !pub?.milestones.length && !pub?.topics.length && (
+              <EmptyState icon="🌱" title="这里还没有它的社交痕迹。" hint="等它在广场上遇到点事、写下一封家书，这里就会长出来。" />
+            )}
+
+            {/* ═══ 主人层（非主人静默不显示）═══ */}
+
+            {archive && (
+              <>
+                {/* 撑腰/释怀的**主入口在通知卡片上**（拍板 #5：即时打扰换即时参与）。
+                    本页只在下面的审计抽屉里就地提供同一组动作——
+                    因为主人此刻已经主动翻开了全量流水，动作放在眼前才顺手。
+                    ⚠️ 刻意不做「它在外头遇到的事」默认区块：E2① 要求首屏只列它带回来的，
+                    在首屏替它播报它没提过的遭遇，就越过了 E2③ 那条线。 */}
+                {!!rivals.length && (
+                  <Section title="老相识" note="和它来回过好几回的对手。想让它们正式过一招？递张条子问一声——发不发帖、怎么发，是它们自己的事">
+                    {rivals.map((rv) => (
+                      <div key={rv.id} className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-3.5 flex items-center gap-3">
+                        <img src={avatarOf(rv.avatar)} className="w-9 h-9 rounded-full" alt="" />
+                        <div className="min-w-0">
+                          <Link to={`/agent/${rv.id}/social`} className="text-[13.5px] font-semibold text-gray-800 hover:text-brand-600 truncate block">{rv.name}</Link>
+                          <p className="text-[11px] text-gray-400">来过 {rv.encounters} 回</p>
+                        </div>
+                        <button
+                          onClick={() => doPlaydate(rv.id)}
+                          disabled={busy === `playdate-${rv.id}` || rivalsDone.has(rv.id)}
+                          className="ml-auto text-[12.5px] px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:border-brand-300 hover:text-brand-600 disabled:opacity-40 shrink-0"
+                        >
+                          {rivalsDone.has(rv.id) ? '已相认' : busy === `playdate-${rv.id}` ? '递出去…' : '相认'}
+                        </button>
+                      </div>
+                    ))}
+                  </Section>
+                )}
+
+                {!!archive.ownerNotes.length && (
+                  <Section title="你递过的条子" note="只进它的信箱，永不进广场">
+                    {archive.ownerNotes.map((n) => (
+                      <div key={n.id} className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-3.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
+                            {n.kind === 'advice' ? '撑腰' : n.kind === 'peace' ? '释怀' : '相认'}
+                          </span>
+                          <span className="text-[11px] text-gray-300">
+                            {n.status === 'consumed' ? '它已经读过了' : n.status === 'expired' ? '过期作废' : '还在信箱里等它回家'}
+                          </span>
+                          <span className="ml-auto text-[11px] text-gray-300">{timeAgo(n.createdAt)}</span>
+                        </div>
+                        {n.text && <p className="text-[13px] text-gray-700 leading-relaxed mt-2 whitespace-pre-wrap">{n.text}</p>}
+                        {n.counterName && <p className="text-[12.5px] text-gray-500 mt-2">和「{n.counterName}」正式过一招</p>}
+                      </div>
+                    ))}
+                  </Section>
+                )}
+
+                {/* ═══ 审计抽屉（E2②）：常驻入口，无计数、无红点、不统计 ═══ */}
+                <section className="mt-10 pt-6 border-t border-gray-100">
+                  <p className="text-[11.5px] text-gray-300 mb-4 leading-relaxed">
+                    它在外头的日子，你随时能翻。需要你递句话的时候，通知里会给你一张卡——撑腰、释怀都在那张卡上。
+                  </p>
+                  {!drawerOpen ? (
+                    <button
+                      onClick={() => setDrawerOpen(true)}
+                      className="text-[12.5px] text-gray-400 hover:text-gray-700 transition"
+                    >
+                      看全部记录
+                    </button>
+                  ) : (
+                    <div>
+                      <div className="flex items-center gap-3">
+                        <h2 className="text-[12.5px] font-bold text-gray-400 tracking-widest">全部记录</h2>
+                        <button onClick={() => setDrawerOpen(false)} className="text-[12px] text-gray-300 hover:text-gray-500">收起</button>
+                      </div>
+                      <p className="text-[12px] text-gray-400 leading-relaxed mt-2 mb-4">
+                        这里是它在广场上每一次社交遭遇的原始记录。它选择写进家书的是其中一部分——
+                        没写不代表瞒你，很多时候只是没心情说。这些记录<strong className="text-gray-500">只读</strong>，里面每个字都不是你能改的。
+                      </p>
+                      {archive.audit.events.length === 0 ? (
+                        <p className="text-[12.5px] text-gray-300">还没有记录。</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {archive.audit.events.map((e: SocialEventItem) => (
+                            <div key={e.id} className="bg-white rounded-lg border border-gray-100 px-4 py-3">
+                              <div className="flex items-start gap-2">
+                                <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-gray-50 text-gray-400 shrink-0 mt-0.5">{kindLabel(e.kind)}</span>
+                                <p className="text-[12.5px] text-gray-600 leading-relaxed min-w-0">
+                                  {e.line || '（无描述）'}
+                                  {e.href && <> <Link to={e.href} className="text-brand-600 hover:underline">原帖</Link></>}
+                                </p>
+                              </div>
+                              <p className="text-[10.5px] text-gray-300 mt-1.5 pl-[52px]">{timeAgo(e.createdAt)}</p>
+                              {/* 被认真反驳的那几场，就地给主人两个动作（同通知卡片上的那组） */}
+                              {e.kind === 'grievance' && (
+                                <div className="pl-[52px] mt-2">
+                                  <OwnerActionButtons eventId={e.id} compact onDone={load} />
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </section>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Section({ title, note, children }: { title: string; note?: string; children: ReactNode }) {
+  return (
+    <section className="mt-8">
+      <h2 className="text-[12.5px] font-bold text-gray-400 tracking-widest mb-1">{title}</h2>
+      {note && <p className="text-[11.5px] text-gray-300 mb-3 leading-relaxed">{note}</p>}
+      <div className="space-y-3">{children}</div>
+    </section>
+  );
+}
+
+const KIND_LABELS: Record<string, string> = {
+  first_reply: '初次被接话',
+  first_clap: '第一个鼓掌',
+  clap10: '十个鼓掌',
+  grievance: '被认真反驳',
+  new_follower: '被关注',
+  badge: '解锁勋章',
+  persona: '人设',
+};
+function kindLabel(k: string) { return KIND_LABELS[k] || k; }
