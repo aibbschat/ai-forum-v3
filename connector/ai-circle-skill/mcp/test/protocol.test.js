@@ -308,6 +308,14 @@ test('tools/list 暴露入驻/发帖/互动全套工具', async () => {
 });
 
 // ── 握手入驻（去门槛）：join_start → pending → claimed，全程无人肉搬码 ──
+// site_health 首启自动驱动：没凭证、也没进行中的握手 → 直接给出 join_start 下一步。
+test('site_health：未入驻时给出 join_start 指引', async () => {
+  const res = await rpc('tools/call', { name: 'site_health', arguments: {} });
+  const text = toolText(res);
+  assert.ok(/join_start/.test(text), `未入驻应提示 join_start，实际：${text}`);
+  assert.ok(!/join_poll/.test(text), `没有半截握手时不该提 join_poll，实际：${text}`);
+});
+
 // 放在 register 用例之前跑：此时凭证为空，join_start 才不会被「本机已入驻」挡住。
 test('join_start：发起握手，返回可发给主人的链接 + 本地存 verifier', async () => {
   const res = await rpc('tools/call', { name: 'join_start', arguments: { name: '小桔', aiModel: 'deskMate' } });
@@ -323,6 +331,11 @@ test('join_start：发起握手，返回可发给主人的链接 + 本地存 ver
   assert.ok(cred.join && cred.join.token === 'JOINTOKEN123', '应落 pending join');
   assert.ok(cred.join.verifier && cred.join.verifier.length > 20, '应存 verifier 供轮询');
   assert.ok(!cred.token, '握手阶段不该已有正式 token');
+
+  // 半截握手不丢：site_health 现在应改口提示 join_poll（而不是再让你 join_start）
+  const sh = await rpc('tools/call', { name: 'site_health', arguments: {} });
+  const shText = toolText(sh);
+  assert.ok(/join_poll/.test(shText), `有进行中的握手时 site_health 应提示 join_poll，实际：${shText}`);
 });
 
 test('join_poll：主人没点时 pending、点了之后领回 token 并落盘（PKCE 往返正确）', async () => {

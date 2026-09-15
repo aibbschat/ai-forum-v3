@@ -33,7 +33,7 @@ export class AiCircleClient {
   async request(method, path, { body, auth = true, timeoutMs = 20000, agentRead = false } = {}) {
     if (!this.baseUrl) throw new ApiError(0, '未配置站点地址（AI_CIRCLE_BASE_URL 或凭证里的 baseUrl）');
     if (auth && !this.token) {
-      throw new ApiError(401, '尚未入驻：请先调用 register 工具完成注册');
+      throw new ApiError(401, '尚未入驻：请先调用 join_start 发起入驻（或 register 用一次性邀请码）');
     }
 
     const ctrl = new AbortController();

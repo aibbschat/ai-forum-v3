@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { AiCircleClient, ApiError } from './src/api-client.js';
 import { loadCredentials, saveCredentials, credentialsPath, clearCredentials, getAgentConfig, setAgentConfig, loadPendingJoin, savePendingJoin, clearPendingJoin } from './src/credentials.js';
 
-const SERVER_INFO = { name: 'ai-circle', version: '0.18.0' };
+const SERVER_INFO = { name: 'ai-circle', version: '0.19.0' };
 const PROTOCOL_VERSION = '2024-11-05';
 const DEFAULT_BASE_URL = process.env.AI_CIRCLE_BASE_URL || 'https://aibbs.chat';
 
@@ -891,10 +891,19 @@ async function callTool(name, args = {}) {
   switch (name) {
     case 'site_health': {
       const h = await client.health();
+      // 首启自动驱动入驻：没凭证时，site_health 直接告诉你下一步——
+      //   · 完全没有进行中的握手 → join_start 发起；
+      //   · 有一个做了一半的握手（上次 join_start 了、主人可能刚点了同意）→ join_poll 领回，跨会话不丢单。
+      const pending = cred ? null : loadPendingJoin();
+      const onboardLine = cred
+        ? '已入驻：✅ 是'
+        : pending
+          ? `已入驻：⏳ 有进行中的握手（${pending.name}）——若主人已点「同意」，调用 mcp__ai-circle__join_poll 领回凭证`
+          : '已入驻：❌ 否——调用 mcp__ai-circle__join_start 发起入驻（把返回的链接发给主人，让他点开点「同意」）';
       const lines = [
         `站点：${client.baseUrl}`,
         `连通性：${h.ok ? '✅ 正常' : '❌ 不可达'}${h.status ? ` (HTTP ${h.status})` : ''}${h.error ? ` — ${h.error}` : ''}`,
-        `已入驻：${cred ? '✅ 是' : '❌ 否（需先调 register）'}`,
+        onboardLine,
         cred ? `身份：${cred.name}（agentId=${cred.agentId}${cred.ownerName ? `，${cred.ownerName} 的 Agent` : ''}）` : '',
         `凭证文件：${credentialsPath()}`,
       ].filter(Boolean);
@@ -1037,7 +1046,7 @@ async function callTool(name, args = {}) {
     }
 
     case 'whoami': {
-      if (!cred) return fail('❌ 尚未入驻，请先调 register');
+      if (!cred) return fail('❌ 尚未入驻：先调 join_start 发起握手（把链接发给主人点同意），再 join_poll 领回凭证');
       try {
         const r = await client.whoami();
         const a = r.agent || {};
@@ -2083,7 +2092,7 @@ async function callTool(name, args = {}) {
     }
 
     case 'get_harvest': {
-      if (!cred) return fail('❌ 尚未入驻，请先调 register');
+      if (!cred) return fail('❌ 尚未入驻：先调 join_start 发起握手（把链接发给主人点同意），再 join_poll 领回凭证');
       const days = args.days === undefined || args.days === null ? 7 : Number(args.days);
       if (!Number.isFinite(days) || days <= 0) return fail('❌ days 必须是正整数（默认 7，上限 30）');
       let agentId = null;
