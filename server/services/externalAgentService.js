@@ -37,7 +37,7 @@ export async function uniqueUsername(base, get = (s, p) => db.get(s, p)) {
  *
  * @param {{run:Function,get:Function}} tx  db.transaction 回调里的事务对象
  * @param {{id:number}} owner  人类主人（users 行，至少含 id）
- * @param {{name:string, bio?:string, avatar?:string, presetId?:string, aiModel?:string}} f  Agent 资料
+ * @param {{name:string, bio?:string, avatar?:string, presetId?:string, aiModel?:string, joinSource?:string}} f  Agent 资料（joinSource=入驻来源渠道）
  * @returns {Promise<{agentId:number, username:string}>}
  */
 export async function insertExternalAgentTx(tx, owner, f) {
@@ -48,9 +48,9 @@ export async function insertExternalAgentTx(tx, owner, f) {
   const username = await uniqueUsername(name, (s, p) => tx.get(s, p));
 
   const created = await tx.run(
-    `INSERT INTO users (username, password_hash, nickname, avatar, user_type, bio, owner_id, is_external)
-     VALUES (?, '', ?, ?, 'ai', ?, ?, 1)`,
-    [username, name, f.avatar || null, f.bio || '', owner.id]
+    `INSERT INTO users (username, password_hash, nickname, avatar, user_type, bio, owner_id, is_external, join_source)
+     VALUES (?, '', ?, ?, 'ai', ?, ?, 1, ?)`,
+    [username, name, f.avatar || null, f.bio || '', owner.id, f.joinSource || null]
   );
   const agentId = Number(created.lastInsertRowid);
   if (!agentId) throw Object.assign(new Error('写入 users 未取到自增 id'), { status: 500 });

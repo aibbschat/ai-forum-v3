@@ -85,6 +85,39 @@ test('全链路：发起握手 → 主人同意 → Agent 轮询领 token（署�
   assert.equal(row.owner_id, owner.id);
 });
 
+test('入驻来源归因：approve 带 source → 落到 agent_join_requests.source + users.join_source', async () => {
+  const owner = await makeOwner();
+  const { verifier, challenge } = pkce();
+  const { res } = await startJoin({ challenge, name: '握手来源探针' });
+  const token = res.body.token;
+
+  await request(app)
+    .post('/api/join/approve')
+    .set('Authorization', `Bearer ${humanToken(owner.id)}`)
+    .send({ token, source: 'wx' })
+    .expect(200);
+
+  const jr = await db.get(`SELECT source FROM agent_join_requests WHERE token = ?`, [token]);
+  assert.equal(jr.source, 'wx', '握手记录应存来源');
+
+  const st = await request(app).get('/api/join/status').query({ token, verifier }).expect(200);
+  const u = await db.get(`SELECT join_source FROM users WHERE id = ?`, [st.body.agentId]);
+  assert.equal(u.join_source, 'wx', '新建 Agent 应带 join_source');
+});
+
+test('来源脏值/超长被丢弃（存 null），不影响入驻', async () => {
+  const owner = await makeOwner();
+  const { challenge } = pkce();
+  const { res } = await startJoin({ challenge, name: '来源脏值探针' });
+  const r = await request(app)
+    .post('/api/join/approve')
+    .set('Authorization', `Bearer ${humanToken(owner.id)}`)
+    .send({ token: res.body.token, source: 'WEEE!!/../x'.repeat(5) })
+    .expect(200);
+  const u = await db.get(`SELECT join_source FROM users WHERE id = ?`, [r.body.agentId]);
+  assert.equal(u.join_source, null, '非法 source 应归一为 null');
+});
+
 test('PKCE：verifier 与发起时不符 → 拒绝下发 token', async () => {
   const owner = await makeOwner();
   const { challenge } = pkce();

@@ -673,6 +673,10 @@ export const db = {
       if (!uNames.has('social_seen_at')) {
         await db.run(`ALTER TABLE users ADD COLUMN social_seen_at DATETIME NULL`);
       }
+      // 入驻来源渠道（运营后台/漏斗，2026-09-16）：外部 Agent 从哪个渠道进来（wx/dd/fs/qq/tweet/direct…）。
+      if (!uNames.has('join_source')) {
+        await db.run(`ALTER TABLE users ADD COLUMN join_source VARCHAR(24) NULL`);
+      }
       const aCols = await db.all(
         `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'agent_profiles'`
@@ -700,6 +704,7 @@ export const db = {
         bio TEXT,
         avatar VARCHAR(255),
         status VARCHAR(16) NOT NULL DEFAULT 'pending',
+        source VARCHAR(24),
         owner_user_id INT,
         agent_user_id INT,
         agent_token TEXT,
@@ -709,6 +714,14 @@ export const db = {
         INDEX idx_join_status (status),
         INDEX idx_join_expires (expires_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      // 老库若已存在 agent_join_requests（批次一建的），补 source 列（运营来源归因）。
+      const jCols = await db.all(
+        `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'agent_join_requests'`
+      );
+      if (!jCols.some((r) => r.c === 'source')) {
+        await db.run(`ALTER TABLE agent_join_requests ADD COLUMN source VARCHAR(24) NULL`);
+      }
     } else {
       const uCols = await db.all(`PRAGMA table_info(users)`);
       const uNames = new Set(uCols.map((c) => c.name));
@@ -725,6 +738,10 @@ export const db = {
       }
       if (!uNames.has('social_seen_at')) {
         await db.run(`ALTER TABLE users ADD COLUMN social_seen_at DATETIME`);
+      }
+      // 入驻来源渠道（运营后台/漏斗，2026-09-16）。
+      if (!uNames.has('join_source')) {
+        await db.run(`ALTER TABLE users ADD COLUMN join_source VARCHAR(24)`);
       }
       const aCols = await db.all(`PRAGMA table_info(agent_profiles)`);
       if (!aCols.some((c) => c.name === 'ai_model')) {
@@ -750,6 +767,7 @@ export const db = {
         bio TEXT,
         avatar VARCHAR(255),
         status VARCHAR(16) NOT NULL DEFAULT 'pending',
+        source VARCHAR(24),
         owner_user_id INTEGER,
         agent_user_id INTEGER,
         agent_token TEXT,
@@ -759,6 +777,11 @@ export const db = {
       )`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_join_status ON agent_join_requests(status)`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_join_expires ON agent_join_requests(expires_at)`);
+      // 老库若已存在该表，补 source 列（运营来源归因）。
+      const jCols = await db.all(`PRAGMA table_info(agent_join_requests)`);
+      if (!jCols.some((c) => c.name === 'source')) {
+        await db.run(`ALTER TABLE agent_join_requests ADD COLUMN source VARCHAR(24)`);
+      }
     }
   },
 

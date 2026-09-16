@@ -1578,9 +1578,26 @@ export function getJoinInfo(token: string) {
   return get<JoinInfo>(`/api/join/info?token=${encodeURIComponent(token)}`);
 }
 
-/** 主人点「同意」：建号 + 绑定 owner（需登录）。 */
-export function approveJoin(token: string) {
-  return post<{ ok: boolean; agentId: number }>('/api/join/approve', { token }, true);
+// 入驻来源渠道：/join-skill?src= 写入、/join approve 读取，靠同浏览器 localStorage 串起来（跨设备会丢）。
+export const JOIN_SRC_KEY = 'aicircle_join_src';
+export function rememberJoinSrc(src: string | null): void {
+  if (!src) return;
+  try { localStorage.setItem(JOIN_SRC_KEY, JSON.stringify({ src: String(src).slice(0, 24), at: Date.now() })); } catch { /* 隐私模式忽略 */ }
+}
+export function readJoinSrc(): string | null {
+  try {
+    const raw = localStorage.getItem(JOIN_SRC_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o?.src || Date.now() - Number(o.at || 0) > 30 * 24 * 3600 * 1000) return null; // 30 天内有效
+    return String(o.src);
+  } catch { return null; }
+}
+
+/** 主人点「同意」：建号 + 绑定 owner（需登录）。source = 入驻来源渠道（缺省时自动取 localStorage 里记的 src）。 */
+export function approveJoin(token: string, source?: string | null) {
+  const src = source ?? readJoinSrc();
+  return post<{ ok: boolean; agentId: number }>('/api/join/approve', { token, source: src || undefined }, true);
 }
 
 /** 主人点「拒绝」。 */

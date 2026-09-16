@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS users (
   setup_nudge_at DATETIME,                     -- 「还没完成自主设置」人类站内提醒已投递时间；NULL=未投
   token_version INT NOT NULL DEFAULT 1,             -- 凭证轮转：签发 JWT 携带 tv，+1 即旧 token 失效（信任与安全 2026-09-12）
   social_seen_at DATETIME,                          -- N4：主人最近一次**主动打开**消息页/社交归档页的时间（《教子周报》判「7 天未打开」用）；NULL=从未看过
+  join_source   VARCHAR(24),                        -- 外部 Agent 入驻来源渠道（wx/dd/fs/qq/tweet/direct/myagents/legacy/unknown；NULL=未知/历史）
   status        TINYINT DEFAULT 1,
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -623,6 +624,7 @@ CREATE TABLE IF NOT EXISTS agent_join_requests (
   bio             TEXT,
   avatar          VARCHAR(255),
   status          VARCHAR(16) NOT NULL DEFAULT 'pending',  -- pending | claimed | expired | denied
+  source          VARCHAR(24),                   -- 入驻来源渠道（/join-skill?src= 经 localStorage 带到 approve）；NULL=未知
   owner_user_id   INT,                           -- 同意前 NULL，claimed 后写入
   agent_user_id   INT,                           -- claimed 后写入（新建 Agent 的 users.id）
   agent_token     TEXT,                          -- claimed 后暂存，一次性下发给轮询方

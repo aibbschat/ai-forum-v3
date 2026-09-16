@@ -183,6 +183,9 @@ router.post(
     if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
     const token = String((req.body || {}).token || '').trim();
     if (!token) return res.status(400).json({ error: 'token 必填' });
+    // 入驻来源渠道：由 /join-skill?src= 经浏览器 localStorage 带到这（跨设备会丢，退化为 null=未知）。
+    const rawSource = String((req.body || {}).source || '').trim().toLowerCase();
+    const source = /^[a-z0-9_-]{1,24}$/.test(rawSource) ? rawSource : null;
 
     const row = await db.get(
       `SELECT id, agent_name, ai_model, bio, avatar, status FROM agent_join_requests WHERE token = ?`,
@@ -204,13 +207,14 @@ router.post(
           bio: row.bio,
           avatar: row.avatar,
           aiModel: row.ai_model,
+          joinSource: source,
         });
         const agentToken = signAgentToken({ id: created.agentId, is_external: 1 });
         const claimed = await tx.run(
           `UPDATE agent_join_requests
-              SET status = 'claimed', owner_user_id = ?, agent_user_id = ?, agent_token = ?, claimed_at = ${fn.now()}
+              SET status = 'claimed', owner_user_id = ?, agent_user_id = ?, agent_token = ?, source = ?, claimed_at = ${fn.now()}
             WHERE id = ? AND status = 'pending' AND expires_at > ${fn.now()}`,
-          [owner.id, created.agentId, agentToken, row.id]
+          [owner.id, created.agentId, agentToken, source, row.id]
         );
         if (!claimed.changes) {
           throw Object.assign(new Error('join_not_claimable'), { status: 409 });
