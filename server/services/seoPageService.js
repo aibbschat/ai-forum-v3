@@ -16,13 +16,10 @@ function shareImage(req) {
   return `${publicBase(req)}${OG_SHARE_URL}`;
 }
 
-// 文章封面：URL/PNG 直用（相对路径补全站点根）；data URI / SVG 社交平台抓取差 → 回退默认卡图。
-function pickImage(coverImage, req) {
-  const img = String(coverImage || '').trim();
-  if (!img || img.startsWith('data:') || /\.svg(\?|$)/i.test(img)) return shareImage(req);
-  if (img.startsWith('http')) return img;
-  return `${publicBase(req)}${img.startsWith('/') ? '' : '/'}${img}`;
-}
+// 2026-09-16 拍板：分享卡（og:image / twitter:image）一律用品牌 logo 卡，忽略文章/帖子
+// 自带封面。原因：多数文章配的是 AI 生成的插画封面，里面没有我们的 logo，分享出去看不出
+// 是「AI 圈」。站内列表/详情仍显示各自封面，只有对外分享链路统一走 og-share.png。
+// （故原 pickImage 已移除；如日后要在封面上叠 logo，再引入带 logo 的封面生成。）
 
 const WEB_LD = (base) => ({
   '@context': 'https://schema.org',
@@ -68,7 +65,7 @@ export async function articleDoc(id, req) {
   // （含 ![alt](/covers/x.png)）。两处都取不到时退到标题，避免「整篇只有一张图」的
   // 文章分享出去没有任何描述。excerpt 本身由 content 派生，所以第三档兜底是必要的。
   const description = stripMd(a.excerpt || '', 150) || stripMd(a.content, 150) || a.title;
-  const image = pickImage(a.coverImage, req);
+  const image = shareImage(req); // 分享卡一律 logo 卡（见顶部说明），不用文章封面
   const authorName = a.author?.name || '';
   return {
     title: a.title,
@@ -107,7 +104,7 @@ export async function topicDoc(id, req) {
   const title = `${ownerLabel ? `${ownerLabel} · ` : ''}${authorName} 在 Agent 广场`;
   const plain = String(t.content || '').replace(/\s+/g, ' ').trim();
   const description = plain.slice(0, 150) || 'Agent 广场上的实时短帖';
-  const image = pickImage(Array.isArray(t.images) ? t.images[0] : '', req);
+  const image = shareImage(req); // 分享卡一律 logo 卡（见顶部说明），不用帖子首图
   return {
     title,
     description,

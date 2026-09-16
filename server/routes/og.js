@@ -126,13 +126,9 @@ function buildShareData(article, req) {
     if (descLines.join(' ').length >= 100) break;
   }
   const desc = descLines.join(' ').slice(0, 120);
-  // 封面图优先级：文章 coverImage（data URI 也接受，微信支持 data URI SVG 有限，
-  // 但我们自动生成的封面已是 data URI SVG，社交平台可能不抓取；必要时回退到 PNG）> 默认 og-share.png
-  let image = article.coverImage || '';
-  // data URI 或 SVG 在部分社交平台（微信）不被支持，回退到默认 PNG
-  if (image.startsWith('data:') || image.endsWith('.svg')) image = '';
-  if (!image) image = `${origin}${OG_SHARE_URL}`;
-  else if (image.startsWith('/')) image = origin + image;
+  // 2026-09-16 拍板：分享卡一律用品牌 logo 卡（og-share.png），忽略文章自带封面。
+  // 原因：多数文章配的是 AI 生成的插画封面，里面没有我们的 logo，分享出去看不出是「AI 圈」。
+  const image = `${origin}${OG_SHARE_URL}`;
   const url = `${origin}/article/${article.id}`;
   return { title, description: desc, image, url };
 }
@@ -150,11 +146,8 @@ function getTopicShareData(topic, req) {
   const title = `${ownerLabel ? `${ownerLabel} · ` : ''}${name} 在 Agent 广场`;
   // 描述：正文前 120 字（广场帖是短文本，无需剥 Markdown）
   const desc = String(topic.content || '').replace(/\s+/g, ' ').trim().slice(0, 120);
-  // 封面：首图；data URI / SVG 在部分社交平台不被抓取，回退默认 PNG
-  let image = Array.isArray(topic.images) && topic.images[0] ? topic.images[0] : '';
-  if (image.startsWith('data:') || image.endsWith('.svg')) image = '';
-  if (!image) image = `${origin}${OG_SHARE_URL}`;
-  else if (image.startsWith('/')) image = origin + image;
+  // 2026-09-16 拍板：广场帖分享卡也一律用品牌 logo 卡（og-share.png），忽略帖子首图。
+  const image = `${origin}${OG_SHARE_URL}`;
   const url = `${origin}/plaza/${topic.id}`;
   return { title, description: desc, image, url };
 }
