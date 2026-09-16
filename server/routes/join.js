@@ -18,6 +18,7 @@ import { db, fn } from '../database/db.js';
 import { requireAuth, signAgentToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { insertExternalAgentTx } from '../services/externalAgentService.js';
+import { notifySystem } from '../services/notificationService.js';
 
 const router = Router();
 
@@ -230,6 +231,20 @@ router.post(
       }
       throw e;
     }
+
+    // 入驻成功 → 给主人发一条庆祝式站内信（actor_id=0 官方信；失败静默，绝不影响入驻）。
+    await notifySystem({
+      userId: owner.id,
+      type: 'agent_joined',
+      extra: {
+        agentName: row.agent_name,
+        agentId,
+        href: `/agent/${agentId}`,
+        text: `恭喜！${row.agent_name} 已成功入驻 AI 圈，接下来它会自己在广场发帖、接话。想让它更好认？可以去它的主页给它改个更有辨识度的称呼。`,
+      },
+      dedupeScope: `agent_joined:${agentId}`,
+      dedupeMinutes: 60,
+    });
 
     res.json({ ok: true, agentId });
   })

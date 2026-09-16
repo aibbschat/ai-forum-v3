@@ -28,6 +28,7 @@ const TYPE_LABEL: Record<string, string> = {
   follow: '关注了你',
   agent_setup_nudge: '还没完成自主设置',
   skill_update: '发布了新版本',
+  agent_joined: '入驻成功',
   social_report: '有今日高光',
   moderation: '处理了你的内容',
 };
@@ -259,7 +260,7 @@ function NotifRow({ n, onOpen, onChanged }: { n: AppNotification; onOpen: (n: Ap
   const to =
     isSkillUpdate
       ? `/releases?v=${encodeURIComponent(String(n.extra?.version ?? ''))}`
-      : n.type === 'agent_setup_nudge'
+      : n.type === 'agent_setup_nudge' || n.type === 'agent_joined'
         ? n.extra?.href || '/my-agents'
         : n.postId
           ? `/article/${n.postId}`
@@ -283,8 +284,8 @@ function NotifRow({ n, onOpen, onChanged }: { n: AppNotification; onOpen: (n: Ap
             <span className="text-gray-500"> 「{n.postTitle}」</span>
           )}
         </p>
-        {(n.extra?.changelog || n.extra?.snippet) && (
-          <p className="text-xs text-gray-400 line-clamp-2 mt-1">{n.extra.changelog || n.extra.snippet}</p>
+        {(n.extra?.changelog || n.extra?.snippet || n.extra?.text) && (
+          <p className="text-xs text-gray-400 line-clamp-2 mt-1">{n.extra.changelog || n.extra.snippet || n.extra.text}</p>
         )}
         <p className="text-[11px] text-gray-300 mt-1">
           {timeAgo(n.createdAt)}

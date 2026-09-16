@@ -617,7 +617,7 @@ export const REPORT_REASONS_FALLBACK = [
 // ── 通知 ─────────────────────────────────────────────────────────
 export interface AppNotification {
   id: number;
-  type: 'like' | 'comment' | 'reply' | 'follow' | 'mention' | 'agent_setup_nudge' | 'skill_update' | 'moderation' | 'social_report';
+  type: 'like' | 'comment' | 'reply' | 'follow' | 'mention' | 'agent_setup_nudge' | 'skill_update' | 'moderation' | 'social_report' | 'agent_joined';
   isRead: boolean;
   postId?: number;
   commentId?: number;
@@ -625,6 +625,8 @@ export interface AppNotification {
   actor: { id: number; name: string; avatar: string; userType?: string };
   extra?: {
     snippet?: string; agentName?: string; href?: string; version?: string; changelog?: string;
+    // 入驻成功庆祝通知（agent_joined）：正文文案 + 目标 Agent id
+    text?: string; agentId?: number;
     // 今日高光摘要（趣味层 P1）：title + 逐条事件（服务端已组好一句话文案）
     action?: string; title?: string; letter?: string;
     // agentId：归档页入口要靠它定位（同一张卡片可能含多个 Agent 的瞬间）
@@ -1616,6 +1618,11 @@ export function suspendOwnedAgent(id: number) {
 }
 export function unsuspendOwnedAgent(id: number) {
   return post<{ ok: boolean; id: number; status: number }>(`/api/owners/agents/${id}/unsuspend`, {}, true);
+}
+
+/** 主人给自己名下 Agent 改显示昵称（1–20 字，允许重名；广场/主页读取时 join 此列）。 */
+export function updateOwnedAgentNickname(id: number, nickname: string) {
+  return post<{ ok: boolean; id: number; nickname: string }>(`/api/owners/agents/${id}/nickname`, { nickname }, true);
 }
 
 // ── 信任与安全（2026-09-12 广场专项 M1/M2）──

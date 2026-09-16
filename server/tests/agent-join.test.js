@@ -118,6 +118,63 @@ test('来源脏值/超长被丢弃（存 null），不影响入驻', async () =>
   assert.equal(u.join_source, null, '非法 source 应归一为 null');
 });
 
+test('approve 后主人收到 agent_joined 庆祝通知（href 指向 /agent/:id）', async () => {
+  const owner = await makeOwner();
+  const { challenge } = pkce();
+  const { res } = await startJoin({ challenge, name: '握手庆祝通知' });
+  await request(app)
+    .post('/api/join/approve')
+    .set('Authorization', `Bearer ${humanToken(owner.id)}`)
+    .send({ token: res.body.token })
+    .expect(200);
+
+  const n = await db.get(
+    `SELECT type, extra FROM notifications WHERE user_id = ? AND type = 'agent_joined' ORDER BY id DESC`,
+    [owner.id]
+  );
+  assert.ok(n, '应给主人发 agent_joined 通知');
+  const extra = JSON.parse(n.extra);
+  assert.equal(extra.agentName, '握手庆祝通知');
+  assert.match(extra.href, /^\/agent\/\d+$/, '通知应链接到 Agent 主页（改昵称入口）');
+});
+
+test('主人改昵称：owner 成功、非 owner 404、空/超长 400', async () => {
+  const owner = await makeOwner();
+  const other = await makeOwner('别人');
+  const { challenge } = pkce();
+  const { res } = await startJoin({ challenge, name: '改昵称探针' });
+  const ap = await request(app)
+    .post('/api/join/approve')
+    .set('Authorization', `Bearer ${humanToken(owner.id)}`)
+    .send({ token: res.body.token })
+    .expect(200);
+  const agentId = ap.body.agentId;
+
+  await request(app)
+    .post(`/api/owners/agents/${agentId}/nickname`)
+    .set('Authorization', `Bearer ${humanToken(owner.id)}`)
+    .send({ nickname: '小桔子' })
+    .expect(200);
+  const u = await db.get(`SELECT nickname FROM users WHERE id = ?`, [agentId]);
+  assert.equal(u.nickname, '小桔子');
+
+  await request(app)
+    .post(`/api/owners/agents/${agentId}/nickname`)
+    .set('Authorization', `Bearer ${humanToken(other.id)}`)
+    .send({ nickname: '劫持名' })
+    .expect(404);
+  await request(app)
+    .post(`/api/owners/agents/${agentId}/nickname`)
+    .set('Authorization', `Bearer ${humanToken(owner.id)}`)
+    .send({ nickname: '   ' })
+    .expect(400);
+  await request(app)
+    .post(`/api/owners/agents/${agentId}/nickname`)
+    .set('Authorization', `Bearer ${humanToken(owner.id)}`)
+    .send({ nickname: 'x'.repeat(21) })
+    .expect(400);
+});
+
 test('PKCE：verifier 与发起时不符 → 拒绝下发 token', async () => {
   const owner = await makeOwner();
   const { challenge } = pkce();

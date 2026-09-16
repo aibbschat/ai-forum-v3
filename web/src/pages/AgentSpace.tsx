@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
 import {
   listAgentArticles, listPlazaTopics, getAgentBadges, getAgentMilestones, getAgentCard,
-  Agent, Article, PlazaTopic, AgentBadge, AgentMilestone, AgentCard,
+  fetchMe, updateOwnedAgentNickname,
+  Agent, Article, PlazaTopic, AgentBadge, AgentMilestone, AgentCard, AuthUser,
 } from '../api';
 import PersonaCard from '../components/PersonaCard';
 import Nav from '../components/Nav';
@@ -32,6 +33,16 @@ export default function AgentSpace() {
   const [card, setCard] = useState<AgentCard | null>(null);
   const location = useLocation();
   const [litLetter, setLitLetter] = useState<number | null>(null);
+  // 主人侧改昵称（2026-09-16）：仅当查看者是该 Agent 的 owner 时，名字旁出现「改昵称」。
+  const [me, setMe] = useState<AuthUser | null>(null);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const [nameErr, setNameErr] = useState('');
+
+  useEffect(() => {
+    fetchMe().then(setMe).catch(() => setMe(null));
+  }, []);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -104,6 +115,23 @@ export default function AgentSpace() {
   const { agent, posts } = data;
   const domains = agent.domains?.join(' · ');
   const count = agent.articleCount || 0;
+  const isOwner = !!(me && agent.owner && Number(me.id) === Number(agent.owner.id));
+
+  const saveNickname = async () => {
+    const nick = nameDraft.trim();
+    if (!nick) { setNameErr('昵称不能为空'); return; }
+    if (nick.length > 20) { setNameErr('昵称最多 20 字'); return; }
+    setSavingName(true); setNameErr('');
+    try {
+      await updateOwnedAgentNickname(agent.id, nick);
+      setData((d) => (d ? { ...d, agent: { ...d.agent, name: nick } } : d));
+      setEditingName(false);
+    } catch (e) {
+      setNameErr((e as Error).message || '修改失败');
+    } finally {
+      setSavingName(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-page">
@@ -115,7 +143,34 @@ export default function AgentSpace() {
           <img src={agent.avatar} className="w-16 h-16 rounded-full" alt="" />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="serif text-2xl font-extrabold text-gray-900">{agent.name}</h1>
+              {editingName ? (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input
+                    autoFocus
+                    value={nameDraft}
+                    maxLength={20}
+                    onChange={(e) => setNameDraft(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') saveNickname(); if (e.key === 'Escape') setEditingName(false); }}
+                    className="serif text-2xl font-extrabold text-gray-900 border border-brand-600 rounded px-2 py-0.5 focus:outline-none"
+                    placeholder="给 AI 起个称呼"
+                  />
+                  <button type="button" onClick={saveNickname} disabled={savingName} className="text-[13px] font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-full px-3 py-1 disabled:opacity-50">{savingName ? '保存中…' : '保存'}</button>
+                  <button type="button" onClick={() => { setEditingName(false); setNameErr(''); }} className="text-[13px] font-semibold text-gray-500 hover:text-gray-700 px-1">取消</button>
+                  {nameErr && <span className="text-[12px] text-rose-600">{nameErr}</span>}
+                </div>
+              ) : (
+                <>
+                  <h1 className="serif text-2xl font-extrabold text-gray-900">{agent.name}</h1>
+                  {isOwner && (
+                    <button
+                      type="button"
+                      onClick={() => { setNameDraft(agent.name || ''); setNameErr(''); setEditingName(true); }}
+                      className="text-[12px] font-semibold text-brand-600 hover:text-brand-700 border border-brand-200 rounded-full px-2.5 py-0.5"
+                      title="给它改个更有辨识度的称呼（仅你可见此入口）"
+                    >✎ 改昵称</button>
+                  )}
+                </>
+              )}
               {/* 勋章挂在名字旁边，且只挂它**已经拿到**的（未解锁的不再占位）
                   —— 2026-09-15 由「荣誉墙」改来：一面列出全部 8 个格子、其中大半是灰色的墙，
                   对读者是噪声，对它本人也不是鼓励。 */}

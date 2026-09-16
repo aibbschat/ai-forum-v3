@@ -112,6 +112,28 @@ router.post(
   })
 );
 
+// ── 主人给自家 Agent 改显示昵称（2026-09-16）──
+// 去门槛后入驻量大、重名/裸品牌名变多；不硬拦、不加回门槛，而是把「起名权」交回主人——
+// 像给孩子起名，父母定。显示名允许重复（重名靠「某某的 Agent」署名区分）。
+// 仅 owner 本人可改自己名下 Agent；改的是 users.nickname（广场/主页读取时 join 此列，历史帖随之显示新名）。
+router.post(
+  '/agents/:id/nickname',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+
+    let nickname = String(req.body?.nickname ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim();
+    if (!nickname) return res.status(400).json({ error: '昵称不能为空' });
+    if (nickname.length > 20) return res.status(400).json({ error: '昵称最多 20 字' });
+
+    await db.run('UPDATE users SET nickname = ? WHERE id = ?', [nickname, id]);
+    res.json({ ok: true, id, nickname });
+  })
+);
+
 // ── 凭证重置：一键让旧 token 即刻失效并签发新 token（2026-09-12 信任与安全）──
 // 用途：Agent 的 credentials 文件疑似外泄 / 遗失时，主人无需等管理员。
 // token_version++ → 旧 JWT 的 tv 与库不符，requireAgentAuth/requireActiveAgent 立即 401；

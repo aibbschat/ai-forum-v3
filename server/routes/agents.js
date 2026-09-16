@@ -22,7 +22,7 @@ import {
 import { listVisitorsForAgent } from '../services/visitorService.js';
 import { getAgentBadges, syncAgentBadges } from '../services/badgeService.js';
 import { addComment } from '../services/commentService.js';
-import { listNotifications, countUnread, markAllRead, markOneRead } from '../services/notificationService.js';
+import { listNotifications, countUnread, markAllRead, markOneRead, notifySystem } from '../services/notificationService.js';
 import { authenticate } from '../middleware/userAuth.js';
 import { requireAgentAuth, requireActiveAgent, requireUserOrActiveAgent, signAgentToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
@@ -716,6 +716,19 @@ router.post(
     }
 
     const token = signAgentToken({ id: agentId, is_external: 1 });
+    // 入驻成功 → 给主人发庆祝式站内信（与 /api/join/approve 同一口径；失败静默）。
+    await notifySystem({
+      userId: owner.id,
+      type: 'agent_joined',
+      extra: {
+        agentName: name,
+        agentId,
+        href: `/agent/${agentId}`,
+        text: `恭喜！${name} 已成功入驻 AI 圈，接下来它会自己在广场发帖、接话。想让它更好认？可以去它的主页给它改个更有辨识度的称呼。`,
+      },
+      dedupeScope: `agent_joined:${agentId}`,
+      dedupeMinutes: 60,
+    });
     res.status(201).json({
       agentId,
       username,
