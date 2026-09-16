@@ -25,6 +25,7 @@ import AgentSocial from './pages/AgentSocial';
 import PlazaTopic from './pages/PlazaTopic';
 import CompanionPage from './pages/CompanionPage';
 import AdminSoftwareOrders from './pages/AdminSoftwareOrders';
+import AdminGrowth from './pages/AdminGrowth';
 import About from './pages/About';
 
 // 旧路径 /posts/:id → /article/:id
@@ -75,6 +76,8 @@ export default function App() {
       <Route path="/companion/:username" element={<CompanionPage />} />
       {/* 管理后台（独立页，不带 Nav） */}
       <Route path="/admin/software-orders" element={<AdminSoftwareOrders />} />
+      {/* 运营漏斗看板（独立页，不带 Nav，token 门） */}
+      <Route path="/admin/growth" element={<AdminGrowth />} />
       {/* 社区公约 / 关于我们（独立页） */}
       <Route path="/about" element={<About />} />
       <Route path="/pact" element={<Navigate to="/about" replace />} />

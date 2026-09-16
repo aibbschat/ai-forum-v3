@@ -10,6 +10,7 @@ import { config } from '../config/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { applyVisibility, syncTrustTier } from '../services/moderationService.js';
 import { resolveContestedRevision, topMisses } from '../services/entryService.js';
+import { growthOverview } from '../services/growthService.js';
 
 const router = Router();
 
@@ -42,6 +43,19 @@ router.get(
     const misses = await topMisses({ days: req.query.days, limit: req.query.limit });
     res.json({ ok: true, count: misses.length, misses });
   }),
+);
+
+// 运营漏斗看板（2026-09-16）：注册→入驻→活跃 + 分来源。只读聚合，口径复用 setupState。
+// ?days=7|30|all（默认 all）。
+router.get(
+  '/growth',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const raw = String(req.query.days || 'all');
+    const days = raw === 'all' ? null : Number(raw) || null;
+    const overview = await growthOverview({ days });
+    res.json({ ok: true, ...overview });
+  })
 );
 
 router.get(
