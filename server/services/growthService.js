@@ -14,6 +14,11 @@ const SEEN_AGO_SEC = isMaria
   ? 'CASE WHEN u.last_seen_at IS NULL THEN NULL ELSE TIMESTAMPDIFF(SECOND, u.last_seen_at, NOW()) END'
   : "CASE WHEN u.last_seen_at IS NULL THEN NULL ELSE CAST((julianday('now') - julianday(u.last_seen_at)) * 86400 AS INTEGER) END";
 
+// 「领 AI 入驻」能力上线日（开放接口阶段 1，2026-09-10）。
+// 之前注册的账号多为旧站迁移，从来没见过这个功能 —— 混进分母会把转化率算成假警报
+// （实测：56 注册里 46 个是旧站时代账号，真实新代际转化 3/9=33%，而非 4/56=7%）。
+export const FEATURE_LAUNCH = '2026-09-10';
+
 function windowClause(days) {
   // days 为 null/0/'all' → 不加时间窗（全部）；否则近 N 天注册
   const d = Number(days);
@@ -42,6 +47,30 @@ export async function growthOverview({ days = null } = {}) {
     win.params
   );
   const ownersWithAgents = Number(ownerRow?.c || 0);
+
+  // ── 分代际：入驻能力上线后 vs 之前（旧站迁移）──
+  // 转化率只该看新代际：旧站账号从来没见过「领 AI 入驻」，混进分母就是假警报。
+  const eraRows = await db.all(
+    `SELECT CASE WHEN u.created_at >= ? THEN 'new' ELSE 'legacy' END AS era,
+            COUNT(*) AS total,
+            SUM(CASE WHEN EXISTS (SELECT 1 FROM users a WHERE a.owner_id = u.id AND a.is_external = 1) THEN 1 ELSE 0 END) AS with_agent
+       FROM users u
+      WHERE u.user_type = 'human' ${win.sql}
+      GROUP BY era`,
+    [FEATURE_LAUNCH, ...win.params]
+  );
+  const era = {
+    new: { registeredUsers: 0, ownersWithAgents: 0 },
+    legacy: { registeredUsers: 0, ownersWithAgents: 0 },
+  };
+  for (const r of eraRows) {
+    const e = String(r.era) === 'new' ? era.new : era.legacy;
+    e.registeredUsers += Number(r.total) || 0;
+    e.ownersWithAgents += Number(r.with_agent) || 0;
+  }
+  const conversionPct = era.new.registeredUsers > 0
+    ? Math.round((era.new.ownersWithAgents / era.new.registeredUsers) * 100)
+    : null;
 
   // ── 外部 Agent 全量（含活动/心跳/来源），逐行 classify 后分桶 ──
   const agents = await db.all(
@@ -85,6 +114,12 @@ export async function growthOverview({ days = null } = {}) {
 
   return {
     windowDays: Number(days) > 0 ? Number(days) : null,
+    featureLaunch: FEATURE_LAUNCH,
+    // 分代际（转化率只看这个）：new = 入驻能力上线后注册；legacy = 旧站迁移
+    cohorts: {
+      sinceFeature: { ...era.new, registeredNoAgent: Math.max(0, era.new.registeredUsers - era.new.ownersWithAgents), conversionPct },
+      legacy: { ...era.legacy, registeredNoAgent: Math.max(0, era.legacy.registeredUsers - era.legacy.ownersWithAgents) },
+    },
     registeredUsers,
     ownersWithAgents,
     registeredNoAgent: Math.max(0, registeredUsers - ownersWithAgents), // 注册了但一个 Agent 都没带进来

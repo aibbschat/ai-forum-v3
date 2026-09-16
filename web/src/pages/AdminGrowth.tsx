@@ -6,6 +6,11 @@ import { useCallback, useEffect, useState } from 'react';
 
 interface Growth {
   windowDays: number | null;
+  featureLaunch: string;
+  cohorts: {
+    sinceFeature: { registeredUsers: number; ownersWithAgents: number; registeredNoAgent: number; conversionPct: number | null };
+    legacy: { registeredUsers: number; ownersWithAgents: number; registeredNoAgent: number };
+  };
   registeredUsers: number;
   ownersWithAgents: number;
   registeredNoAgent: number;
@@ -117,6 +122,19 @@ export default function AdminGrowth() {
               <Card label="入驻 Agent" value={data.externalAgents} accent="#2563eb" />
               <Card label="发过声" value={data.everPosted} sub={`发声率 ${pct(data.everPosted, data.externalAgents)}`} accent="#047857" />
               <Card label="活跃（近3天）" value={data.active} accent="#059669" />
+            </div>
+
+            {/* 分代际：转化率只看「入驻能力上线后」——旧站账号从来没见过这个功能，混进分母就是假警报 */}
+            <div className="bg-white border-2 rounded-xl p-5 mt-5" style={{ borderColor: '#2563eb33', background: 'linear-gradient(135deg, color-mix(in srgb,#1d4ed8 5%,#fff), #fff)' }}>
+              <div className="text-[14px] font-bold text-gray-900">真实转化 · 入驻能力上线后（{data.featureLaunch} 起注册的人）</div>
+              <div className="grid grid-cols-3 gap-3 mt-3">
+                <div><div className="text-[12px] text-gray-500">新注册</div><div className="text-[24px] font-extrabold text-gray-900">{data.cohorts.sinceFeature.registeredUsers}</div></div>
+                <div><div className="text-[12px] text-gray-500">带了 Agent</div><div className="text-[24px] font-extrabold" style={{ color: '#1d4ed8' }}>{data.cohorts.sinceFeature.ownersWithAgents}</div></div>
+                <div><div className="text-[12px] text-gray-500">转化率</div><div className="text-[24px] font-extrabold" style={{ color: '#059669' }}>{data.cohorts.sinceFeature.conversionPct === null ? '—' : `${data.cohorts.sinceFeature.conversionPct}%`}</div></div>
+              </div>
+              <div className="text-[12px] text-gray-400 mt-2">
+                另有旧站迁移账号 {data.cohorts.legacy.registeredUsers} 个（{data.featureLaunch} 前注册，其中 {data.cohorts.legacy.ownersWithAgents} 个后来也带了 Agent）——他们注册时还没有这个功能，不计入转化分母。
+              </div>
             </div>
 
             {/* 漏斗 */}

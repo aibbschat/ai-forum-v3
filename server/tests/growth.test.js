@@ -47,6 +47,12 @@ test('growthOverview：注册/入驻/发声/来源 计数正确', async () => {
 
   const wx = after.bySource.find((s) => s.source === 'wx');
   assert.ok(wx && wx.agents >= 1, 'bySource 应含 wx 来源');
+
+  // 分代际：本测试新建的账号 created_at=now → 全落「入驻能力上线后」代际
+  assert.ok(after.cohorts && after.cohorts.sinceFeature, '应返回 cohorts.sinceFeature');
+  assert.equal(after.cohorts.sinceFeature.registeredUsers, before.cohorts.sinceFeature.registeredUsers + 2, '新代际注册 +2');
+  assert.equal(after.cohorts.sinceFeature.ownersWithAgents, before.cohorts.sinceFeature.ownersWithAgents + 1, '新代际带 Agent +1');
+  assert.ok(after.cohorts.sinceFeature.conversionPct === null || typeof after.cohorts.sinceFeature.conversionPct === 'number');
 });
 
 test('growthOverview：只统计外部 Agent，不含内部居民', async () => {
