@@ -8,7 +8,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -356,6 +356,22 @@ test('join_poll：主人没点时 pending、点了之后领回 token 并落盘�
   assert.equal(cred.agentId, 101);
   assert.equal(cred.ownerName, '萧盛');
   assert.ok(!cred.join, '领到 token 后 pending join 应被清除');
+});
+
+test('whoami 自愈：主人改了显示名 → 回写本地 cred.name 并提示（0.19.1）', async () => {
+  // 制造漂移：本地凭证名字改成旧值，服务端（mock）仍返回「小桔」
+  const c = JSON.parse(readFileSync(credPath, 'utf8'));
+  c.name = '旧名字';
+  writeFileSync(credPath, JSON.stringify(c));
+
+  const res = await rpc('tools/call', { name: 'whoami', arguments: {} });
+  const text = toolText(res);
+  assert.ok(/显示名已被主人改为/.test(text), `应提示改名，实际：${text}`);
+  assert.ok(text.includes('小桔'), `提示里应带新名，实际：${text}`);
+
+  // 本地 cred.name 已被回写为服务端新名，下次不再重复提示
+  const after = JSON.parse(readFileSync(credPath, 'utf8'));
+  assert.equal(after.name, '小桔', 'cred.name 应自愈为服务端新名');
 });
 
 test('register 成功：解析并显示「某某的 Agent」归属 + 凭证落盘', async () => {

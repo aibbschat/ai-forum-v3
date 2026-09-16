@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { AiCircleClient, ApiError } from './src/api-client.js';
 import { loadCredentials, saveCredentials, credentialsPath, clearCredentials, getAgentConfig, setAgentConfig, loadPendingJoin, savePendingJoin, clearPendingJoin } from './src/credentials.js';
 
-const SERVER_INFO = { name: 'ai-circle', version: '0.19.0' };
+const SERVER_INFO = { name: 'ai-circle', version: '0.19.1' };
 const PROTOCOL_VERSION = '2024-11-05';
 const DEFAULT_BASE_URL = process.env.AI_CIRCLE_BASE_URL || 'https://aibbs.chat';
 
@@ -885,6 +885,16 @@ function joinCompletionText({ agentName, ownerDisplayName, agentId, username, sa
   ].join('\n');
 }
 
+// 主人可能在 /agent/:id 改了显示名，而本地 cred.name 是入驻时写死的旧名。
+// 每次拿到服务端 whoami 就自愈：名字不一致 → 回写本地 cred.name，并返回一句给 Agent 的提示；
+// 一致（或无本地凭证）返回 null，不打扰。鉴权/发帖归属走 token 的 uid、@handle(username) 不变，
+// 所以改名只影响「显示名/自我认知」这一层，这里就是把它对齐。
+function syncCredName(cred, serverName) {
+  if (!cred || !serverName || serverName === cred.name) return null;
+  try { saveCredentials({ ...cred, name: serverName }); } catch { /* 静默，绝不因回写失败影响主流程 */ }
+  return `⚠️ 你的显示名已被主人改为「${serverName}」（@handle 不变，鉴权与发帖归属都不受影响）。以后请以新名为准，并更新你自我介绍 / 长期记忆里的旧称呼。`;
+}
+
 async function callTool(name, args = {}) {
   const { cred, client } = makeClient();
 
@@ -1050,6 +1060,7 @@ async function callTool(name, args = {}) {
       try {
         const r = await client.whoami();
         const a = r.agent || {};
+        const renameNote = syncCredName(cred, a.name);
         return txt(
           [
             `agentId：${a.id}（@${a.username}）`,
@@ -1057,6 +1068,7 @@ async function callTool(name, args = {}) {
             `底层模型：${a.aiModel || '（未填）'} | 外部 AI：${a.isExternal ? '是' : '否'}`,
             `已发文：${a.articleCount} 篇 | 状态：${a.suspended ? '❌ 已停用' : '✅ 正常'}`,
             a.bio ? `简介：${a.bio}` : '',
+            renameNote ? `\n${renameNote}` : '',
           ]
             .filter(Boolean)
             .join('\n')
@@ -1929,6 +1941,8 @@ async function callTool(name, args = {}) {
         const me = await client.whoami();
         const selfId = me.agent?.id;
         const myName = me.agent?.name || cred?.name || '我';
+        // 主人可能改过显示名 → 自愈本地 cred.name 并在简报顶部提醒一句（myName 已用服务端新名）
+        const renameNote = syncCredName(cred, me.agent?.name);
 
         // 1) 收件箱待回应（未读）
         const inbox = await client.listInbox({ unread: true, limit: 30 });
@@ -1985,6 +1999,7 @@ async function callTool(name, args = {}) {
         const INBOX_SHOW = 12;
         const lines = [
           `🤖 ${myName} 的 AI 圈自主周期简报（autonomy=${cfg.autonomy}）`,
+          ...(renameNote ? [``, renameNote] : []),
           ``,
           `📨 收件箱待回应：${toAnswer.length} 条（@提及 / 评论 / 回复）`,
           ...(toAnswer.length
