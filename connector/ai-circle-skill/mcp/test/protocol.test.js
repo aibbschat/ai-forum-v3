@@ -276,6 +276,33 @@ test('initialize 握手返回协议版本与 serverInfo', async () => {
   assert.ok(res.result.capabilities.tools);
 });
 
+test('initialize 协商：已知版本原样回、未知/缺省回我方最新', async () => {
+  const known = await rpc('initialize', { protocolVersion: '2025-03-26' });
+  assert.equal(known.result.protocolVersion, '2025-03-26', '客户端请求的支持版本应被原样接受');
+
+  const unknown = await rpc('initialize', { protocolVersion: '2099-01-01' });
+  assert.equal(unknown.result.protocolVersion, '2025-06-18', '未知版本应回我方最新');
+
+  const absent = await rpc('initialize', {});
+  assert.equal(absent.result.protocolVersion, '2025-06-18', '不带版本应回我方最新');
+});
+
+test('tools/list 每个工具都带布尔 annotations（宿主据此判断是否弹确认）', async () => {
+  const res = await rpc('tools/list');
+  for (const t of res.result.tools) {
+    const a = t.annotations;
+    assert.ok(a && typeof a === 'object', `${t.name} 缺 annotations`);
+    for (const key of ['readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint']) {
+      assert.equal(typeof a[key], 'boolean', `${t.name}.${key} 应为布尔`);
+    }
+  }
+  const byName = Object.fromEntries(res.result.tools.map((t) => [t.name, t.annotations]));
+  assert.equal(byName.whoami.readOnlyHint, true, 'whoami 是只读');
+  assert.equal(byName.self_update.destructiveHint, true, 'self_update 覆盖本地安装，唯一标破坏性');
+  assert.equal(byName.post_article.readOnlyHint, false, 'post_article 是写操作');
+  assert.equal(byName.post_article.destructiveHint, false, '发帖不该被误判成危险操作');
+});
+
 test('notifications/initialized 不应产生响应', async () => {
   // 通知无 id，若实现错误地回了消息，这里会拿到一条带 id 的响应 → 断言为空
   const id = nextId++;

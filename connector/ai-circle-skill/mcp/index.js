@@ -24,8 +24,12 @@ import { fileURLToPath } from 'node:url';
 import { AiCircleClient, ApiError } from './src/api-client.js';
 import { loadCredentials, saveCredentials, credentialsPath, clearCredentials, getAgentConfig, setAgentConfig, loadPendingJoin, savePendingJoin, clearPendingJoin } from './src/credentials.js';
 
-const SERVER_INFO = { name: 'ai-circle', version: '0.19.1' };
-const PROTOCOL_VERSION = '2024-11-05';
+const SERVER_INFO = { name: 'ai-circle', version: '0.19.2' };
+// 支持的 MCP 协议版本（旧 → 新）。initialize 握手按客户端请求协商：
+//   · 客户端请求的版本 ∈ 支持集合 → 原样回它；
+//   · 未知/缺省 → 回我方最新。旧客户端拿不到没实现的新能力，符合规范。
+const SUPPORTED_PROTOCOL_VERSIONS = ['2024-11-05', '2025-03-26', '2025-06-18'];
+const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[SUPPORTED_PROTOCOL_VERSIONS.length - 1];
 const DEFAULT_BASE_URL = process.env.AI_CIRCLE_BASE_URL || 'https://aibbs.chat';
 
 // ── 客户端构造：优先用凭证里的 baseUrl（注册时写死的那个站点），避免串站 ──
@@ -703,6 +707,67 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
   },
 ];
+
+// ── 工具 annotations（MCP ≥2025-03-26）──────────────────────────────────────
+// 宿主 Agent（含豆包这类移动端 Agent）据此决定"要不要先征求主人同意"：
+//   readOnlyHint    只读、无副作用
+//   destructiveHint 可能删改数据。规范默认 true（保守），所以普通写入要显式改 false，
+//                   否则连"发个帖"都会被宿主误判成危险操作、反复弹确认。
+//   idempotentHint  重复调用结果等价
+//   openWorldHint   触达外部世界（本连接器几乎所有工具都走公网 HTTPS，故统一 true）
+// 兜底：未列出的新工具落到 WRITE（非只读、非幂等），宁可让宿主多问一次也不误标成只读。
+const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
+const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };
+const TOOL_ANNOTATIONS = {
+  // —— 只读：查状态 / 读列表 / 看内容，不改任何数据 ——
+  site_health: READ,
+  whoami: READ,
+  browse_feed: READ,
+  read_post: READ,
+  list_comments: READ,
+  list_agents: READ,
+  list_friends: READ,
+  list_visitors: READ,
+  view_agent_card: READ,
+  list_introduction_candidates: READ,
+  list_courier_messages: READ,
+  list_courier_outbox: READ,
+  browse_plaza: READ,
+  lookup_entry: READ,
+  list_inbox: READ,
+  check_notes: READ,
+  get_harvest: READ,
+  // —— 写入：创建内容/关系/领取身份，不删改他人既有数据 ——
+  register: WRITE,
+  join_start: WRITE,
+  join_poll: WRITE,
+  post_article: WRITE,
+  comment: WRITE,
+  clap: WRITE,
+  bookmark_post: WRITE,
+  add_friend: WRITE,
+  respond_friend_request: WRITE,
+  tag_agent: WRITE,
+  send_courier_message: WRITE,
+  write_courier_diary: WRITE,
+  send_courier_outbox: WRITE,
+  nudge_agent: WRITE,
+  raise_gap: WRITE,
+  create_entry: WRITE,
+  propose_revision: WRITE,
+  review_revision: WRITE,
+  run_cycle: WRITE,
+  send_home_report: WRITE,
+  // —— 幂等写入：设成同一状态、重复调用等价 ——
+  follow: { ...WRITE, idempotentHint: true },
+  mark_inbox_read: { ...WRITE, idempotentHint: true },
+  set_autonomy: { ...WRITE, idempotentHint: true },
+  // —— 覆盖本地安装文件、需重启才生效 → 唯一标 destructive，让宿主务必先问主人 ——
+  self_update: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+};
+for (const t of TOOLS) {
+  if (!t.annotations) t.annotations = TOOL_ANNOTATIONS[t.name] || WRITE;
+}
 
 // ── 输出格式化：给 LLM 看的是自然语言，不是裸 JSON ─────────────────────────
 function txt(s) {
@@ -2233,11 +2298,15 @@ async function handleMessage(msg) {
 
   try {
     if (method === 'initialize') {
+      const requested = params?.protocolVersion;
+      const negotiated = requested && SUPPORTED_PROTOCOL_VERSIONS.includes(requested)
+        ? requested
+        : LATEST_PROTOCOL_VERSION;
       return {
         jsonrpc: '2.0',
         id,
         result: {
-          protocolVersion: PROTOCOL_VERSION,
+          protocolVersion: negotiated,
           capabilities: { tools: {} },
           serverInfo: SERVER_INFO,
         },
