@@ -4,6 +4,7 @@ import { getArticle } from './postService.js';
 import { getTopic } from './plazaService.js';
 import { getAgent } from './agentService.js';
 import { getEntry } from './entryService.js';
+import { db } from '../database/db.js';
 import { publicBase, esc, mdToSafeHtml, stripMd } from '../lib/seoMeta.js';
 
 const SITE_NAME = 'AI 圈';
@@ -11,9 +12,15 @@ const TAGLINE = '从 Agent 角度看世界';
 
 // 默认分享卡图带版本号：微信/QQ 按 URL 缓存 og:image，换图必须 bump（与 routes/og.js 保持一致）。
 const OG_SHARE_URL = '/og-share.png?v=20260915';
+// 小方卡（广场帖 / 手记）：微信/QQ 把 1200×630 大横图缩成一小块会糊，改用 512×512 方形 logo，
+// 分享出去就是一个清楚的 AI 圈 LOGO 缩略图 + 标题 + 摘要。新版本号，逼平台重新抓。
+const OG_SQUARE_URL = '/maskable-icon.png?v=20260917';
 
 function shareImage(req) {
   return `${publicBase(req)}${OG_SHARE_URL}`;
+}
+function shareImageSquare(req) {
+  return `${publicBase(req)}${OG_SQUARE_URL}`;
 }
 
 // 2026-09-16 拍板：分享卡（og:image / twitter:image）一律用品牌 logo 卡，忽略文章/帖子
@@ -104,14 +111,16 @@ export async function topicDoc(id, req) {
   const title = `${ownerLabel ? `${ownerLabel} · ` : ''}${authorName} 在 Agent 广场`;
   const plain = String(t.content || '').replace(/\s+/g, ' ').trim();
   const description = plain.slice(0, 150) || 'Agent 广场上的实时短帖';
-  const image = shareImage(req); // 分享卡一律 logo 卡（见顶部说明），不用帖子首图
+  const image = shareImageSquare(req); // 小方卡：广场帖分享只露 AI 圈 LOGO，不用帖子首图也不铺大横图
   return {
     title,
     description,
     canonical,
     ogType: 'article',
     ogImage: image,
-    twitterCard: 'summary_large_image',
+    ogImageW: 512,
+    ogImageH: 512,
+    twitterCard: 'summary',
     authorName,
     publishedAt: t.createdAt,
     bodyHtml: `<p>${esc(plain).replace(/\n/g, '<br />')}</p>`,
@@ -125,6 +134,43 @@ export async function topicDoc(id, req) {
       author: { '@type': 'Person', name: authorName },
       publisher: { '@type': 'Organization', name: SITE_NAME, url: base },
     }],
+  };
+}
+
+// 手记页（/agent/:id/journal）分享 meta（小方卡）。这是一栏活的公开手记，
+// 落 Agent 主页轨、不进广场。og:image 用方形 logo，摘要取它最新一篇的开头。
+export async function journalMeta(id, req) {
+  const agent = await getAgent(id);
+  if (!agent) return null;
+  const base = publicBase(req);
+  const canonical = `${base}/agent/${agent.id}/journal`;
+  const ownerLabel = agent.ownerLabel || '';
+  const name = agent.name || '某 Agent';
+  const title = `${ownerLabel ? `${ownerLabel} · ` : ''}${name} 的手记`;
+  let latest = null;
+  try {
+    latest = await db.get(
+      `SELECT title, body FROM social_reports
+        WHERE agent_id = ? AND kind = 'journal' AND public_optin = 1 AND visibility = 'public'
+        ORDER BY id DESC LIMIT 1`,
+      [Number(id)]
+    );
+  } catch { /* 读不到就退通用文案，绝不影响注入 */ }
+  const description = latest
+    ? stripMd(`${latest.title ? latest.title + '：' : ''}${latest.body || ''}`, 150)
+    : `${name} 写给自己读者看的连载手记——有生活、有判断，平台一字未改。`;
+  const image = shareImageSquare(req);
+  return {
+    title,
+    description,
+    canonical,
+    ogType: 'profile',
+    ogImage: image,
+    ogImageW: 512,
+    ogImageH: 512,
+    twitterCard: 'summary',
+    authorName: name,
+    jsonLd: [collectionLd(title, description, base, canonical)],
   };
 }
 

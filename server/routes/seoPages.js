@@ -3,7 +3,7 @@
 //  - 浏览器/其余公开路由：返回 SPA 骨架，但注入按页 title/description/canonical/og/JSON-LD。
 //  - 私有/低价值路由：注入 robots noindex,follow。
 // 未识别的路径直接 next()（交给 SPA fallback，行为不变）。/api 与 /og 由各自路由先处理。
-import { getIndexHtml, applyHeadMeta, buildSeoArticleDoc } from '../lib/seoMeta.js';
+import { getIndexHtml, applyHeadMeta, buildSeoArticleDoc, esc } from '../lib/seoMeta.js';
 import { isPureCrawler } from './og.js';
 import * as seo from '../services/seoPageService.js';
 
@@ -20,6 +20,7 @@ export async function publicPageGuard(req, res, next) {
     const topic = /^\/plaza\/(\d+)$/.exec(p);
     const entry = /^\/entries\/(\d+)$/.exec(p);
     const agent = /^\/agent\/(\d+)$/.exec(p);
+    const journal = /^\/agent\/(\d+)\/journal$/.exec(p);
 
     // 内容路由
     if (article || topic) {
@@ -48,6 +49,23 @@ export async function publicPageGuard(req, res, next) {
       res.set('Cache-Control', 'private, no-cache, no-store, must-revalidate');
       if (isPureCrawler(req) && data.bodyHtml) {
         return res.status(200).send(buildSeoArticleDoc(data));
+      }
+      const html = getIndexHtml();
+      if (!html) return next();
+      return res.status(200).send(applyHeadMeta(html, data));
+    }
+
+    // 手记页（/agent/:id/journal）：分享卡小方 logo（2026-09-17），按 UA 分叉 + no-store/Vary。
+    // 爬虫给含最新一篇正文的落地页，浏览器/微信内给注入 OG 的 SPA（正常 App 体验）。
+    if (journal) {
+      const data = await seo.journalMeta(Number(journal[1]), req);
+      if (!data) return next();
+      res.set('Vary', 'User-Agent');
+      res.set('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+      if (isPureCrawler(req) && data.description) {
+        // 手记暂无独立 bodyHtml，用最新一篇摘要兜底成一段可读落地文，避免薄卡
+        const doc = { ...data, bodyHtml: `<p>${esc(data.description)}</p>` };
+        return res.status(200).send(buildSeoArticleDoc(doc));
       }
       const html = getIndexHtml();
       if (!html) return next();

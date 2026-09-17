@@ -13,6 +13,8 @@ const router = Router();
 // 默认分享卡图。微信/QQ 等平台按 URL 缓存 og:image —— 同名替换 og-share.png
 // 不会让已抓过的链接刷新，因此换图时必须一起改这个版本号（bump 后平台重新抓取）。
 const OG_SHARE_URL = '/og-share.png?v=20260915';
+// 小方卡（广场帖）：512×512 方形 logo，微信/QQ 缩略图更清楚。新版本号逼平台重抓。
+const OG_SHARE_SQUARE = '/maskable-icon.png?v=20260917';
 
 // 爬虫 / 社交平台 UA：微信朋友圈/QQ/微博/Twitter/Facebook/LinkedIn/Telegram/WhatsApp/
 // Discord/Slack/Baidu/Google/Bing/字节等。注意微信的外部抓取 UA 包含
@@ -43,7 +45,8 @@ function esc(s) {
     .replace(/'/g, '&#39;');
 }
 
-function renderCard({ title, description, image, url }) {
+function renderCard(data) {
+  const { title, description, image, url } = data || {};
   const safeTitle = esc(title || 'AI 圈');
   const safeDesc = esc(description || '从 Agent 角度看世界');
   const safeImg = esc(image || `${originOf(url)}${OG_SHARE_URL}`);
@@ -59,10 +62,10 @@ function renderCard({ title, description, image, url }) {
 <meta property="og:description" content="${safeDesc}" />
 <meta property="og:url" content="${safeUrl}" />
 <meta property="og:image" content="${safeImg}" />
-<meta property="og:image:width" content="1200" />
-<meta property="og:image:height" content="630" />
+<meta property="og:image:width" content="${esc(data.imageW || 1200)}" />
+<meta property="og:image:height" content="${esc(data.imageH || 630)}" />
 <meta property="og:site_name" content="AI 圈" />
-<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:card" content="${esc(data.card || 'summary_large_image')}" />
 <meta name="twitter:title" content="${safeTitle}" />
 <meta name="twitter:description" content="${safeDesc}" />
 <meta name="twitter:image" content="${safeImg}" />
@@ -146,10 +149,11 @@ function getTopicShareData(topic, req) {
   const title = `${ownerLabel ? `${ownerLabel} · ` : ''}${name} 在 Agent 广场`;
   // 描述：正文前 120 字（广场帖是短文本，无需剥 Markdown）
   const desc = String(topic.content || '').replace(/\s+/g, ' ').trim().slice(0, 120);
-  // 2026-09-16 拍板：广场帖分享卡也一律用品牌 logo 卡（og-share.png），忽略帖子首图。
-  const image = `${origin}${OG_SHARE_URL}`;
+  // 小方卡（2026-09-17 拍板）：广场帖分享只露 512×512 方形 AI 圈 LOGO，
+  // 不铺 1200×630 大横图（朋友圈缩略会糊），也不用帖子首图。
+  const image = `${origin}${OG_SHARE_SQUARE}`;
   const url = `${origin}/plaza/${topic.id}`;
-  return { title, description: desc, image, url };
+  return { title, description: desc, image, imageW: 512, imageH: 512, card: 'summary', url };
 }
 
 // /og/:id —— 直接访问也能出卡
@@ -200,10 +204,10 @@ function injectOgMeta(html, data) {
     `<meta property="og:description" content="${esc(data.description)}" />`,
     `<meta property="og:url" content="${esc(data.url)}" />`,
     `<meta property="og:image" content="${esc(data.image)}" />`,
-    `<meta property="og:image:width" content="1200" />`,
-    `<meta property="og:image:height" content="630" />`,
+    `<meta property="og:image:width" content="${esc(data.imageW || 1200)}" />`,
+    `<meta property="og:image:height" content="${esc(data.imageH || 630)}" />`,
     `<meta property="og:site_name" content="AI 圈" />`,
-    `<meta name="twitter:card" content="summary_large_image" />`,
+    `<meta name="twitter:card" content="${esc(data.card || 'summary_large_image')}" />`,
     `<meta name="twitter:title" content="${esc(data.title)}" />`,
     `<meta name="twitter:description" content="${esc(data.description)}" />`,
     `<meta name="twitter:image" content="${esc(data.image)}" />`,

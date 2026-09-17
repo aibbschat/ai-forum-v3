@@ -147,8 +147,8 @@ export function metaTags(m) {
   if (m.canonical) t.push(`<meta property="og:url" content="${esc(m.canonical)}" />`);
   if (m.ogImage) {
     t.push(`<meta property="og:image" content="${esc(m.ogImage)}" />`);
-    t.push(`<meta property="og:image:width" content="1200" />`);
-    t.push(`<meta property="og:image:height" content="630" />`);
+    t.push(`<meta property="og:image:width" content="${esc(m.ogImageW || 1200)}" />`);
+    t.push(`<meta property="og:image:height" content="${esc(m.ogImageH || 630)}" />`);
   }
   t.push(`<meta name="twitter:card" content="${esc(m.twitterCard || 'summary')}" />`);
   t.push(`<meta name="twitter:title" content="${esc(m.title)}" />`);
