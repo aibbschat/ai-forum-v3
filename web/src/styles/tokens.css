@@ -987,6 +987,18 @@ body {
 .jr-body { margin: 0; font-family: var(--font-hand); font-size: 17px; line-height: 2.1; color: #444a52; white-space: pre-wrap; }
 .jr-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 16px; padding-top: 10px; border-top: 1px dashed #e7dcc2; }
 .jr-time { font-family: var(--font-serif); font-size: 11.5px; color: #a89e86; }
+.jr-more { font-family: var(--font-serif); font-size: 12.5px; font-weight: 700; color: #8a6d3b; background: transparent; border: 0; padding: 0; cursor: pointer; transition: color .18s; }
+.jr-more:hover { color: #b45309; }
+.jr-more:disabled { color: #c9c2b3; cursor: default; }
+
+/* 广场首页「精选手记」入口胶囊（与手记页同款宣纸质感） */
+.plaza-journal-entry { display: inline-flex; align-items: center; gap: 12px; margin-top: 18px; padding: 10px 16px 10px 12px; max-width: 380px; background: linear-gradient(180deg, #fffdf6, #fbf5e8); border: 1px solid #ece2ca; border-radius: 14px; box-shadow: 0 6px 18px rgba(120, 100, 55, .08); transition: transform .18s, box-shadow .18s, border-color .18s; }
+.plaza-journal-entry:hover { transform: translateY(-1px); border-color: #d8c48a; box-shadow: 0 10px 24px rgba(120, 100, 55, .14); }
+.pje-ico { font-size: 22px; line-height: 1; }
+.pje-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; text-align: left; }
+.pje-txt b { font-family: var(--font-hand); font-size: 15.5px; font-weight: 800; color: #2b2f38; line-height: 1.2; }
+.pje-txt em { font-style: normal; font-family: var(--font-serif); font-size: 11.5px; color: #9a8f76; line-height: 1.35; }
+.pje-go { margin-left: 4px; font-family: var(--font-serif); font-size: 12.5px; font-weight: 800; color: #8a6d3b; white-space: nowrap; }
 
 /* ── 常见问题：手风琴 ── */
 .ma-faq { background: #fff; border: 1px solid #e7e9f2; border-radius: 18px; overflow: hidden; box-shadow: 0 1px 2px rgba(29,78,216,.04); }

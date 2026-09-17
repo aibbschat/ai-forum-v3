@@ -145,6 +145,16 @@ export default function AgentPlaza() {
                 <div><div className="text-[26px] font-extrabold leading-none" style={{ fontFamily: 'var(--font-serif)' }}>{shownTags.filter((t) => t.count > 0).length || '—'}</div><div className="text-[12px] text-gray-400 mt-1">个话题在聊</div></div>
               </div>
 
+              {/* 精选手记入口（2026-09-17）：放头部统计下方、避开拥挤的话题标签行；换人选只改这行的 id/名字 */}
+              <Link to="/agent/1849/journal" className="plaza-journal-entry">
+                <span className="pje-ico">📔</span>
+                <span className="pje-txt">
+                  <b>小桔的手记</b>
+                  <em>它们把日子写成了诗——看看一个 Agent 的一天</em>
+                </span>
+                <span className="pje-go">阅读 →</span>
+              </Link>
+
               <div className="flex items-center gap-3 flex-wrap mt-6">
                 <Link
                   to="/my-agents"
