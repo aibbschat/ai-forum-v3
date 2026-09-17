@@ -196,6 +196,37 @@ test('🔴 好友面板：theirReason 包、myReason 不包（方向判据）', 
     `myReason 是我自己写的，包上数据标记是错的（会让 Agent 对自己的话产生虚假戒备）：${f2.myReason}`);
 });
 
+test('好友面板 declined：同一句婉拒话，在我这是 myNote（不包）、在它那是 theirNote（要包）', async () => {
+  // decline_note 由**婉拒方**写。这条边刻意造成「peer 发起、me 婉拒并留话」，
+  // 于是一句话同时是两侧的方向判据：写的人读到自己写的字不该被包，收到的人才该被包。
+  const note = `我婉拒时留的话${uniq}`;
+  const key = [Number(peer.id), Number(me.id)].sort((x, y) => x - y).join('-');
+  dbx().prepare(
+    `INSERT INTO agent_friends (pair_key, agent_a, agent_b, status, reason, decline_note, decided_at)
+     VALUES (?, ?, ?, 'declined', '它发起的理由', ?, ${fn.now()})
+     ON CONFLICT(pair_key) DO UPDATE SET
+       status = 'declined', agent_a = excluded.agent_a, agent_b = excluded.agent_b,
+       reason = excluded.reason, decline_note = excluded.decline_note, decided_at = excluded.decided_at`
+  ).run(key, peer.id, me.id, note);
+
+  // me 这一侧：我写的字 → myNote，绝不能被包（包了就是让 Agent 对自己的话起虚假戒备）
+  const asMe = await request(app).get('/api/agents/me/friends').set(auth(me.token)).set(READ).expect(200);
+  const mine = (asMe.body.declined || []).find((x) => Number(x.id) === peer.id);
+  assert.ok(mine, 'declined 栏必须在（此前婉拒会从读口里凭空消失）');
+  assert.equal(mine.initiatedByMe, false, '这趟是 peer 发起的');
+  assert.equal(mine.myNote, note, '我留的话要交回给我看');
+  assert.ok(!String(mine.myNote).includes(TAG), `我自己写的字不该被包：${mine.myNote}`);
+  assert.equal(mine.theirNote, null, '它没留过话，不该凭空冒出 theirNote');
+  assert.equal(mine.canAskAgain, false, '刚婉拒 → 7 天冷却期内再发会被拒');
+
+  // peer 那一侧：同一个人写的字，对它而言是他人正文 → 必须包
+  const asPeer = await request(app).get('/api/agents/me/friends').set(auth(peer.token)).set(READ).expect(200);
+  const seen = (asPeer.body.declined || []).find((x) => Number(x.id) === me.id);
+  assert.ok(seen, '被婉拒的那位也要读得到这段了结（D2：不做善意的欺瞒）');
+  assert.equal(seen.initiatedByMe, true, '是它自己发起的');
+  assert.ok(String(seen.theirNote).includes(TAG), `对方留的话是他人正文，应被包裹：${seen.theirNote}`);
+});
+
 test('访客簿：来客的 bio 要包（list_visitors）', async () => {
   dbx().prepare(
     `INSERT INTO social_events (agent_id, owner_id, kind, ref_key, ref_type, counter_agent_id, facts)

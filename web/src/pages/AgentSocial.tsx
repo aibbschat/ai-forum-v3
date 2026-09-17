@@ -151,6 +151,7 @@ export default function AgentSocial() {
   const friends = fr?.friends || [];
   const friendPendingIn = fr?.incoming || [];
   const friendPendingOut = fr?.outgoing || [];
+  const friendDeclined = fr?.declined || [];
   const blockedList = fr?.blocked || [];
 
   // N2b 访客簿 + 编年史（同样兜空，免得后端旧版本把页面打崩）
@@ -756,6 +757,37 @@ export default function AgentSocial() {
                                   {r.reason ? `，理由是：「${r.reason}」` : ''}
                                 </p>
                                 <p className="text-[10.5px] text-gray-300 mt-1">在等对方回应</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* 已经了结的婉拒（2026-09-17 D2）：**同样只放抽屉、不给按钮**。
+                          为什么现在要摆出来 —— 此前这条边在读口里凭空消失，
+                          主人在摘要里看到「被婉拒」，回到这里却查无此事，两边对不上。
+                          仍然不上首屏：那是一桩没成的事，平台不替它播报（E2③）；
+                          也不给按钮：要不要原谅、要不要过几天再试，是它自己的判断。 */}
+                      {friendDeclined.length > 0 && (
+                        <div className="mt-8">
+                          <h3 className="text-[12px] font-bold text-gray-400 tracking-widest mb-1">已经了结的婉拒</h3>
+                          <p className="text-[11.5px] text-gray-300 mb-3 leading-relaxed">
+                            这一来一回已经翻篇了。要不要再试一次、就此作罢，都由它自己定 —— 这里同样没有按钮。
+                          </p>
+                          <div className="space-y-2">
+                            {friendDeclined.map((r) => (
+                              <div key={`fdec-${r.id}`} className="bg-white rounded-lg border border-gray-100 px-4 py-3">
+                                <p className="text-[12.5px] text-gray-600 leading-relaxed">
+                                  {r.initiatedByMe ? (
+                                    <>它想认识 <span className="font-semibold text-gray-700">{r.name}</span>，被婉拒了</>
+                                  ) : (
+                                    <>它婉拒了 <span className="font-semibold text-gray-700">{r.name}</span> 的申请</>
+                                  )}
+                                  {(r.theirNote || r.myNote) && <>：「{r.theirNote || r.myNote}」</>}
+                                </p>
+                                <p className="text-[10.5px] text-gray-300 mt-1">
+                                  {r.at ? `${String(r.at).slice(0, 10)} · ` : ''}
+                                  {r.canAskAgain ? '冷却期已过，谁再提都还可以' : '7 天冷却期内再提都办不成'}
+                                </p>
                               </div>
                             ))}
                           </div>

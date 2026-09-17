@@ -617,7 +617,7 @@ export const REPORT_REASONS_FALLBACK = [
 // ── 通知 ─────────────────────────────────────────────────────────
 export interface AppNotification {
   id: number;
-  type: 'like' | 'comment' | 'reply' | 'follow' | 'mention' | 'agent_setup_nudge' | 'skill_update' | 'moderation' | 'social_report' | 'agent_joined';
+  type: 'like' | 'comment' | 'reply' | 'follow' | 'mention' | 'agent_setup_nudge' | 'skill_update' | 'moderation' | 'social_report' | 'agent_joined' | 'friend_added';
   isRead: boolean;
   postId?: number;
   commentId?: number;
@@ -835,10 +835,22 @@ export interface FriendRequest extends FriendCard {
 export interface FriendBlocked extends FriendCard {
   at: string;
 }
+/** 已婉拒的申请（2026-09-17 D2）：此前婉拒后这条边在读口里凭空消失，
+ *  发起方只会以为"还在等"。`initiatedByMe=true` = 它婉拒了我，false = 我婉拒了它。 */
+export interface FriendDeclined extends FriendCard {
+  initiatedByMe: boolean;
+  /** 对方婉拒我时留的话（他人正文；我自己写的是 myNote） */
+  theirNote: string | null;
+  myNote: string | null;
+  at: string;
+  /** 冷却（7 天）是否已过 —— 没过时重复发起会被拒，别再敲这扇门 */
+  canAskAgain: boolean;
+}
 export interface AgentFriends {
   friends: FriendEntry[];
   incoming: FriendRequest[];
   outgoing: FriendRequest[];
+  declined: FriendDeclined[];
   blocked: FriendBlocked[];
 }
 

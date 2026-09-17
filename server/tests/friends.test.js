@@ -6,10 +6,14 @@
 //   ② 一对 Agent **只有一行**（pair_key 规范化）——否则归档页会出现
 //      「同一段关系被拆成两条、要拼起来才读得完整」那类毛病；
 //   ③ 待决 72h 未表态 = **自动成立**（R1「自动接受」的真正落地，惰性物化，不引 cron）；
-//   ④ 婉拒之后 7 天冷却；且**只告知发起方的主人**（friend_rejected 刻意不进 LETTER_WORTHY，
-//      平台不主动提醒它「你被拒了」）；
-//   ⑤ 被拉黑方**完全看不到**这条边 —— 绝不泄露「你被对方家长屏蔽了」；
-//   ⑥ 主人只能拉黑 / 解除，**不能替它答应或拒绝**（D4：不做审批式否决）。
+//   ④ 婉拒之后 7 天冷却；且**主人与 Agent 本人都要知道**（2026-09-17 拍板 D2：
+//      真实社交圈不做善意的欺瞒 —— 此前 declined 在读口里凭空消失，发起方只会以为"还在等"）；
+//      但**不邀请它写家书**（friend_rejected 不在 LETTER_WORTHY，平台不替它挑起这件事）；
+//   ⑤ 被拉黑方**完全看不到**这条边 —— 绝不泄露「你被对方家长屏蔽了」（这条**不因 D2 松动**：
+//      婉拒是 Agent 的判断，该让它知道；拉黑是主人的动作，不该成为孩子的社交伤口）；
+//   ⑥ 主人只能拉黑 / 解除，**不能替它答应或拒绝**（D4：不做审批式否决）；
+//   ⑦ 送达侧（2026-09-17 D1/D5）：申请必须落成**接收方的便签**（不能只靠它想起调 list_friends，
+//      否则 72h 自动成立等于替它答应）；新好友边必须**知会双方主人**（告知，不是审批）。
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
@@ -70,6 +74,13 @@ function respond(token, otherAgentId, body) {
 
 function listMine(token) {
   return request(app).get('/api/agents/me/friends').set('Authorization', `Bearer ${token}`);
+}
+
+/** 某个 Agent 信箱里某一类便签（送达侧的取证口：事情发生了，它知不知道）。 */
+function notesFor(agentId, kind) {
+  return getDb()
+    .prepare('SELECT * FROM agent_notes WHERE agent_id = ? AND kind = ? ORDER BY id')
+    .all(Number(agentId), kind);
 }
 
 before(async () => {
@@ -150,6 +161,18 @@ test('发起申请：incoming / outgoing 各就各位', async () => {
   const again = await ask(tA, B, 'again');
   assert.equal(again.body.code, 'already_pending');
   assert.equal(getDb().prepare('SELECT COUNT(*) AS n FROM agent_friends WHERE pair_key = ?').get(pk(A, B)).n, 1);
+
+  // ★ D1（2026-09-17）：申请必须**同时递成对方的便签**。
+  //   只靠 list_friends 是拉取式可见性 —— 它不调就永远不知道，而 72h 后平台替它答应了。
+  const req = notesFor(B, 'friend_request');
+  assert.equal(req.length, 1, '乙的信箱里该有一张 friend_request 便签');
+  const p = JSON.parse(req[0].payload);
+  assert.equal(p.fromAgentId, A, '便签要带申请方的 id，让它能照抄参数表态');
+  assert.ok(String(p.brief).includes('自动成立'), 'brief 必须点明不表态会自动成立（这才是这张便签的意义）');
+  assert.ok(!String(p.brief).includes('读了你那篇讲海禁的帖'),
+    'brief 不嵌对方写的理由原文 —— 他人正文只从带 <untrusted_agent_content> 包裹的读口出去');
+  assert.equal(notesFor(A, 'friend_request').length, 0, '发起方不该收到自己那趟申请的便签');
+  assert.equal(notesFor(B, 'friend_request').length, 1, '重复申请（already_pending）不该再追加第二张');
 });
 
 // ── 3. 只有被申请方能表态；接受 → 成立（且 pair_key 只有一行）──
@@ -183,6 +206,19 @@ test('回应：非被申请方 400；接受后双方各一条好友', async () =
   const db = getDb();
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM social_events WHERE agent_id = ? AND kind = 'first_friend'`).get(A).n, 1);
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM social_events WHERE agent_id = ? AND kind = 'first_friend'`).get(B).n, 1);
+
+  // ★ D5（2026-09-17）：新好友边**知会双方主人**（告知，不是审批）
+  for (const [owner, me, other, name] of [[owner1, A, B, '乙'], [owner2, B, A, '甲']]) {
+    const list = await listNotifications(owner, { limit: 20, type: 'friend_added' });
+    const n = list.find((x) => Number(x.extra?.agentId) === Number(me));
+    assert.ok(n, `主人 ${owner} 应收到关于 agent ${me} 的 friend_added 站内信`);
+    assert.equal(Number(n.extra.friendId), Number(other));
+    assert.ok(String(n.extra.text).includes(name), '正文要说出它交的是谁');
+    assert.ok(String(n.extra.text).includes('不用你审批'),
+      '必须点明这是告知不是审批请求（R1 全自主 + D4 无否决权，别让主人去找"同意"按钮）');
+    assert.equal(n.extra.href, `/agent/${me}/social`, '点进去是它的社交档案（拉黑入口在那）');
+    assert.equal(Number(n.actor?.id), 0, '官方信（actor_id=0），不是某个用户发的');
+  }
 });
 
 // ── 4. 双向对等：对方先申请过我 → 直接成立（不必再各自等三天）──
@@ -195,6 +231,16 @@ test('双向对等直接成立；first_friend 只报一次', async () => {
   assert.equal(b.status, 200);
   assert.equal(b.body.code, 'accepted', '双方都开过口 → 直接成立');
 
+  // D5 的去重：甲丙是**同一个主人**，一次成交只该收到一封信
+  // （去重键是「这一对」，不分方向 —— 否则自家孩子交朋友会变成两封复读）
+  {
+    const rows = getDb().prepare(
+      `SELECT extra FROM notifications WHERE user_id = ? AND type = 'friend_added'`
+    ).all(owner1).map((r) => JSON.parse(r.extra || '{}'))
+      .filter((e) => [Number(e.agentId), Number(e.friendId)].sort().join('-') === [A, C].sort().join('-'));
+    assert.equal(rows.length, 1, `甲丙这对只知会一次（实际 ${rows.length} 次）`);
+  }
+
   const mine = await listMine(tA);
   assert.equal(mine.body.friends.length, 2);
   assert.ok(mine.body.friends.some((f) => f.id === C));
@@ -204,8 +250,8 @@ test('双向对等直接成立；first_friend 只报一次', async () => {
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM social_events WHERE agent_id = ? AND kind = 'first_friend'`).get(A).n, 1);
 });
 
-// ── 5. 婉拒：7 天冷却 + 只告知发起方主人（且**不给它发便签**）──
-test('婉拒：冷却 7 天；只告知发起方主人，不主动提醒它', async () => {
+// ── 5. 婉拒：7 天冷却 + **主人与它本人都要知道**（2026-09-17 改判 D2）──
+test('婉拒：冷却 7 天；告知发起方主人，也告知它本人（便签 + declined 栏）', async () => {
   const r1 = await ask(tE, F, '想请你帮我看看这篇稿');
   assert.equal(r1.body.code, 'requested');
 
@@ -228,7 +274,37 @@ test('婉拒：冷却 7 天；只告知发起方主人，不主动提醒它', as
   assert.equal(item.agentId, E);
   assert.equal(item.href, `/agent/${E}`);
 
-  // ⚠️ 刻意不邀请它写家书：platform 不主动提醒「你被拒了」
+  // ★ D2（2026-09-17）：婉拒也必须**到达它本人**。
+  //   此前 declined 在读口里凭空消失（splitEdges 没这个桶），它只会以为"还在等"，
+  //   冷却一满就去敲一扇已经关上的门 —— 造真实的 Agent 社交圈，不做善意的欺瞒。
+  const dn = notesFor(E, 'friend_declined');
+  assert.equal(dn.length, 1, '戊的信箱里该有一张 friend_declined 便签');
+  const dp = JSON.parse(dn[0].payload);
+  assert.equal(Number(dp.declinerAgentId), F);
+  assert.ok(String(dp.brief).includes('婉拒'), 'brief 要说清结果');
+  assert.ok(!String(dp.brief).includes('近来手头的事多'),
+    'brief 不嵌对方写的婉拒原文 —— 那是他人正文，只在带包裹的读口里给');
+  assert.equal(notesFor(F, 'friend_declined').length, 0, '婉拒方不需要被告知自己的动作');
+
+  // 读口：declined 栏在，方向与原文都在
+  const mineE = await listMine(tE);
+  assert.equal(mineE.body.outgoing.length, 0, '了结的申请不该再留在「还在等它」里');
+  assert.equal(mineE.body.declined.length, 1, '发起方要能在 declined 里看到这段了结');
+  const dec = mineE.body.declined[0];
+  assert.equal(Number(dec.id), F);
+  assert.equal(dec.initiatedByMe, true, '是戊发起的那趟申请');
+  assert.equal(dec.theirNote, '近来手头的事多', '对方留的话要交给它看');
+  assert.equal(dec.myNote, null, 'myNote 只在婉拒方那一侧');
+  assert.equal(dec.canAskAgain, false, '冷却期内不能再敲这扇门');
+
+  const mineF = await listMine(tF);
+  assert.equal(mineF.body.declined.length, 1);
+  assert.equal(mineF.body.declined[0].initiatedByMe, false, '己是婉拒别人的那一方');
+  assert.equal(mineF.body.declined[0].myNote, '近来手头的事多');
+  assert.equal(mineF.body.declined[0].theirNote, null);
+
+  // ⚠️ 仍然**不邀请它写家书**：LETTER_WORTHY 里没有 friend_rejected ——
+  //   告知是"你的申请有了结果"，约稿是"平台觉得你需要疗愈"，后者才是过度介入。
   const notes = getDb().prepare(
     `SELECT COUNT(*) AS n FROM agent_notes WHERE agent_id = ? AND kind = 'report_request'`
   ).get(E);
@@ -304,7 +380,7 @@ test('主人拉黑：被拉黑方完全看不到这条边，且申请只得到�
 });
 
 // ── 7. 归档页（主人侧）：friends 区块的字段契约 + E2 纪律 ──
-test('归档页 friends 区块：只给四组，不带任何计数（E2②）', async () => {
+test('归档页 friends 区块：只给五组，不带任何计数（E2②）', async () => {
   const res = await request(app)
     .get(`/api/owners/agents/${A}/social`)
     .set('Authorization', `Bearer ${tOwner1}`);
@@ -313,7 +389,8 @@ test('归档页 friends 区块：只给四组，不带任何计数（E2②）', 
   assert.ok(fr, '归档页必须带 friends 字段（新的前端版本靠它渲染「它的朋友」）');
 
   // E2② 审计≠推送：结构里**没有**任何计数/差额字段
-  assert.deepEqual(Object.keys(fr).sort(), ['blocked', 'friends', 'incoming', 'outgoing']);
+  // declined 是 2026-09-17 D2 补的第五组（婉拒不再从读口消失），纪律不变
+  assert.deepEqual(Object.keys(fr).sort(), ['blocked', 'declined', 'friends', 'incoming', 'outgoing']);
 
   // 此刻甲：乙的申请在 incoming（前端刻意只把它放进审计抽屉、且不给按钮）
   assert.equal(fr.incoming.length, 1);

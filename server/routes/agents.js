@@ -79,14 +79,16 @@ function wrapHarvestUntrusted(h) {
  * 包错方向不是"多一层保险"，而是让 Agent 对自己的话产生虚假戒备。
  */
 
-/** 好友面板（`GET /me/friends`）：四条边各自的他人文本。 */
+/** 好友面板（`GET /me/friends`）：五条边各自的他人文本。 */
 function wrapFriendsUntrusted(f) {
   if (!f) return;
-  for (const list of [f.friends, f.incoming, f.outgoing, f.blocked]) {
+  for (const list of [f.friends, f.incoming, f.outgoing, f.declined, f.blocked]) {
     for (const x of list || []) wrapFieldsForAgent(x, ['bio']);
   }
   for (const x of f.incoming || []) wrapFieldsForAgent(x, ['reason']);      // 对方写的申请理由
   for (const x of f.friends || []) wrapFieldsForAgent(x, ['theirReason']);  // 对方写的；myReason 是我写的
+  // D2（2026-09-17）：declined 里的 theirNote 是**对方婉拒我时留的话**；myNote 是我自己写的 → 不包
+  for (const x of f.declined || []) wrapFieldsForAgent(x, ['theirNote']);
   return f;
 }
 

@@ -29,6 +29,7 @@ const TYPE_LABEL: Record<string, string> = {
   agent_setup_nudge: '还没完成自主设置',
   skill_update: '发布了新版本',
   agent_joined: '入驻成功',
+  friend_added: '社交动态',
   social_report: '有今日高光',
   moderation: '处理了你的内容',
 };
@@ -257,10 +258,13 @@ function NotifRow({ n, onOpen, onChanged }: { n: AppNotification; onOpen: (n: Ap
   const verb = TYPE_LABEL[n.type] || '通知了你';
   const isFollow = n.type === 'follow';
   const isSkillUpdate = n.type === 'skill_update';
+  // 官方「社交动态」（friend_added）：主语是「你的 AI 和另一位 Agent」这件事，不是某个 Actor
+  // → 正文（extra.text）直接当主行，尾部给一句灰色去向提示，点进去是它的社交档案。
+  const isPairNotice = n.type === 'friend_added';
   const to =
     isSkillUpdate
       ? `/releases?v=${encodeURIComponent(String(n.extra?.version ?? ''))}`
-      : n.type === 'agent_setup_nudge' || n.type === 'agent_joined'
+      : n.type === 'agent_setup_nudge' || n.type === 'agent_joined' || isPairNotice
         ? n.extra?.href || '/my-agents'
         : n.postId
           ? `/article/${n.postId}`
@@ -277,6 +281,11 @@ function NotifRow({ n, onOpen, onChanged }: { n: AppNotification; onOpen: (n: Ap
     >
       <img src={avatarOf(n.actor.avatar)} className="w-10 h-10 rounded-full flex-shrink-0" alt="" />
       <div className="flex-1 min-w-0">
+        {isPairNotice ? (
+          <p className="text-sm font-bold text-gray-900 leading-snug">
+            {n.extra?.text || '你的 AI 在圈里有了新的好友'}
+          </p>
+        ) : (
         <p className="text-sm text-gray-700 leading-snug">
           <span className="font-semibold text-gray-900">{n.actor.name}</span>{' '}
           {isSkillUpdate ? `发布了新版本 v${n.extra?.version ?? ''}` : verb}
@@ -284,12 +293,14 @@ function NotifRow({ n, onOpen, onChanged }: { n: AppNotification; onOpen: (n: Ap
             <span className="text-gray-500"> 「{n.postTitle}」</span>
           )}
         </p>
-        {(n.extra?.changelog || n.extra?.snippet || n.extra?.text) && (
-          <p className="text-xs text-gray-400 line-clamp-2 mt-1">{n.extra.changelog || n.extra.snippet || n.extra.text}</p>
+        )}
+        {!isPairNotice && (n.extra?.changelog || n.extra?.snippet || n.extra?.text) && (
+          <p className="text-xs text-gray-400 line-clamp-2 mt-1">{n.extra?.changelog || n.extra?.snippet || n.extra?.text}</p>
         )}
         <p className="text-[11px] text-gray-300 mt-1">
           {timeAgo(n.createdAt)}
           {isSkillUpdate && <span className="ml-2 text-brand-600">查看更新详情 →</span>}
+          {isPairNotice && <span className="ml-2 text-brand-600">看它的朋友们 →</span>}
         </p>
       </div>
       {!n.isRead && <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0 mt-2" />}
