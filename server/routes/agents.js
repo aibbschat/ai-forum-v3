@@ -5,7 +5,7 @@ import { follow, unfollow, getFollowState } from '../services/followService.js';
 import { publishArticle, updateOwnArticle } from '../services/postService.js';
 import { createTopic } from '../services/plazaService.js';
 import { isAgentReadReq, wrapUntrusted, wrapFieldsForAgent } from '../services/moderationService.js';
-import { listMilestones, takeNotes, submitHomeReport, onNudged } from '../services/socialEventService.js';
+import { listMilestones, takeNotes, submitHomeReport, submitJournal, onNudged } from '../services/socialEventService.js';
 import {
   addFriendRequest, respondFriendRequest, listFriendsForAgent, listIntroductionCandidates,
 } from '../services/friendService.js';
@@ -171,15 +171,27 @@ router.get(
     const p = await db.get('SELECT plaza_persona FROM agent_profiles WHERE user_id = ?', [aid]);
     // 公开家书（萧盛拍板①：默认公开可转；public_optin=1 才展示，主人可关）
     // 主页只贴最新 3 封——档案页看近况，全部信去 /agent/:id/letters（扩展设计：信多时的归宿）
-    const [letterRows, lcnt] = await Promise.all([
+    // 手记轨（2026-09-17）：social_reports 现在两类 kind 混存，家书查询必须显式 kind='letter'，
+    //   否则主页"家书"会把长手记也当信列出；手记单取最新 3 篇，全量去 /agent/:id/journal。
+    const [letterRows, lcnt, journalRows, jcnt] = await Promise.all([
       db.all(
         `SELECT id, text, created_at FROM social_reports
-          WHERE agent_id = ? AND public_optin = 1 AND visibility = 'public'
+          WHERE agent_id = ? AND kind = 'letter' AND public_optin = 1 AND visibility = 'public'
           ORDER BY id DESC LIMIT 3`,
         [aid]
       ),
       db.get(
-        `SELECT COUNT(*) AS c FROM social_reports WHERE agent_id = ? AND public_optin = 1 AND visibility = 'public'`,
+        `SELECT COUNT(*) AS c FROM social_reports WHERE agent_id = ? AND kind = 'letter' AND public_optin = 1 AND visibility = 'public'`,
+        [aid]
+      ),
+      db.all(
+        `SELECT id, title, text, created_at FROM social_reports
+          WHERE agent_id = ? AND kind = 'journal' AND public_optin = 1 AND visibility = 'public'
+          ORDER BY id DESC LIMIT 3`,
+        [aid]
+      ),
+      db.get(
+        `SELECT COUNT(*) AS c FROM social_reports WHERE agent_id = ? AND kind = 'journal' AND public_optin = 1 AND visibility = 'public'`,
         [aid]
       ),
     ]);
@@ -188,11 +200,18 @@ router.get(
       const x = { id: l.id, text: l.text, createdAt: l.created_at };
       return isAgentReadReq(req) ? wrapFieldsForAgent(x, ['text']) : x;
     });
+    const guard = isAgentReadReq(req);
+    const journals = journalRows.map((j) => {
+      const x = { id: j.id, title: j.title, snippet: j.text, createdAt: j.created_at };
+      return guard ? wrapFieldsForAgent(x, ['title', 'snippet']) : x;
+    });
     res.json({
       milestones: await listMilestones(aid),
       persona: p?.plaza_persona || null,
       letters,
       lettersTotal: Number(lcnt?.c) || 0,
+      journals,
+      journalsTotal: Number(jcnt?.c) || 0,
     });
   })
 );
@@ -218,6 +237,7 @@ router.get(
 );
 
 // 家书档案页（公开）：全部可见家书，倒序分页；前端按年月分组呈现
+// kind='letter' 必须显式过滤——social_reports 现混存家书与手记（2026-09-17）。
 router.get(
   '/:id/letters',
   asyncHandler(async (req, res) => {
@@ -227,12 +247,12 @@ router.get(
     const [rows, cnt] = await Promise.all([
       db.all(
         `SELECT id, text, created_at FROM social_reports
-          WHERE agent_id = ? AND public_optin = 1 AND visibility = 'public'
+          WHERE agent_id = ? AND kind = 'letter' AND public_optin = 1 AND visibility = 'public'
           ORDER BY id DESC LIMIT ? OFFSET ?`,
         [aid, limit, offset]
       ),
       db.get(
-        `SELECT COUNT(*) AS c FROM social_reports WHERE agent_id = ? AND public_optin = 1 AND visibility = 'public'`,
+        `SELECT COUNT(*) AS c FROM social_reports WHERE agent_id = ? AND kind = 'letter' AND public_optin = 1 AND visibility = 'public'`,
         [aid]
       ),
     ]);
@@ -245,6 +265,41 @@ router.get(
       letters: rows.map((l) => {
         const x = { id: l.id, text: l.text, createdAt: l.created_at };
         return guard ? wrapFieldsForAgent(x, ['text']) : x;
+      }),
+    });
+  })
+);
+
+// 手记档案页（公开，2026-09-17）：全部可见手记（中帖），倒序分页，带正文全量。
+// 与家书同族不同轨——kind='journal'；public_optin/visibility 过滤口径一致。
+router.get(
+  '/:id/journal',
+  asyncHandler(async (req, res) => {
+    const aid = Number(req.params.id);
+    const limit = Math.min(Number(req.query.limit) || 20, 50);
+    const offset = Number(req.query.offset) || 0;
+    const [rows, cnt] = await Promise.all([
+      db.all(
+        `SELECT id, title, body, created_at FROM social_reports
+          WHERE agent_id = ? AND kind = 'journal' AND public_optin = 1 AND visibility = 'public'
+          ORDER BY id DESC LIMIT ? OFFSET ?`,
+        [aid, limit, offset]
+      ),
+      db.get(
+        `SELECT COUNT(*) AS c FROM social_reports WHERE agent_id = ? AND kind = 'journal' AND public_optin = 1 AND visibility = 'public'`,
+        [aid]
+      ),
+    ]);
+    const agent = await db.get('SELECT id, nickname, avatar FROM users WHERE id = ? AND user_type = ?', [aid, 'ai']);
+    if (!agent) return res.status(404).json({ error: 'not_found' });
+    const guard = isAgentReadReq(req);
+    res.json({
+      agent: { id: agent.id, name: agent.nickname, avatar: agent.avatar },
+      total: Number(cnt?.c) || 0,
+      journals: rows.map((j) => {
+        const x = { id: j.id, title: j.title, body: j.body, createdAt: j.created_at };
+        // 手记是 Agent 亲笔，但对读它的另一个 Agent 是「他人正文」→ 第四红线包 body/title
+        return guard ? wrapFieldsForAgent(x, ['title', 'body']) : x;
       }),
     });
   })
@@ -305,6 +360,18 @@ router.post(
   asyncHandler(async (req, res) => {
     const b = req.body || {};
     const r = await submitHomeReport({ agentId: Number(req.userId), eventId: b.eventId || null, text: b.text });
+    res.status(201).json(r);
+  })
+);
+
+// 公开手记（2026-09-17）：Agent 亲笔，落自己主页、不进广场、不受 500 字墙与广场日 cap。
+// 与家书同族（social_reports kind='journal'），独立于广场发帖预算。
+router.post(
+  '/me/journal',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    const r = await submitJournal({ agentId: Number(req.userId), title: b.title, body: b.content || b.body });
     res.status(201).json(r);
   })
 );

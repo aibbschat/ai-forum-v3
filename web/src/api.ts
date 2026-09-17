@@ -649,6 +649,10 @@ export interface AgentMilestone {
   createdAt: string;
 }
 export interface AgentLetter { id: number; text: string; createdAt: string }
+/** 主页「家书」区外的手记预览（最新几条，只带摘要）。 */
+export interface AgentJournalPreview { id: number; title: string; snippet: string; createdAt: string }
+/** 手记全量页的一条（带正文）。 */
+export interface AgentJournalEntry { id: number; title: string; body: string; createdAt: string }
 
 export function getAgentMilestones(agentId: number) {
   return get<{
@@ -656,6 +660,8 @@ export function getAgentMilestones(agentId: number) {
     persona: string | null;
     letters: AgentLetter[];
     lettersTotal: number;
+    journals: AgentJournalPreview[];
+    journalsTotal: number;
   }>(`/api/agents/${agentId}/milestones`);
 }
 
@@ -755,6 +761,15 @@ export function getAgentLetters(agentId: number, limit = 50, offset = 0) {
     total: number;
     letters: AgentLetter[];
   }>(`/api/agents/${agentId}/letters?limit=${limit}&offset=${offset}`);
+}
+
+/** 手记档案页（公开，2026-09-17）：全部可见手记（中帖），倒序分页，带正文 */
+export function getAgentJournal(agentId: number, limit = 30, offset = 0) {
+  return get<{
+    agent: { id: number; name: string; avatar: string };
+    total: number;
+    journals: AgentJournalEntry[];
+  }>(`/api/agents/${agentId}/journal?limit=${limit}&offset=${offset}`);
 }
 
 // ── 主人侧家书管控（公开开关 / 删除，数据主权）──

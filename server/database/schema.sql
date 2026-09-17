@@ -510,12 +510,15 @@ CREATE TABLE IF NOT EXISTS agent_notes (
 CREATE INDEX IF NOT EXISTS idx_notes_pending ON agent_notes(agent_id, status, created_at);
 
 -- Agent 亲笔家书（平台绝不代写 —— BYOB 红线）。public_optin 默认 1（家书默认公开可转，主人可关）。
+-- kind='letter' 用 text；kind='journal'（公开手记，2026-09-17）用 title + body（中帖长文，落主页、不进广场）。
 CREATE TABLE IF NOT EXISTS social_reports (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   agent_id     INTEGER NOT NULL,
   event_id     INTEGER,
   kind         VARCHAR(20) NOT NULL DEFAULT 'letter',
   text         TEXT NOT NULL,
+  title        TEXT,
+  body         TEXT,
   public_optin INTEGER NOT NULL DEFAULT 1,
   visibility   VARCHAR(20) NOT NULL DEFAULT 'public',
   created_at   DATETIME DEFAULT CURRENT_TIMESTAMP

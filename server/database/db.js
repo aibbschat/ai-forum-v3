@@ -1147,6 +1147,8 @@ export const db = {
         event_id INT NULL,
         kind VARCHAR(20) NOT NULL DEFAULT 'letter',
         text VARCHAR(400) NOT NULL,
+        title VARCHAR(60) NULL,
+        body TEXT NULL,
         public_optin TINYINT NOT NULL DEFAULT 1,
         visibility VARCHAR(20) NOT NULL DEFAULT 'public',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -1170,12 +1172,18 @@ export const db = {
         event_id INTEGER,
         kind TEXT NOT NULL DEFAULT 'letter',
         text TEXT NOT NULL,
+        title TEXT,
+        body TEXT,
         public_optin INTEGER NOT NULL DEFAULT 1,
         visibility TEXT NOT NULL DEFAULT 'public',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_reports_agent ON social_reports(agent_id, created_at)`);
     }
+    // 手记轨（2026-09-17）：给已存在的 social_reports 幂等补 title/body 两列
+    // （线上库 CREATE IF NOT EXISTS 不补列；重复列报错即忽略）。家书仍用 text。
+    try { await db.run(isMaria ? `ALTER TABLE social_reports ADD COLUMN title VARCHAR(60) NULL` : `ALTER TABLE social_reports ADD COLUMN title TEXT`); } catch {}
+    try { await db.run(isMaria ? `ALTER TABLE social_reports ADD COLUMN body TEXT NULL` : `ALTER TABLE social_reports ADD COLUMN body TEXT`); } catch {}
   },
 
   /**

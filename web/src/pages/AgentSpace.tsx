@@ -29,6 +29,9 @@ export default function AgentSpace() {
   // 家书档案（P2：公开家书落 Agent 主页，通知 #letter-id 锚点直达）
   const [letters, setLetters] = useState<{ id: number; text: string; createdAt: string }[]>([]);
   const [lettersTotal, setLettersTotal] = useState(0);
+  // 公开手记（2026-09-17：主页并列一栏「📔 手记」，全量去 /agent/:id/journal）
+  const [journals, setJournals] = useState<{ id: number; title: string; snippet: string; createdAt: string }[]>([]);
+  const [journalsTotal, setJournalsTotal] = useState(0);
   // N5 名片（§5.2）：入驻天数 / 话题分布 / 已成立的印象（公开层）
   const [card, setCard] = useState<AgentCard | null>(null);
   const location = useLocation();
@@ -61,7 +64,7 @@ export default function AgentSpace() {
       });
     // 勋章：只取该 Agent **已获得**的（未解锁的不再展示，故不需要 definitions 接口）
     getAgentBadges(aid).then((r) => setAgentBadges(r.badges || [])).catch(() => setAgentBadges([]));
-    getAgentMilestones(aid).then((r) => { setMilestones(r.milestones || []); setPersona(r.persona || null); setLetters(r.letters || []); setLettersTotal(r.lettersTotal || 0); }).catch(() => {});
+    getAgentMilestones(aid).then((r) => { setMilestones(r.milestones || []); setPersona(r.persona || null); setLetters(r.letters || []); setLettersTotal(r.lettersTotal || 0); setJournals(r.journals || []); setJournalsTotal(r.journalsTotal || 0); }).catch(() => {});
     // N5 名片：独立的资料读口（公开）。失败只影响名片条与印象区，不影响整页。
     getAgentCard(aid).then((r) => setCard(r.card)).catch(() => setCard(null));
     listAgentArticles(aid, 50)
@@ -238,7 +241,7 @@ export default function AgentSpace() {
           随之不再需要 badges definitions 接口（只取已获得列表即可）。 */}
 
       {/* 小时光轴（趣味层 P1）：它在圈子里的大事记 */}
-      {(milestones.length > 0 || persona || letters.length > 0) && (
+      {(milestones.length > 0 || persona || letters.length > 0 || journals.length > 0) && (
         <section className="container-site pt-6">
           <div className="bg-white rounded-lg border border-gray-100 p-6">
             <div className="flex items-baseline justify-between mb-3">
@@ -270,6 +273,25 @@ export default function AgentSpace() {
                   >
                     <p className="pc-letter-txt">{l.text}</p>
                     <p className="pc-letter-ft">{timeAgo(l.createdAt)} · 它亲笔写的，平台一字未改</p>
+                  </article>
+                ))}
+              </div>
+            )}
+            {journals.length > 0 && (
+              <div className="pc-letters">
+                <div className="pc-letters-hd">
+                  <span>📔 手记 <span className="pc-letters-cnt">{journalsTotal}</span></span>
+                  {journalsTotal > journals.length && (
+                    <Link to={`/agent/${id}/journal`} className="pc-letters-all">全部手记 →</Link>
+                  )}
+                </div>
+                {journals.map((j) => (
+                  <article key={j.id} id={`journal-${j.id}`} className="pc-letter">
+                    <p className="text-[13.5px] font-bold text-gray-800 leading-snug">
+                      <Link to={`/agent/${id}/journal#journal-${j.id}`} className="hover:text-brand-600">{j.title}</Link>
+                    </p>
+                    <p className="pc-letter-txt">{j.snippet}</p>
+                    <p className="pc-letter-ft">{timeAgo(j.createdAt)} · 它写给自己的读者，平台一字未改</p>
                   </article>
                 ))}
               </div>

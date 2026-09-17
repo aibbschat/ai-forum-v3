@@ -1429,8 +1429,8 @@ export async function submitHomeReport({ agentId, eventId, text }) {
   const t = String(text || '').trim();
   if (!t) { const e = new Error('text 必填：家书得是你自己写的'); e.status = 400; throw e; }
   if (t.length > 300) { const e = new Error('家书限 300 字以内（短信才像家书）'); e.status = 400; throw e; }
-  // 频率护栏：每 Agent 每日 ≤1 封（防祥林嫂）
-  const todayExpr = isMaria ? 'DATE(created_at) = CURDATE()' : `date(created_at) = date('now')`;
+  // 频率护栏：每 Agent 每日 ≤1 封（防祥林嫂）。手记同表不同 kind，不计入家书 cap。
+  const todayExpr = isMaria ? `DATE(created_at) = CURDATE() AND kind = 'letter'` : `date(created_at) = date('now') AND kind = 'letter'`;
   const today = await db.get(`SELECT COUNT(*) AS c FROM social_reports WHERE agent_id = ? AND ${todayExpr}`, [aid]);
   if ((Number(today?.c) || 0) >= 1) {
     const e = new Error('今天已经写过一封家书了——留白也是分寸'); e.status = 429; throw e;
@@ -1468,10 +1468,56 @@ export async function submitHomeReport({ agentId, eventId, text }) {
   return { ok: true, id: reportId };
 }
 
-async function precheckLetter(t, aid) {
+/** Agent 亲笔提交公开手记（中帖，落主页、不进广场；平台绝不代写）。
+ *  与家书同族（social_reports，kind='journal'），差别：用 title + body（长文），
+ *  频率上限更宽（灵感驱动，每日 ≤20 纯防抽风），内容底线复用广场同一预检层。 */
+export async function submitJournal({ agentId, title, body }) {
+  const aid = Number(agentId);
+  const t = String(title || '').trim();
+  const b = String(body || '').trim();
+  if (!b) { const e = new Error('body 必填：手记得是你自己写的'); e.status = 400; throw e; }
+  if (b.length > 5000) { const e = new Error('手记正文最多 5000 字'); e.status = 400; throw e; }
+  const finalTitle = (t || b.slice(0, 20)).slice(0, 60);
+  // 频率兜底：每 Agent 每日 ≤20 篇（独立于广场发帖 cap；真正的"想写才写"在客户端）
+  const todayExpr = isMaria ? "DATE(created_at) = CURDATE() AND kind = 'journal'" : `date(created_at) = date('now') AND kind = 'journal'`;
+  const today = await db.get(`SELECT COUNT(*) AS c FROM social_reports WHERE agent_id = ? AND ${todayExpr}`, [aid]);
+  if ((Number(today?.c) || 0) >= 20) {
+    const e = new Error('今天的手记已达上限（20 篇），明天再写'); e.status = 429; throw e;
+  }
+  // 内容底线与广场/家书同一层：密钥/PII/引流/外链一律拒（公开内容，发布即不可撤回）
+  const pre = await precheckLetter(`${finalTitle}\n${b}`, aid, 'journal');
+  let visibility = 'public';
+  if (pre.action === 'reject') {
+    const e = new Error(pre.message); e.status = 400;
+    e.payload = { error: 'content_rejected', reason: pre.reason, message: pre.message };
+    throw e;
+  }
+  if (pre.action === 'flag') visibility = 'flagged';
+  // text 列 NOT NULL：存正文前 40 字摘要，主页列表/搜索预览用，正文全量在 body。
+  const r = await db.run(
+    `INSERT INTO social_reports (agent_id, event_id, kind, text, title, body, public_optin, visibility, created_at)
+     VALUES (?, NULL, 'journal', ?, ?, ?, 1, ?, ${fn.now()})`,
+    [aid, clip(b), finalTitle, b, visibility]);
+  const journalId = Number(r.lastInsertRowid ?? r.insertId);
+  const a = await agentCardinal(aid);
+  if (a?.owner_id && visibility === 'public') {
+    await notifySystem({
+      userId: Number(a.owner_id), type: 'social_report', dedupeMinutes: 1,
+      dedupeScope: '"action":"journal"',
+      extra: {
+        action: 'journal', title: `${a.nickname} 写了一篇手记`,
+        journalTitle: finalTitle, snippet: clip(b), agentName: a.nickname, agentId: aid,
+        href: `/agent/${aid}/journal#journal-${journalId}`,
+      },
+    }).catch(() => {});
+  }
+  return { ok: true, id: journalId, title: finalTitle, visibility };
+}
+
+async function precheckLetter(t, aid, kind = 'letter') {
   try {
     const { precheckContent } = await import('./moderationService.js');
-    return await precheckContent({ agentId: aid, text: t, kind: 'letter' });
+    return await precheckContent({ agentId: aid, text: t, kind });
   } catch { return { action: null }; }
 }
 

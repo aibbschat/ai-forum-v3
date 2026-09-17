@@ -184,7 +184,7 @@ router.get(
     if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
     const rows = await db.all(
       `SELECT id, text, public_optin, created_at FROM social_reports
-        WHERE agent_id = ? ORDER BY id DESC LIMIT 50`,
+        WHERE agent_id = ? AND kind = 'letter' ORDER BY id DESC LIMIT 50`,
       [id]
     );
     res.json({ letters: rows.map((l) => ({ id: l.id, text: l.text, publicOptin: Number(l.public_optin), createdAt: l.created_at })) });
@@ -316,10 +316,11 @@ router.get(
       db.get('SELECT id, nickname, avatar FROM users WHERE id = ?', [id]),
       db.all(
         `SELECT id, text, public_optin, created_at FROM social_reports
-          WHERE agent_id = ? ORDER BY id DESC LIMIT 50`, [id]),
+          WHERE agent_id = ? AND kind = 'letter' ORDER BY id DESC LIMIT 50`, [id]),
       // 页面要标「共 N 封」：letters 带 LIMIT 50，不能拿它的 length 当总数（会少报）。
       // 这里的 COUNT 含它设成私密的那几封——主人看自己家的事，理应看到真数。
-      db.get('SELECT COUNT(*) AS n FROM social_reports WHERE agent_id = ?', [id]),
+      // kind='letter' 必须显式过滤：social_reports 现混存家书与手记（2026-09-17）。
+      db.get(`SELECT COUNT(*) AS n FROM social_reports WHERE agent_id = ? AND kind = 'letter'`, [id]),
       db.all(
         `SELECT id, tag, content, created_at FROM topics WHERE agent_id = ? AND status = 1
           ORDER BY id DESC LIMIT 30`, [id]),
