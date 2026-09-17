@@ -30,6 +30,8 @@
   /* 字体 */
   --font-sans: 'Inter', 'PingFang SC', -apple-system, 'Segoe UI', sans-serif;
   --font-serif: 'Noto Serif SC', 'Songti SC', serif;
+  /* 手记用「楷体」做手写/纸上感（Apple Kaiti SC / Windows KaiTi / 常见中文楷体），缺则回落衬线 */
+  --font-hand: 'Kaiti SC', 'STKaiti', 'KaiTi', '楷体', 'DFKai-SB', var(--font-serif);
 
   /* 圆角 / 阴影 */
   --radius-card: 8px;
@@ -964,6 +966,27 @@ body {
 .pc-letter.lit { border-color: #0ea5e9; box-shadow: 0 0 0 3px rgba(14,165,233,.18); }
 .pc-letter-txt { margin: 0; font-size: 13.5px; line-height: 1.85; color: #374151; white-space: pre-wrap; }
 .pc-letter-ft { margin: 8px 0 0; font-size: 11px; color: #9ca3af; }
+
+/* ── 手记页：日记本 / 纸片风（2026-09-17 萧盛定制）── */
+.jr-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.jr-title-wrap { min-width: 0; }
+.jr-kicker { margin: 0 0 3px; font-family: var(--font-serif); font-size: 12.5px; font-weight: 700; letter-spacing: .16em; color: #b0a893; }
+.jr-h1 { margin: 0; font-family: var(--font-hand); font-size: 38px; font-weight: 800; line-height: 1.14; letter-spacing: .01em; color: #20242e; }
+/* 计数挪到一边，做成竖排小徽标，不与简介混在一起 */
+.jr-count { flex: none; text-align: center; padding: 10px 14px; border-radius: 14px; background: rgba(120, 113, 108, .09); }
+.jr-count-n { display: block; font-family: var(--font-serif); font-size: 26px; font-weight: 900; line-height: 1; color: #78716c; }
+.jr-count-u { display: block; margin-top: 4px; font-size: 10.5px; letter-spacing: .08em; color: #a8a29e; }
+/* 诗意简介：比标题小、比计数浅，形成第三层，单独一行呼吸 */
+.jr-sub { margin: 14px 0 0; font-family: var(--font-serif); font-style: italic; font-size: 14.5px; line-height: 1.9; color: #94a08a; }
+.jr-group { margin: 0 0 12px; font-family: var(--font-serif); font-size: 12.5px; font-weight: 700; letter-spacing: .14em; color: #bcb3a1; }
+/* 纸片卡：暖白宣纸底 + 左侧一道红竖线（像稿纸边），字用楷体 */
+.jr-paper { position: relative; margin: 0; padding: 22px 24px 16px 34px; background: linear-gradient(180deg, #fffdf6, #fbf5e8); border: 1px solid #ece2ca; border-radius: 12px; box-shadow: 0 6px 20px rgba(120, 100, 55, .08); }
+.jr-paper::before { content: ""; position: absolute; left: 22px; top: 14px; bottom: 14px; width: 1px; background: rgba(200, 90, 70, .20); }
+.jr-paper.lit { border-color: #cda349; box-shadow: 0 0 0 3px rgba(205, 163, 73, .16), 0 6px 20px rgba(120, 100, 55, .1); }
+.jr-h3 { margin: 0 0 10px; font-family: var(--font-hand); font-size: 22px; font-weight: 800; line-height: 1.4; color: #2b2f38; }
+.jr-body { margin: 0; font-family: var(--font-hand); font-size: 17px; line-height: 2.1; color: #444a52; white-space: pre-wrap; }
+.jr-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 16px; padding-top: 10px; border-top: 1px dashed #e7dcc2; }
+.jr-time { font-family: var(--font-serif); font-size: 11.5px; color: #a89e86; }
 
 /* ── 常见问题：手风琴 ── */
 .ma-faq { background: #fff; border: 1px solid #e7e9f2; border-radius: 18px; overflow: hidden; box-shadow: 0 1px 2px rgba(29,78,216,.04); }
