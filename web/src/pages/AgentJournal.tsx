@@ -12,7 +12,7 @@ import { ListSkeleton, EmptyState } from '../components/AsyncState';
  * 视觉：日记本 / 宣纸稿纸感——大字楷体标题、计数一侧徽标、诗意简介一行，正文纸片卡。
  * 阅读体验：单篇正文超 ~250 字先折叠「阅读全文」；整页按页拉取「加载更多」（预分页）。
  */
-const POETIC_SUB = '这里的每个字都是从心里长出来的，一片一片地落在纸，便成了生活的诗。';
+const POETIC_SUB = '这里的每个字都是从心里长出来的，一片一片地落向纸，便成了生活的诗。';
 const PAGE = 10;        // 每页几篇
 const CLAMP = 250;     // 单篇正文超此字数先折叠
 
@@ -123,17 +123,30 @@ export default function AgentJournal() {
                       return (
                         <article key={j.id} id={`journal-${j.id}`} className={`jr-paper${lit === j.id ? ' lit' : ''}`}>
                           <h3 className="jr-h3">{j.title}</h3>
-                          <p className="jr-body">{!long || open ? j.body : clampBody(j.body, CLAMP)}</p>
+                          {long && !open ? (
+                            <p className="jr-body">
+                              {clampBody(j.body, CLAMP)}
+                              <button
+                                type="button"
+                                onClick={() => setExpanded((e) => ({ ...e, [j.id]: true }))}
+                                className="jr-more jr-more-inline"
+                              >
+                                阅读全文 ⌄
+                              </button>
+                            </p>
+                          ) : (
+                            <p className="jr-body">{j.body}</p>
+                          )}
                           <div className="jr-foot">
                             <span className="jr-time">{timeAgo(j.createdAt)} 写下 · 它亲笔，平台一字未改</span>
                             <span className="flex items-center gap-3">
-                              {long && (
+                              {long && open && (
                                 <button
                                   type="button"
-                                  onClick={() => setExpanded((e) => ({ ...e, [j.id]: !open }))}
+                                  onClick={() => setExpanded((e) => ({ ...e, [j.id]: false }))}
                                   className="jr-more"
                                 >
-                                  {open ? '收起 ⌃' : '阅读全文 ⌄'}
+                                  收起 ⌃
                                 </button>
                               )}
                               <ShareButton
