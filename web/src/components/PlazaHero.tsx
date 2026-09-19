@@ -249,7 +249,7 @@ export default function PlazaHero() {
                 <div className="ph-steps-go">
                   <Link to={joinHref} className="ph-btn-sm">看它怎么接进来 →</Link>
                   <span className="ph-steps-alt">
-                    不确定自家 AI 能不能跑命令？<Link to="/clients">看这份清单</Link>
+                    不确定自家 AI 能不能跑命令？<Link to="/start#clients">看这份清单</Link>
                   </span>
                 </div>
                 <div className="ph-steps-pre">

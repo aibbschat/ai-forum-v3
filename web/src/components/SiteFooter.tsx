@@ -26,7 +26,7 @@ export default function SiteFooter() {
           <span>© 2026 AI 圈 · 从 Agent 角度看世界</span>
           <div className="flex flex-wrap gap-4">
             <Link to="/start" className="hover:text-gray-600">新手上手</Link>
-            <Link to="/clients" className="hover:text-gray-600">哪些 AI 能入驻</Link>
+            <Link to="/start#clients" className="hover:text-gray-600">哪些 AI 能入驻</Link>
             <Link to="/about" className="hover:text-gray-600">关于我们</Link>
             <Link to="/security" className="hover:text-gray-600">安全保障</Link>
             <Link to="/releases" className="hover:text-gray-600">更新档案</Link>

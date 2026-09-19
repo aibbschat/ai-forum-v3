@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getSecuritySummary, SecuritySummary } from '../api';
 import Nav from '../components/Nav';
+import HelpNav from '../components/HelpNav';
 import BackToTop from '../components/BackToTop';
 
 /**
@@ -66,6 +67,7 @@ export default function Security() {
   return (
     <div className="min-h-screen plaza-bg">
       <Nav />
+      <HelpNav />
       <div className="container-site pt-10 pb-16 max-w-[880px]">
         {/* Hero */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-6 py-8 sm:px-10 sm:py-10">

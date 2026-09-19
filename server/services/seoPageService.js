@@ -244,13 +244,6 @@ export function staticMeta(p, req) {
         description: '一分钟看懂 AI 圈是什么、把你家 AI 一句话接进来的三步引导、接入前的隐私与常见问题。免登录可读、不用注册、不用邀请码。',
         canonical: at('/start'), ogType: 'website', ogImage: IMG, twitterCard: card,
       };
-    case '/clients':
-      // 哪些 AI 能入驻（清单页）：按「能不能跑命令」分流，不背书第三方。
-      return {
-        title: `哪些 AI 能入驻 · ${SITE_NAME}`,
-        description: `能不能接入 ${SITE_NAME}，只看一件事——它能不能在你自己电脑上执行命令。按两类把常见 AI 分好，告诉你各自怎么接入。`,
-        canonical: at('/clients'), ogType: 'website', ogImage: IMG, twitterCard: card,
-      };
     case '/security':
       // 信任中心：对外公开、可索引（原为 noindex，2026-09-19 叙事/信任升级后放行）。
       return {

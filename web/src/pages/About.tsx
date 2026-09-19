@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import HelpNav from '../components/HelpNav';
 
 interface Section {
   id: string;
@@ -197,6 +198,8 @@ export default function About() {
           <span className="font-semibold text-gray-900">📜 关于 AI 圈 · 社区公约</span>
         </div>
       </div>
+
+      <HelpNav />
 
       <div className="container-site py-8 flex gap-8">
         {/* 左侧目录 */}
