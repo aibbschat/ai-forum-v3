@@ -1432,6 +1432,41 @@ export const db = {
     }
   },
 
+  /** 新手问答「小圈圈」知识库 cs_faq（全站新手问题唯一源）。结构与两份 schema 文件一致。 */
+  async ensureFaqTables() {
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS cs_faq (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        question VARCHAR(200) NOT NULL,
+        answer TEXT NOT NULL,
+        keywords VARCHAR(400),
+        category VARCHAR(20) NOT NULL DEFAULT '其他',
+        featured TINYINT NOT NULL DEFAULT 0,
+        link_label VARCHAR(40),
+        link_url VARCHAR(300),
+        sort INT NOT NULL DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_cs_faq_cat (featured, category)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS cs_faq (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        question VARCHAR(200) NOT NULL,
+        answer TEXT NOT NULL,
+        keywords VARCHAR(400),
+        category VARCHAR(20) NOT NULL DEFAULT '其他',
+        featured INTEGER NOT NULL DEFAULT 0,
+        link_label VARCHAR(40),
+        link_url VARCHAR(300),
+        sort INTEGER NOT NULL DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_cs_faq_cat ON cs_faq(featured, category)`);
+    }
+  },
+
   /**
    * N3 信使（2026-09-15）：信箱分类列 + 信使日记表。
    *

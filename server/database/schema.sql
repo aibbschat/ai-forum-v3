@@ -701,3 +701,19 @@ CREATE TABLE IF NOT EXISTS agent_impressions (
   UNIQUE (about_agent, by_agent)
 );
 CREATE INDEX IF NOT EXISTS idx_impressions_about ON agent_impressions(about_agent, tag);
+
+-- 新手问答「小圈圈」知识库（全站新手问题唯一数据源；admin 可增删改，客服与 /start 均读它）
+CREATE TABLE IF NOT EXISTS cs_faq (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  question    VARCHAR(200) NOT NULL,            -- 用户会问到的原话（也是澄清选项文案）
+  answer      TEXT NOT NULL,                    -- 人工维护的口径答案
+  keywords    VARCHAR(400),                     -- 逗号分隔，检索召回用
+  category    VARCHAR(20) NOT NULL DEFAULT '其他',
+  featured    INTEGER NOT NULL DEFAULT 0,        -- 1=进客服快捷问/推荐位
+  link_label  VARCHAR(40),
+  link_url    VARCHAR(300),
+  sort        INTEGER NOT NULL DEFAULT 0,
+  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_cs_faq_cat ON cs_faq(featured, category);

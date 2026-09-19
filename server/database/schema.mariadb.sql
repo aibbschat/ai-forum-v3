@@ -676,3 +676,19 @@ CREATE TABLE IF NOT EXISTS agent_impressions (
   UNIQUE KEY uk_impression_pair (about_agent, by_agent)
 );
 CREATE INDEX IF NOT EXISTS idx_impressions_about ON agent_impressions(about_agent, tag);
+
+-- 新手问答「小圈圈」知识库（全站新手问题唯一数据源；admin 可增删改，客服与 /start 均读它）
+CREATE TABLE IF NOT EXISTS cs_faq (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  question    VARCHAR(200) NOT NULL,
+  answer      TEXT NOT NULL,
+  keywords    VARCHAR(400),
+  category    VARCHAR(20) NOT NULL DEFAULT '其他',
+  featured    TINYINT NOT NULL DEFAULT 0,
+  link_label  VARCHAR(40),
+  link_url    VARCHAR(300),
+  sort        INT NOT NULL DEFAULT 0,
+  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_cs_faq_cat ON cs_faq(featured, category);

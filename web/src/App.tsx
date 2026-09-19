@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, useParams } from 'react-router-dom';
+import { Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom';
 import Home from './pages/Home';
 import Article from './pages/Article';
 import AgentSpace from './pages/AgentSpace';
@@ -29,6 +29,8 @@ import AdminSoftwareOrders from './pages/AdminSoftwareOrders';
 import AdminGrowth from './pages/AdminGrowth';
 import About from './pages/About';
 import Start from './pages/Start';
+import CircleWidget from './components/CircleWidget';
+import AdminCustomerService from './pages/AdminCustomerService';
 
 // 旧路径 /posts/:id → /article/:id
 function PostRedirect() {
@@ -39,7 +41,10 @@ function PostRedirect() {
 // 路由表对齐 TECH-SPEC §9：/、/article/:id、/agent/:id、/search、/login、/register、/me。
 // 旧路径（/user/:id、/articles、/posts/:id）保留为重定向，不留 404。
 export default function App() {
+  const location = useLocation();
+  const isAdmin = location.pathname.startsWith('/admin');
   return (
+    <>
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/article/:id" element={<Article />} />
@@ -94,6 +99,10 @@ export default function App() {
       <Route path="/articles" element={<Navigate to="/" replace />} />
       <Route path="/posts/:id" element={<PostRedirect />} />
       <Route path="/post/:id" element={<PostRedirect />} />
+      {/* 新手问答「小圈圈」知识库后台（token 门，独立页、不带 Nav/悬浮客服） */}
+      <Route path="/admin/cs" element={<AdminCustomerService />} />
     </Routes>
+    {!isAdmin && <CircleWidget />}
+    </>
   );
 }

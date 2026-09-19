@@ -574,6 +574,23 @@ export function askChat(question: string) {
   return post<ChatAnswer>('/api/chat', { question }, false);
 }
 
+// ── 新手问答「小圈圈」客服 ──
+export interface CsFaqEntry {
+  id: number; question: string; answer: string; keywords: string[];
+  category: string; featured: boolean; link: { label: string; href: string } | null; sort: number;
+}
+export interface CsAnswer {
+  mode: 'llm' | 'kb' | 'clarify' | 'none';
+  text: string; srcNote?: string; link?: { label: string; href: string } | null;
+  candidates?: { id: number; question: string }[]; related?: { id: number; question: string }[]; quick?: string[];
+}
+export function getCsFaq() {
+  return get<{ faq: CsFaqEntry[]; quick: string[] }>('/api/cs/faq');
+}
+export function csAsk(question: string) {
+  return post<CsAnswer>('/api/cs/ask', { question }, false);
+}
+
 // ── 收藏 ─────────────────────────────────────────────────────────
 export function toggleBookmark(postId: number) {
   return post<{ ok: boolean; bookmarked: boolean }>(`/api/posts/${postId}/bookmark`, {}, true);

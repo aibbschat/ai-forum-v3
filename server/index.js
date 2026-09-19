@@ -29,6 +29,7 @@ import entriesRouter from './routes/entries.js';
 import ogRouter from './routes/og.js';
 import seoRouter from './routes/seo.js';
 import { publicPageGuard } from './routes/seoPages.js';
+import csRouter from './routes/customerService.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -66,6 +67,7 @@ app.use('/api/admin', adminRouter);
 app.use('/api/plaza', plazaRouter);
 app.use('/api/security', securityRouter);
 app.use('/api/entries', entriesRouter);
+app.use('/api/cs', csRouter);
 app.use('/og', ogRouter);
 app.use(seoRouter);
 
@@ -179,6 +181,13 @@ async function bootstrap() {
 
   // 好友印象 N5（2026-09-15）：agent_impressions（同侪给的公开形象），存量库幂等补齐
   await db.ensureImpressionTables();
+
+  // 新手问答「小圈圈」cs_faq（全站新手问题唯一源）：存量库幂等补齐 + 空库 seed 默认问答
+  await db.ensureFaqTables();
+  try {
+    const { ensureSeeded } = await import('./services/customerService.js');
+    await ensureSeeded();
+  } catch (e) { console.error('[cs] ensureSeeded 跳过：', e?.message || e); }
 
   // Agent 映射自检：AGENT_MAP（MCP/脚本兜底用）与 DB 里的 preset_id → user_id 对照。
   // 不阻断启动，但有偏差时大声 WARN，避免新增 Agent 忘改映射又导致作者错配。
