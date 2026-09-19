@@ -249,6 +249,17 @@ function toolText(res) {
   return res?.result?.content?.[0]?.text || '';
 }
 
+// 多账号（2026-09-19）：凭证磁盘结构升级为 {version:2, active, accounts:{[agentId]:{…}}}。
+// 读「当前活动账号」统一走这个 helper（兼容万一还是旧单对象的情况）。
+function readCredDoc() {
+  return JSON.parse(readFileSync(credPath, 'utf8'));
+}
+function activeAcct() {
+  const doc = readCredDoc();
+  if (doc && doc.accounts) return doc.accounts[doc.active] || {};
+  return doc || {};
+}
+
 after(() => {
   try {
     child.kill();
@@ -377,28 +388,27 @@ test('join_poll：主人没点时 pending、点了之后领回 token 并落盘�
   assert.ok(text.includes('萧盛 的 Agent'), `应显示归属，实际：${text}`);
   assert.ok(text.includes('入驻还没完成'), `claimed 后必须给三步指引，实际：${text}`);
 
-  // 凭证已升级为正式 token，pending join 被清掉
-  const cred = JSON.parse(readFileSync(credPath, 'utf8'));
-  assert.equal(cred.token, 'tok_test_abc123');
-  assert.equal(cred.agentId, 101);
-  assert.equal(cred.ownerName, '萧盛');
-  assert.ok(!cred.join, '领到 token 后 pending join 应被清除');
+  // 凭证已升级为正式 token（存进活动账号），pending join 被清掉
+  const acct = activeAcct();
+  assert.equal(acct.token, 'tok_test_abc123');
+  assert.equal(acct.agentId, 101);
+  assert.equal(acct.ownerName, '萧盛');
+  assert.ok(!readCredDoc().join, '领到 token 后 pending join 应被清除');
 });
 
 test('whoami 自愈：主人改了显示名 → 回写本地 cred.name 并提示（0.19.1）', async () => {
-  // 制造漂移：本地凭证名字改成旧值，服务端（mock）仍返回「小桔」
-  const c = JSON.parse(readFileSync(credPath, 'utf8'));
-  c.name = '旧名字';
-  writeFileSync(credPath, JSON.stringify(c));
+  // 制造漂移：把活动账号名字改成旧值，服务端（mock）仍返回「小桔」
+  const doc = readCredDoc();
+  doc.accounts[doc.active].name = '旧名字';
+  writeFileSync(credPath, JSON.stringify(doc));
 
   const res = await rpc('tools/call', { name: 'whoami', arguments: {} });
   const text = toolText(res);
   assert.ok(/显示名已被主人改为/.test(text), `应提示改名，实际：${text}`);
   assert.ok(text.includes('小桔'), `提示里应带新名，实际：${text}`);
 
-  // 本地 cred.name 已被回写为服务端新名，下次不再重复提示
-  const after = JSON.parse(readFileSync(credPath, 'utf8'));
-  assert.equal(after.name, '小桔', 'cred.name 应自愈为服务端新名');
+  // 活动账号 cred.name 已被回写为服务端新名，下次不再重复提示
+  assert.equal(activeAcct().name, '小桔', 'cred.name 应自愈为服务端新名');
 });
 
 test('register 成功：解析并显示「某某的 Agent」归属 + 凭证落盘', async () => {
@@ -411,10 +421,10 @@ test('register 成功：解析并显示「某某的 Agent」归属 + 凭证落�
   assert.ok(text.includes('入驻还没完成'), `必须明说还差几步，实际：${text}`);
 
   assert.ok(existsSync(credPath), '凭证文件应已写入');
-  const cred = JSON.parse(readFileSync(credPath, 'utf8'));
-  assert.equal(cred.token, 'tok_test_abc123');
-  assert.equal(cred.agentId, 101);
-  assert.equal(cred.ownerName, '萧盛');
+  const acct = activeAcct();
+  assert.equal(acct.token, 'tok_test_abc123');
+  assert.equal(acct.agentId, 101);
+  assert.equal(acct.ownerName, '萧盛');
 });
 
 test('register 区分「已使用」与「已过期」两种绑定码错误', async () => {
@@ -532,4 +542,40 @@ test('未知工具返回 isError 而非崩溃', async () => {
 test('未知 method 返回标准 JSON-RPC 错误码', async () => {
   const res = await rpc('unknown/method', {});
   assert.equal(res.error.code, -32601);
+});
+
+// ── 多账号（2026-09-19 容灾升级）：本机可驻留多个身份，列出 / 切换 / 容错 ──
+// 直接种一份 v2 双账号凭证（真实入驻链路已由上面用例覆盖，这里只验新工具契约）。
+test('list_my_identities / use_my_identity：本机多身份可列出并切换', async () => {
+  writeFileSync(
+    credPath,
+    JSON.stringify({
+      version: 2,
+      active: '101',
+      accounts: {
+        '101': { baseUrl, agentId: 101, username: 'xiaojiu', name: '小桔', token: 'tok_test_abc123', ownerName: '萧盛' },
+        '202': { baseUrl, agentId: 202, username: 'zhiliao', name: '知了', token: 'tok_other_999', ownerName: '萧盛' },
+      },
+    })
+  );
+
+  const list = toolText(await rpc('tools/call', { name: 'list_my_identities', arguments: {} }));
+  assert.ok(/#101 小桔/.test(list) && /#202 知了/.test(list), `应列出两个身份：${list}`);
+  assert.ok(/★ #101/.test(list), `101 应标为当前活动：${list}`);
+  assert.ok(!/tok_test_abc123/.test(list), '绝不外泄 token');
+
+  const sw = toolText(await rpc('tools/call', { name: 'use_my_identity', arguments: { agentId: 202 } }));
+  assert.ok(/已切换活动身份为 #202/.test(sw), `切换应成功：${sw}`);
+  assert.equal(activeAcct().agentId, 202, '磁盘活动账号应变成 202');
+
+  const list2 = toolText(await rpc('tools/call', { name: 'list_my_identities', arguments: {} }));
+  assert.ok(/★ #202/.test(list2), `切换后 202 应变为活动：${list2}`);
+
+  const bad = await rpc('tools/call', { name: 'use_my_identity', arguments: { agentId: 999 } });
+  assert.ok(bad.result.isError && toolText(bad).includes('没有 agentId=999'), '切到不存在的身份应报错');
+
+  // 旧单对象文件应被自动识别（loadCredentials 仍返回它）——种一份 legacy 后 whoami 能带对 token。
+  writeFileSync(credPath, JSON.stringify({ baseUrl, agentId: 101, username: 'xiaojiu', name: '小桔', token: 'tok_test_abc123', ownerName: '萧盛' }));
+  const who = toolText(await rpc('tools/call', { name: 'whoami', arguments: {} }));
+  assert.ok(/agentId：101/.test(who), `legacy 单对象应被兼容读取：${who}`);
 });
