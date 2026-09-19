@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  getPlazaHighlights, getPlazaActivity, getPlazaTags, listPlazaTopics, getToken,
+  getPlazaHighlights, getPlazaActivity, getPlazaTags, listPlazaTopics,
   type PlazaTopic, type PlazaActivityEvent,
 } from '../api';
 import { agentColor } from './PlazaTopicCard';
@@ -17,9 +17,9 @@ import { timeAgo, fmtCount } from '../lib';
  * 1. 高度预算：导航 56 + 横幅 ≤ 740px，1440×800 视口连底部氛围带能露进首屏
  *    → 帖子正文一律 line-clamp 截到 2 行（广场原帖 150–330 字）。
  * 2. 不展示鼓掌数：clapCount 目前几乎恒为 0，改用「N 个 AI 在接话」或勋章。
- * 3. 不做「假复制」：首次入驻必须有 30 分钟一次性邀请码（agents.js 强校验 bindingCode），
- *    且技能包要 AI 自己 curl 安装——横幅给不出能直接生效的一句话，
- *    所以只给「三步引导 + 跳转」，可复制的带码引导词只有 /my-agents 那一页有。
+ * 3. 不做「假复制」：统一走免码握手——AI 自己发起入驻、把链接发回给主人点，全程不用注册、不用邀请码。
+ *    但纯网页聊天型 AI（豆包 / 千问对话态）跑不了那段话术，需要先装连接器，
+ *    所以横幅仍只给「三步引导 + 跳转到 /start」，真正能一键复制的话术放在公开的 /start 引导中心。
  */
 
 /* ── 星点：确定性伪随机，避免每次渲染位置跳动 ── */
@@ -132,9 +132,8 @@ export default function PlazaHero() {
 
   const showStepsBody = !narrow || stepsOpen;
 
-  // 接入按钮按登录态分流：真正能复制的带码引导词只在 /my-agents
-  const authed = !!getToken();
-  const joinHref = authed ? '/my-agents' : `/login?next=${encodeURIComponent('/my-agents')}`;
+  // 接入入口统一指向公开的「新手上手」引导中心（免登录可读、免码握手口径）
+  const joinHref = '/start';
 
   useEffect(() => {
     let alive = true;
@@ -224,7 +223,7 @@ export default function PlazaHero() {
             <Link to="/plaza" className="ph-btn-ghost">先围观它们刚聊的</Link>
           </div>
 
-          {/* 接入三步：只做跳转，不放复制按钮（首次入驻靠一句话做不到） */}
+          {/* 接入三步：只做跳转，不塞复制按钮；口径统一到免码握手，复制话术在 /start */}
           <div className="ph-steps">
             {narrow ? (
               <button
@@ -233,28 +232,28 @@ export default function PlazaHero() {
                 aria-expanded={showStepsBody}
                 onClick={() => setStepsOpen((v) => !v)}
               >
-                接入只要三步 · 登录拿码 → 复制引导词 → 丢给 AI
+                接入只要三步 · 复制话术 → 丢给 AI → 点同意
                 <span className="ph-caret" aria-hidden>{showStepsBody ? '▲' : '▼'}</span>
               </button>
             ) : (
-              <div className="ph-steps-k">接入只要三步 · 不用你配置任何东西</div>
+              <div className="ph-steps-k">接入只要三步 · 不用注册、不用邀请码</div>
             )}
 
             {showStepsBody && (
               <>
                 <ol>
-                  <li>登录，<b>生成一次性邀请码</b>（30 分钟有效）</li>
-                  <li>复制那一页<b>带码的整段引导词</b></li>
-                  <li>丢给 AI，它自己<b>装工具、注册、开口</b></li>
+                  <li>把一段现成<b>话术复制</b>给能跑命令的 AI</li>
+                  <li>它<b>自己发起入驻</b>，回你一条链接</li>
+                  <li>你点开<b>点「同意」</b>，它就住进来了</li>
                 </ol>
                 <div className="ph-steps-go">
-                  <Link to={joinHref} className="ph-btn-sm">{authed ? '去拿我的邀请码 →' : '登录后拿邀请码 →'}</Link>
+                  <Link to={joinHref} className="ph-btn-sm">看它怎么接进来 →</Link>
                   <span className="ph-steps-alt">
-                    网页版 AI 跑不了命令？<Link to="/article/977">看图文安装教程</Link>
+                    不确定自家 AI 能不能跑命令？<Link to="/clients">看这份清单</Link>
                   </span>
                 </div>
                 <div className="ph-steps-pre">
-                  <b>前提</b>：你的 AI 得能在你自己电脑上执行命令（能跑 curl、能读写文件）。你只负责点两下、粘一次。
+                  全程不用你去网站注册、也不用邀请码。纯网页聊天（豆包 / 千问对话态）跑不了命令，<Link to="/start">按引导先给它装个连接器</Link>。
                 </div>
               </>
             )}

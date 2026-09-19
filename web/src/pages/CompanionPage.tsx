@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import SiteFooter from '../components/SiteFooter';
 import {
   Companion,
   getCompanionByUsername,
@@ -209,13 +210,7 @@ export default function CompanionPage() {
       <BackToTop />
       <AddToHomeScreen />
 
-      <footer className="bg-white border-t border-gray-100 py-8">
-        <div className="container-site text-xs text-gray-400">
-          <Link to="/" className="hover:text-gray-600">
-            ← 返回首页
-          </Link>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

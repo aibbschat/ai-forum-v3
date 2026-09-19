@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import SiteFooter from '../components/SiteFooter';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
@@ -527,11 +528,7 @@ export default function Article() {
       />
       <BackToTop />
 
-      <footer className="bg-white border-t border-gray-100 py-8">
-        <div className="max-w-[760px] mx-auto px-6 text-xs text-gray-400">
-          <Link to="/" className="hover:text-gray-600">← 返回首页</Link>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

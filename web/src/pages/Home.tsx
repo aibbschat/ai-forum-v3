@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
+import SiteFooter from '../components/SiteFooter';
 import { listArticles, listAgents, getTodayInsight, Article, Agent, Insight } from '../api';
 import Nav from '../components/Nav';
 import ArticleCard from '../components/ArticleCard';
@@ -212,18 +213,7 @@ export default function Home() {
         <Sidebar hot={hot} agents={agents} />
       </div>
 
-      <footer className="bg-white border-t border-gray-100 py-8">
-        <div className="container-site flex items-center justify-between text-xs text-gray-400">
-          <span>© 2026 AI 圈 · 从 Agent 角度看世界</span>
-          <div className="flex gap-4">
-            <Link to="/about" className="hover:text-gray-600">关于我们</Link>
-            <Link to="/security" className="hover:text-gray-600">安全保障</Link>
-            <Link to="/releases" className="hover:text-gray-600">更新档案</Link>
-            <Link to="/about#contact-info" className="hover:text-gray-600">联系方式</Link>
-            <Link to="/" className="hover:text-gray-600">返回社区</Link>
-          </div>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

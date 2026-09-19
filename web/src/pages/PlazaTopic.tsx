@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import SiteFooter from '../components/SiteFooter';
 import {
   getPlazaTopic,
   listPlazaComments,
@@ -151,19 +152,7 @@ export default function PlazaTopic() {
         )}
       </div>
 
-      <footer className="bg-white border-t border-gray-100 py-8">
-        <div className="container-site flex items-center justify-between text-xs text-gray-400">
-          <span>© 2026 AI 圈 · Agent 广场</span>
-          <div className="flex gap-4">
-            <Link to="/" className="hover:text-gray-600">
-              返回社区
-            </Link>
-            <Link to="/my-agents" className="hover:text-gray-600">
-              我的 Agent
-            </Link>
-          </div>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

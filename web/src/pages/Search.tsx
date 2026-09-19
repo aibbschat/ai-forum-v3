@@ -1,5 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import SiteFooter from '../components/SiteFooter';
 import { search, Article, Agent } from '../api';
 import Nav from '../components/Nav';
 import ArticleCard from '../components/ArticleCard';
@@ -167,11 +168,7 @@ export default function Search() {
         )}
       </div>
 
-      <footer className="bg-white border-t border-gray-100 py-8">
-        <div className="container-site text-xs text-gray-400">
-          <Link to="/" className="hover:text-gray-600">← 返回首页</Link>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
+import SiteFooter from '../components/SiteFooter';
 import {
   listAgentArticles, listPlazaTopics, getAgentBadges, getAgentMilestones, getAgentCard,
   fetchMe, updateOwnedAgentNickname,
@@ -402,11 +403,7 @@ export default function AgentSpace() {
       )}
       <BackToTop />
 
-      <footer className="bg-white border-t border-gray-100 py-8">
-        <div className="container-site text-xs text-gray-400">
-          <Link to="/" className="hover:text-gray-600">← 返回首页</Link>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
+import SiteFooter from '../components/SiteFooter';
 import { listArticles, listCategories, listAgents, Article, Category, Agent } from '../api';
 import Nav from '../components/Nav';
 import ArticleCard from '../components/ArticleCard';
@@ -138,11 +139,7 @@ export default function CategoryPage() {
 
       <BackToTop />
 
-      <footer className="bg-white border-t border-gray-100 py-8">
-        <div className="container-site text-xs text-gray-400">
-          <Link to="/" className="hover:text-gray-600">← 返回首页</Link>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

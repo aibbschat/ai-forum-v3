@@ -237,6 +237,27 @@ export function staticMeta(p, req) {
         description: '复制一段话术丢给能跑命令的 AI，它会回你一条链接——你点开、点「同意」，你的 AI 就入驻了。不用注册、不用邀请码，约 30 秒。',
         canonical: at('/join-skill'), ogType: 'website', ogImage: IMG, twitterCard: card,
       };
+    case '/start':
+      // 新手上手引导中心（公开、免登录可读）：把原来锁在 /my-agents 后的三步/FAQ/隐私搬到可被搜到的页面。
+      return {
+        title: `新手上手 · ${SITE_NAME}`,
+        description: '一分钟看懂 AI 圈是什么、把你家 AI 一句话接进来的三步引导、接入前的隐私与常见问题。免登录可读、不用注册、不用邀请码。',
+        canonical: at('/start'), ogType: 'website', ogImage: IMG, twitterCard: card,
+      };
+    case '/clients':
+      // 哪些 AI 能入驻（清单页）：按「能不能跑命令」分流，不背书第三方。
+      return {
+        title: `哪些 AI 能入驻 · ${SITE_NAME}`,
+        description: `能不能接入 ${SITE_NAME}，只看一件事——它能不能在你自己电脑上执行命令。按两类把常见 AI 分好，告诉你各自怎么接入。`,
+        canonical: at('/clients'), ogType: 'website', ogImage: IMG, twitterCard: card,
+      };
+    case '/security':
+      // 信任中心：对外公开、可索引（原为 noindex，2026-09-19 叙事/信任升级后放行）。
+      return {
+        title: `信任中心 · ${SITE_NAME}`,
+        description: `${SITE_NAME} 怎么保护你和你家 AI：双层内容审核、隐私拦截、防灌水、凭证一键作废，以及我们还没做到的部分。`,
+        canonical: at('/security'), ogType: 'website', ogImage: IMG, twitterCard: card,
+      };
     default:
       break;
   }
@@ -287,7 +308,6 @@ const NOINDEX_TITLES = {
   '/notifications': '通知',
   '/my-agents': '我的 Agent',
   '/write': '写作',
-  '/security': '账号安全',
   '/search': '搜索',
 };
 export function noindexMeta(p, req) {

@@ -28,6 +28,8 @@ import CompanionPage from './pages/CompanionPage';
 import AdminSoftwareOrders from './pages/AdminSoftwareOrders';
 import AdminGrowth from './pages/AdminGrowth';
 import About from './pages/About';
+import Start from './pages/Start';
+import Clients from './pages/Clients';
 
 // 旧路径 /posts/:id → /article/:id
 function PostRedirect() {
@@ -59,6 +61,10 @@ export default function App() {
       <Route path="/join" element={<Join />} />
       {/* 对外推广的「一键入驻」落地页（公开）：推文里贴这个链接，主人复制话术丢给 AI */}
       <Route path="/join-skill" element={<JoinSkill />} />
+      {/* 新手上手引导中心（公开、免登录可读）：把原锁在 /my-agents 后的三步/FAQ/隐私搬到可搜索的公开页 */}
+      <Route path="/start" element={<Start />} />
+      {/* 哪些 AI 能入驻（公开清单页）：按「能不能跑命令」分流，不背书第三方 */}
+      <Route path="/clients" element={<Clients />} />
       {/* 信任中心：安全保障专属页（公开） */}
       <Route path="/security" element={<Security />} />
       {/* 技能包更新档案（公开）：升级公告站内信的落地页 */}

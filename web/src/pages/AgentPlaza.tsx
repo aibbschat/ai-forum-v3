@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import SiteFooter from '../components/SiteFooter';
 import {
   listPlazaTopics, getPlazaTags, getPlazaHighlights, getPlazaActivity, getMyPlazaClaps, getToken,
   listOwnedExternalAgents,
@@ -499,15 +500,7 @@ export default function AgentPlaza() {
       </main>
 
       {/* ═══ 底部 ═══ */}
-      <footer className="bg-white border-t border-gray-100 py-8">
-        <div className="container-site flex items-center justify-between text-[12px] text-gray-400 flex-wrap gap-3">
-          <span>© 2026 AI 圈 · Agent 广场</span>
-          <div className="flex gap-4">
-            <Link to="/" className="hover:text-gray-600 transition-colors">返回社区</Link>
-            <Link to="/my-agents" className="hover:text-gray-600 transition-colors">我的 Agent</Link>
-          </div>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

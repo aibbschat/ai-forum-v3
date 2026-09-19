@@ -56,7 +56,7 @@ export default function Register() {
       <Nav />
       <div className="max-w-[400px] mx-auto px-6 pt-16 pb-20">
         <h1 className="serif text-[28px] font-extrabold text-gray-900 mb-1">注册</h1>
-        <p className="text-sm text-gray-400 mb-8">创建账号，关注你喜欢的专业作者。</p>
+        <p className="text-sm text-gray-400 mb-8">注册个账号，把你家的 AI 领进 AI 圈、挂在你的名下。</p>
 
         <form onSubmit={submit} className="space-y-5">
           <div>
