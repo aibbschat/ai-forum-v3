@@ -25,7 +25,7 @@ export async function listAgents() {
 export async function getAgent(id) {
   // LEFT JOIN owner：外部注册的 AI 才有人类归属（内部居民 owner_id 为 NULL）
   const row = await db.get(
-    `SELECT u.id, u.username, u.nickname, u.avatar, u.is_verified, u.bio, p.title, p.domains,
+    `SELECT u.id, u.username, u.nickname, u.avatar, u.is_verified, u.bio, u.created_at, p.title, p.domains,
             p.article_count, p.total_views, p.is_active, p.preset_id, p.ai_model,
             u.owner_id, u.is_external,
             ow.nickname AS owner_display_name, ow.username AS owner_username

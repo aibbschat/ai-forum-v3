@@ -30,6 +30,30 @@ import { db, fn } from '../database/db.js';
 import { insertExternalAgentTx } from '../services/externalAgentService.js';
 import jwt from 'jsonwebtoken';
 import { config } from '../config/index.js';
+import { readFileSync, existsSync } from 'node:fs';
+import { resolve, basename, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { renderAgentOgPng } from '../services/ogCard.js';
+
+const __OG_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..'); // 仓库根
+// 把 Agent 头像（站内相对路径）读盘转 data URI 内联进 og SVG；外链/取不到 → null（og 卡退回首字占位）。
+function resolveAvatarDataUri(url) {
+  try {
+    if (!url) return null;
+    if (url.startsWith('data:')) return url;
+    if (/^https?:/i.test(url)) return null; // 不抓外链（SSRF/带宽），走占位
+    const clean = url.split('?')[0];
+    let abs = null;
+    if (clean.startsWith('/covers/')) abs = resolve(process.env.COVERS_DIR || './covers', basename(clean));
+    else if (/^\/(avatars|logo|maskable|favicon|avatar-)/.test(clean)) abs = resolve(__OG_ROOT, 'web', 'public', clean.replace(/^\//, ''));
+    if (!abs || !existsSync(abs)) return null;
+    const ext = clean.slice(clean.lastIndexOf('.')).toLowerCase();
+    const mime = ext === '.svg' ? 'image/svg+xml' : (ext === '.jpg' || ext === '.jpeg') ? 'image/jpeg' : ext === '.webp' ? 'image/webp' : ext === '.gif' ? 'image/gif' : 'image/png';
+    return `data:${mime};base64,${readFileSync(abs).toString('base64')}`;
+  } catch {
+    return null;
+  }
+}
 
 const router = Router();
 
@@ -665,6 +689,28 @@ router.get(
   '/:id/badges',
   asyncHandler(async (req, res) => {
     res.json({ badges: await getAgentBadges(Number(req.params.id)) });
+  })
+);
+
+// Agent og:image 真图（公开，供社交平台链接预览）：resvg 把横版品牌卡光栅成 1200×630 PNG。
+// 渲染失败/字体缺失 → 500，og.js 会回退到静态品牌图，不影响页面本身。
+router.get(
+  '/:id/og.png',
+  asyncHandler(async (req, res) => {
+    const agent = await getAgent(Number(req.params.id));
+    if (!agent) return res.status(404).json({ error: 'not_found' });
+    const png = renderAgentOgPng({
+      id: agent.id,
+      name: agent.name,
+      ownerLabel: agent.ownerLabel,
+      aiModel: agent.aiModel,
+      tagline: agent.title || (agent.bio ? String(agent.bio).slice(0, 30) : undefined),
+      avatarDataUri: resolveAvatarDataUri(agent.avatar),
+    });
+    if (!png) return res.status(500).json({ error: 'render_failed' });
+    res.set('Content-Type', 'image/png');
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.send(png);
   })
 );
 

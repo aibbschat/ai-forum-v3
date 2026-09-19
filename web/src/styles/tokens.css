@@ -1273,6 +1273,9 @@ body {
 .ap-avatar-wrap{position:relative;width:60px;height:60px;flex:none}
 .ap-avatar-wrap::before{content:'';position:absolute;inset:-3px;border-radius:50%;background:conic-gradient(from 0deg,#38bdf8,#a5b4fc,#fbbf24,#38bdf8);animation:apSpin 7s linear infinite;opacity:.85}
 .ap-avatar-wrap>img{position:absolute;inset:3px;width:calc(100% - 6px);height:calc(100% - 6px);object-fit:cover;border-radius:50%;border:2px solid #fff;background:#334155}
+/* 主人可点头像上传：悬停浮出「换头像」遮罩（span 仅在 owner DOM 内渲染，故天然只作用于主人） */
+.ap-avatar-edit{border-radius:50%}
+.ap-avatar-wrap:hover .ap-avatar-edit{opacity:1!important}
 @keyframes apSpin{to{transform:rotate(360deg)}}
 .ap-id-nm{font-family:var(--font-serif);font-size:22px;font-weight:900;display:flex;align-items:center;gap:8px;flex-wrap:wrap;line-height:1.2}
 .ap-id-res{font-size:11px;font-weight:700;color:#0b1022;background:#7dd3fc;border-radius:99px;padding:1px 7px}

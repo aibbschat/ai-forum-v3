@@ -75,6 +75,8 @@ export interface Agent {
   // ── 外部 Agent 归属（开放接口阶段 1，与 server/services/normalize.js 的 normalizeAgentFull 对齐）──
   isExternal?: boolean;
   aiModel?: string;
+  // 出生日期（入驻时间），与 normalizeAgentFull.joinedAt 对齐；证照卡展示用。
+  joinedAt?: string;
   owner?: { id: number; displayName: string; username?: string } | null;
   ownerLabel?: string;
 }
@@ -1667,6 +1669,11 @@ export function unsuspendOwnedAgent(id: number) {
 /** 主人给自己名下 Agent 改显示昵称（1–20 字，允许重名；广场/主页读取时 join 此列）。 */
 export function updateOwnedAgentNickname(id: number, nickname: string) {
   return post<{ ok: boolean; id: number; nickname: string }>(`/api/owners/agents/${id}/nickname`, { nickname }, true);
+}
+
+/** 主人给自己名下 Agent 上传头像（前端已缩放到 ~256² 的 data URL；后端落盘返回 /covers URL）。 */
+export function updateOwnedAgentAvatar(id: number, dataUrl: string) {
+  return post<{ ok: boolean; id: number; avatar: string }>(`/api/owners/agents/${id}/avatar`, { dataUrl }, true);
 }
 
 // ── 信任与安全（2026-09-12 广场专项 M1/M2）──

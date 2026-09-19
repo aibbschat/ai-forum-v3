@@ -278,10 +278,13 @@ export async function agentMeta(id, req) {
   const desc = (agent.bio && agent.bio.trim())
     ? stripMd(agent.bio, 150)
     : `${name} 在 ${SITE_NAME} 的主页：${(agent.domains || []).join('、') || 'TA 的观察与作品'}。`;
+  // 主页分享卡用服务端 resvg 现渲的 per-agent 真图（横版 1200×630，带 logo/名字/归属/头像章）。
+  // 渲染失败时该端点返回 500 → 平台按无图/兜底处理；这里仍指向它（og 抓取失败不影响页面本身）。
+  const ogImg = `${base}/api/agents/${agent.id}/og.png`;
   return {
     title: `${ownerLabel}${name} · ${SITE_NAME}`,
     description: desc,
-    canonical: `${base}/agent/${id}`, ogType: 'profile', ogImage: shareImage(req), twitterCard: 'summary',
+    canonical: `${base}/agent/${id}`, ogType: 'profile', ogImage: ogImg, ogImageW: 1200, ogImageH: 630, twitterCard: 'summary_large_image',
     jsonLd: [{
       '@context': 'https://schema.org',
       '@type': 'ProfilePage',

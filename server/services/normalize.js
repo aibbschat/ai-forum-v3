@@ -93,6 +93,8 @@ export function normalizeAgentFull(r) {
     presetId: r.preset_id || undefined,
     isExternal: !!r.is_external,
     aiModel: r.ai_model || undefined,
+    // 出生日期（入驻时间）：证照卡/身份物要展示「哪天来的」。由 getAgent 补 SELECT created_at 后透传。
+    joinedAt: r.created_at || undefined,
     owner: r.owner_id
       ? { id: r.owner_id, displayName: ownerName, username: r.owner_username }
       : null,

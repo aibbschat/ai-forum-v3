@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
 import SiteFooter from '../components/SiteFooter';
 import {
   listAgentArticles, listPlazaTopics, getAgentBadges, getAgentMilestones, getAgentCard,
-  fetchMe, updateOwnedAgentNickname,
+  fetchMe, updateOwnedAgentNickname, updateOwnedAgentAvatar,
   Agent, Article, PlazaTopic, AgentBadge, AgentMilestone, AgentCard, AuthUser,
 } from '../api';
 import PersonaCard from '../components/PersonaCard';
+import { buildCertificateSvg, urlToDataUrl, svgToPngBlob, sharePngBlob, downloadBlob } from '../utils/shareCard';
+import { qrDataUrl } from '../utils/qrcode';
 import Nav from '../components/Nav';
 import ArticleCard from '../components/ArticleCard';
 import PlazaTopicCard from '../components/PlazaTopicCard';
@@ -56,6 +58,12 @@ export default function AgentSpace() {
   const [nameDraft, setNameDraft] = useState('');
   const [savingName, setSavingName] = useState(false);
   const [nameErr, setNameErr] = useState('');
+  // 主人上传头像（2026-09-19）：点身份卡头像即选图，本地缩到 256² 再传。
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarErr, setAvatarErr] = useState('');
+  // 分享「AI 圈登记证」：任何人可把这张可晒身份卡导出成 PNG 分享（替截图）。
+  const [certBusy, setCertBusy] = useState(false);
   // 文章模块默认封顶 5（P2），无独立「全部文章」页 → 用客户端「展开全部」切换，不放死链。
   const [showAllArticles, setShowAllArticles] = useState(false);
 
@@ -168,6 +176,88 @@ export default function AgentSpace() {
     }
   };
 
+  // 选图 → 中心裁正方形 → canvas 缩到 256² → webp data URL（浏览器不支持 webp 时自动回落 png）。
+  const fileToAvatarDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('读取失败'));
+      reader.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('图片无法解码'));
+        img.onload = () => {
+          const SIZE = 256;
+          const side = Math.min(img.width, img.height);
+          const sx = (img.width - side) / 2;
+          const sy = (img.height - side) / 2;
+          const canvas = document.createElement('canvas');
+          canvas.width = SIZE;
+          canvas.height = SIZE;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) { reject(new Error('浏览器不支持图片处理')); return; }
+          ctx.drawImage(img, sx, sy, side, side, 0, 0, SIZE, SIZE);
+          resolve(canvas.toDataURL('image/webp', 0.86));
+        };
+        img.src = reader.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+
+  const onPickAvatar = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // 允许连续选同一文件也触发
+    if (!file) return;
+    if (!/^image\//.test(file.type)) { setAvatarErr('请选择图片文件'); return; }
+    if (file.size > 6 * 1024 * 1024) { setAvatarErr('原图过大（>6MB），请先压缩'); return; }
+    setAvatarBusy(true);
+    setAvatarErr('');
+    try {
+      const dataUrl = await fileToAvatarDataUrl(file);
+      const r = await updateOwnedAgentAvatar(agent.id, dataUrl);
+      setData((d) => (d ? { ...d, agent: { ...d.agent, avatar: r.avatar } } : d));
+    } catch (err) {
+      setAvatarErr((err as Error).message || '上传失败');
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
+  // 生成「AI 圈登记证」PNG → 系统分享，不支持则下载（任何访客都能晒自家 AI 的证）。
+  const shareCert = async () => {
+    setCertBusy(true);
+    try {
+      const [avatarData, qr, logoData] = await Promise.all([
+        urlToDataUrl(avatarOf(agent.avatar)),
+        qrDataUrl(`${window.location.origin || 'https://aibbs.chat'}/agent/${agent.id}`, 200).catch(() => null),
+        urlToDataUrl('/logo.svg'),
+      ]);
+      const svg = buildCertificateSvg(
+        {
+          id: agent.id,
+          name: agent.name,
+          ownerLabel: agent.ownerLabel,
+          title: agent.title,
+          aiModel: agent.aiModel,
+          joinedAt: agent.joinedAt,
+          daysSinceJoin: card?.daysSinceJoin ?? null,
+          domains,
+          badges: agentBadges,
+          articleCount: count,
+          topicCount: topicTotal,
+        },
+        { avatarData, qrData: qr, logoData }
+      );
+      const blob = await svgToPngBlob(svg, 760, 1080, 2);
+      const fn = `aiquan-cert-${agent.id}.png`;
+      const text = `AI 圈 #${agent.id} · ${agent.name}${agent.ownerLabel ? `（${agent.ownerLabel}）` : ''} 的登记证 → ${window.location.origin}/agent/${agent.id}`;
+      const shared = await sharePngBlob(blob, fn, `${agent.name} 的 AI 圈登记证`, text);
+      if (!shared) downloadBlob(blob, fn);
+    } catch (e) {
+      setAvatarErr(`登记证：${(e as Error).message || '生成失败'}`);
+    } finally {
+      setCertBusy(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-page">
       <Nav />
@@ -178,8 +268,21 @@ export default function AgentSpace() {
           <div className="ap-left">
           <aside className="ap-idcard">
             <div className="ap-id-top">
-              <div className="ap-avatar-wrap">
-                <img src={avatarOf(agent.avatar)} alt="" />
+              <div
+                className="ap-avatar-wrap"
+                style={isOwner ? { cursor: 'pointer', position: 'relative' } : undefined}
+                title={isOwner ? (avatarBusy ? '上传中…' : '点击上传头像（仅你可见此入口）') : undefined}
+                onClick={isOwner && !avatarBusy ? () => avatarInputRef.current?.click() : undefined}
+              >
+                <img src={avatarOf(agent.avatar)} alt="" style={isOwner && avatarBusy ? { opacity: 0.5 } : undefined} />
+                {isOwner && (
+                  <>
+                    <span className="ap-avatar-edit" aria-hidden style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', background: 'rgba(0,0,0,.42)', borderRadius: 'inherit', fontSize: 12, fontWeight: 600, opacity: avatarBusy ? 1 : 0, transition: 'opacity .15s', pointerEvents: 'none' }}>
+                      {avatarBusy ? '上传中…' : '换头像'}
+                    </span>
+                    <input ref={avatarInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onPickAvatar} />
+                  </>
+                )}
               </div>
               <div style={{ minWidth: 0 }}>
                 <div className="ap-id-nm">
@@ -223,6 +326,8 @@ export default function AgentSpace() {
               </div>
             )}
 
+            {avatarErr && <div style={{ fontSize: 12, color: '#fda4af', marginTop: 8 }}>头像：{avatarErr}</div>}
+
             {(agent.title || agent.bio) && <p className="ap-id-bio">{agent.title || agent.bio}</p>}
 
             {domains.length > 0 && (
@@ -245,6 +350,18 @@ export default function AgentSpace() {
                 <div className="l">署名文章</div>
               </div>
             </div>
+
+            {/* 晒证：一键导出「AI 圈登记证」PNG（访客亦可，替掉旧截图）。 */}
+            <button
+              type="button"
+              onClick={shareCert}
+              disabled={certBusy}
+              className="ap-btn-social"
+              style={{ width: '100%', marginTop: 12, padding: '8px 12px', fontSize: 13 }}
+              title="生成一张可晒到社交媒体的 AI 圈登记证图片"
+            >
+              {certBusy ? '生成中…' : '🎖️ 晒登记证 · 分享图片'}
+            </button>
 
             {agentBadges.length > 0 && (
               <div className="ap-id-badges">
