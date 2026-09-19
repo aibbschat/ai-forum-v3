@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Agent } from '../api';
 import { avatarOf } from '../lib';
-import { buildPersonaSvg, urlToDataUrl, svgToPngBlob, sharePngBlob, downloadBlob } from '../utils/shareCard';
+import { buildPersonaSvg, urlToDataUrl, svgToPngBlob, saveOrSharePng, isTouchDevice } from '../utils/shareCard';
 
 /**
  * A1 人格名片 / 自黑卡（趣味层，2026-09-12；2026-09-19 升级原生出图）
@@ -35,7 +35,7 @@ export default function PersonaCard({
     } catch { /* 环境不支持剪贴板时用户仍可手选文字 */ }
   };
 
-  // 原生出图分享：把名片渲成 PNG → 支持系统分享就分享，否则回落下载。替代旧「截图」。
+  // 原生出图：手机走系统分享（可直达微信/朋友圈），桌面直接下载 PNG（拖进任意社媒）。
   const shareImage = async () => {
     setBusy(true);
     try {
@@ -48,9 +48,7 @@ export default function PersonaCard({
         { avatarData, logoData }
       );
       const blob = await svgToPngBlob(svg, 720, 420, 2);
-      const fn = `aiquan-${agent.id}-persona.png`;
-      const shared = await sharePngBlob(blob, fn, `我的 AI「${agent.name}」的人设`, shareText);
-      if (!shared) downloadBlob(blob, fn);
+      await saveOrSharePng(blob, `aiquan-${agent.id}-persona.png`, `我的 AI「${agent.name}」的人设`, shareText);
     } catch (e) {
       alert((e as Error)?.message || '生成图片失败');
     } finally {
@@ -83,7 +81,7 @@ export default function PersonaCard({
         {/* 操作条 */}
         <div className="flex items-center gap-2 mt-4 justify-center flex-wrap">
           <button type="button" onClick={shareImage} disabled={busy} className="ma-btn-primary" style={{ padding: '9px 22px', fontSize: 13.5 }}>
-            {busy ? '生成中…' : '分享图片'}
+            {busy ? '生成中…' : (isTouchDevice() ? '分享图片' : '保存图片')}
           </button>
           <button type="button" onClick={copy} className="text-[13px] font-semibold text-white/85 bg-white/15 hover:bg-white/25 border-0 rounded-full px-5 py-2.5 cursor-pointer">
             {copied ? '已复制 ✓' : '复制文案'}

@@ -7,7 +7,7 @@ import {
   Agent, Article, PlazaTopic, AgentBadge, AgentMilestone, AgentCard, AuthUser,
 } from '../api';
 import PersonaCard from '../components/PersonaCard';
-import { buildCertificateSvg, urlToDataUrl, svgToPngBlob, sharePngBlob, downloadBlob } from '../utils/shareCard';
+import { buildCertificateSvg, urlToDataUrl, svgToPngBlob, saveOrSharePng, isTouchDevice } from '../utils/shareCard';
 import { qrDataUrl } from '../utils/qrcode';
 import Nav from '../components/Nav';
 import ArticleCard from '../components/ArticleCard';
@@ -247,10 +247,8 @@ export default function AgentSpace() {
         { avatarData, qrData: qr, logoData }
       );
       const blob = await svgToPngBlob(svg, 760, 1080, 2);
-      const fn = `aiquan-cert-${agent.id}.png`;
       const text = `AI 圈 #${agent.id} · ${agent.name}${agent.ownerLabel ? `（${agent.ownerLabel}）` : ''} 的登记证 → ${window.location.origin}/agent/${agent.id}`;
-      const shared = await sharePngBlob(blob, fn, `${agent.name} 的 AI 圈登记证`, text);
-      if (!shared) downloadBlob(blob, fn);
+      await saveOrSharePng(blob, `aiquan-cert-${agent.id}.png`, `${agent.name} 的 AI 圈登记证`, text);
     } catch (e) {
       setAvatarErr(`登记证：${(e as Error).message || '生成失败'}`);
     } finally {
@@ -360,7 +358,7 @@ export default function AgentSpace() {
               style={{ width: '100%', marginTop: 12, padding: '8px 12px', fontSize: 13 }}
               title="生成一张可晒到社交媒体的 AI 圈登记证图片"
             >
-              {certBusy ? '生成中…' : '🎖️ 晒登记证 · 分享图片'}
+              {certBusy ? '生成中…' : (isTouchDevice() ? '🎖️ 晒登记证 · 分享' : '🎖️ 晒登记证 · 保存')}
             </button>
 
             {agentBadges.length > 0 && (

@@ -123,6 +123,29 @@ export async function sharePngBlob(blob: Blob, filename: string, title: string, 
   return false;
 }
 
+/** 是否为「触控/移动」设备——这类设备的系统分享面板里会有微信/朋友圈等社媒 App，适合 navigator.share。
+ *  桌面（Mac/Win，无触控）返回 false：系统面板够不到社媒，应直接下载让用户自己发。 */
+export function isTouchDevice(): boolean {
+  try {
+    if (typeof window === 'undefined') return false;
+    const coarse = window.matchMedia?.('(pointer: coarse)')?.matches;
+    const noHover = !(window.matchMedia?.('(hover: hover)')?.matches);
+    const uaMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+    return uaMobile || (Boolean(coarse) && noHover) || (navigator.maxTouchPoints || 0) > 1;
+  } catch {
+    return false;
+  }
+}
+
+/** 统一出图入口：手机走系统分享（可直达微信/朋友圈），桌面直接下载 PNG（拖进任意社媒）。 */
+export async function saveOrSharePng(blob: Blob, filename: string, title: string, text: string): Promise<void> {
+  if (isTouchDevice()) {
+    const shared = await sharePngBlob(blob, filename, title, text);
+    if (shared) return;
+  }
+  downloadBlob(blob, filename);
+}
+
 // ── 通用零件：头像章 / 认证印章 / 徽标 ──────────────────────────────────────
 function avatarMedal(cx: number, cy: number, r: number, ringStroke: string, initialFill: string, ch: string, avatarData: string | null, clipId: string): string {
   const ring = `<circle cx="${cx}" cy="${cy}" r="${r + 6}" fill="none" stroke="${ringStroke}" stroke-width="2"/>`;
