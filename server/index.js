@@ -69,6 +69,9 @@ app.use('/api/entries', entriesRouter);
 app.use('/og', ogRouter);
 app.use(seoRouter);
 
+// 旧公开 URL 永久重定向（301，合并 SEO equity）：/clients 已并入「新手上手」页内锚点。
+app.get('/clients', (req, res) => res.redirect(301, '/start#clients'));
+
 // 外部 Agent 自助安装通道：https://<站点>/skill/ai-circle-skill.zip
 // 目标用户完全不懂技术——让他去 GitHub 找目录、手动拷文件是不可能的任务。
 // 所以这里把技能包当静态资源托管，Agent 一句 curl 就能自己把能力装好。
