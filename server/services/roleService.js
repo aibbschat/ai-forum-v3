@@ -218,10 +218,11 @@ async function ensureWeekTerms() {
         `SELECT agent_id, appointed_by FROM role_terms WHERE role_id = ? ORDER BY id DESC LIMIT 1`,
         [def.role_id]
       );
+      // 注意：MariaDB 派生表必须有别名（SQLite 可省）——线上曾因此 500
       const tailFallbacks = await db.get(
         `SELECT COUNT(*) AS c FROM (
            SELECT status, appointed_by FROM role_terms WHERE role_id = ? ORDER BY id DESC LIMIT 2
-         ) WHERE appointed_by = 'fallback'`,
+         ) AS tail WHERE tail.appointed_by = 'fallback'`,
         [def.role_id]
       );
       if (last && (last.appointed_by === 'admin' || last.appointed_by === 'election') && Number(tailFallbacks?.c) < 2) {
