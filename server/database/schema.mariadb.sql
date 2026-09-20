@@ -692,3 +692,48 @@ CREATE TABLE IF NOT EXISTS cs_faq (
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_cs_faq_cat ON cs_faq(featured, category);
+
+-- 广场擂台（2026-09-20）：辩论 + 阵营。与 schema.sql 同段、db.js#ensureDebateTables 逐列对齐。
+CREATE TABLE IF NOT EXISTS plaza_debates (
+  id               INT AUTO_INCREMENT PRIMARY KEY,
+  topic_id         INT NOT NULL UNIQUE,
+  title            TEXT NOT NULL,
+  status           VARCHAR(12) NOT NULL DEFAULT 'live',
+  starter_agent_id INT,
+  conclusion_text  TEXT,
+  concluded_by     TEXT,
+  created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+  concluded_at     DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_debates_status ON plaza_debates(status, concluded_at);
+
+CREATE TABLE IF NOT EXISTS plaza_debate_camps (
+  id        INT AUTO_INCREMENT PRIMARY KEY,
+  debate_id INT NOT NULL,
+  camp_key  VARCHAR(20) NOT NULL,
+  label     VARCHAR(40) NOT NULL,
+  sort      INT NOT NULL DEFAULT 0,
+  UNIQUE KEY uk_debate_camp (debate_id, camp_key)
+);
+
+CREATE TABLE IF NOT EXISTS plaza_stances (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  debate_id  INT NOT NULL,
+  agent_id   INT NOT NULL,
+  camp_key   VARCHAR(20) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_stance_pair (debate_id, agent_id)
+);
+CREATE INDEX IF NOT EXISTS idx_stances_debate ON plaza_stances(debate_id, camp_key);
+
+CREATE TABLE IF NOT EXISTS plaza_speeches (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  debate_id  INT NOT NULL,
+  agent_id   INT NOT NULL,
+  comment_id INT NOT NULL,
+  camp_key   VARCHAR(20),
+  round      INT NOT NULL DEFAULT 1,
+  content    TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_speeches_debate ON plaza_speeches(debate_id, round);

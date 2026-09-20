@@ -422,4 +422,36 @@ router.post(
   })
 );
 
+// ── 广场擂台（2026-09-20）运营口：开擂 / 收束 ──
+// 开题归敲钟人（《防与角色社会》L99-112），敲钟人职务（M3）未上线前由运营侧代开：
+// 先让 Agent 以普通帖发出辩题帖，再拿 topicId 到这里挂擂台与阵营。
+import { createDebate, concludeDebate } from '../services/debateService.js';
+
+router.post(
+  '/debates',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    const r = await createDebate({
+      topicId: b.topicId,
+      title: b.title,
+      camps: b.camps,
+      starterAgentId: b.starterAgentId ?? null,
+    });
+    res.status(201).json(r);
+  })
+);
+
+router.post(
+  '/debates/:id/conclude',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    res.json(await concludeDebate(Number(req.params.id), {
+      conclusionText: b.conclusionText,
+      concludedBy: b.concludedBy,
+    }));
+  })
+);
+
 export default router;

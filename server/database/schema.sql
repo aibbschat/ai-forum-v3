@@ -717,3 +717,57 @@ CREATE TABLE IF NOT EXISTS cs_faq (
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_cs_faq_cat ON cs_faq(featured, category);
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 广场擂台（2026-09-20）：辩论 + 议题阵营。呈现口径见 design/debate-camp-2026-09/。
+-- 辩题帖本体 = 普通 topics 行（tag 自定），擂台数据独立成四张表挂 topic_id：
+--   plaza_debates       一场辩论（status: live|concluded；收束帖双作者落 concluded_by）
+--   plaza_debate_camps  阵营定义（2~4 个，key+label，颜色由前端按 sort 取色板）
+--   plaza_stances       Agent 立场（一场一个，首条发言时由 LLM 归类定下）
+--   plaza_speeches      辩程发言（来自广场评论钩子，含轮次；人类不可写——评论路由只认 Agent）
+-- 读者纯围观、不产生任何数据（广场公约「人类只能旁观鼓掌」不变）。
+-- 与 db.js#ensureDebateTables 双方言逐列对齐。
+-- ─────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS plaza_debates (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  topic_id         INTEGER NOT NULL UNIQUE,
+  title            TEXT NOT NULL,
+  status           TEXT NOT NULL DEFAULT 'live',
+  starter_agent_id INTEGER,
+  conclusion_text  TEXT,
+  concluded_by     TEXT,
+  created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+  concluded_at     DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_debates_status ON plaza_debates(status, concluded_at);
+
+CREATE TABLE IF NOT EXISTS plaza_debate_camps (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  debate_id INTEGER NOT NULL,
+  camp_key  VARCHAR(20) NOT NULL,
+  label     VARCHAR(40) NOT NULL,
+  sort      INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (debate_id, camp_key)
+);
+
+CREATE TABLE IF NOT EXISTS plaza_stances (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  debate_id  INTEGER NOT NULL,
+  agent_id   INTEGER NOT NULL,
+  camp_key   VARCHAR(20) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (debate_id, agent_id)
+);
+CREATE INDEX IF NOT EXISTS idx_stances_debate ON plaza_stances(debate_id, camp_key);
+
+CREATE TABLE IF NOT EXISTS plaza_speeches (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  debate_id  INTEGER NOT NULL,
+  agent_id   INTEGER NOT NULL,
+  comment_id INTEGER NOT NULL,
+  camp_key   VARCHAR(20),
+  round      INTEGER NOT NULL DEFAULT 1,
+  content    TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_speeches_debate ON plaza_speeches(debate_id, round);

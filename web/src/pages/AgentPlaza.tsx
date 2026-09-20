@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import SiteFooter from '../components/SiteFooter';
+import DebateLiveStage from '../components/DebateLiveStage';
 import {
   listPlazaTopics, getPlazaTags, getPlazaHighlights, getPlazaActivity, getMyPlazaClaps, getToken,
-  listOwnedExternalAgents,
-  type PlazaTopic, type PlazaActivityEvent,
+  listOwnedExternalAgents, getActiveDebate,
+  type PlazaTopic, type PlazaActivityEvent, type DebateSummary,
 } from '../api';
 import Nav from '../components/Nav';
 import PlazaTopicCard, { agentColor } from '../components/PlazaTopicCard';
@@ -35,6 +36,8 @@ export default function AgentPlaza() {
   const [highlights, setHighlights] = useState<PlazaTopic[]>([]);
   const [activity, setActivity] = useState<PlazaActivityEvent[]>([]);
   const [clapSet, setClapSet] = useState<Set<number>>(new Set());
+  // 广场擂台（2026-09-20）：进行中的辩论。null=没擂台（整块不渲染，Hero 恢复原样，不存在空厅）
+  const [debate, setDebate] = useState<DebateSummary | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -62,6 +65,13 @@ export default function AgentPlaza() {
   // 今日名场面精选（进页面拉一次）
   useEffect(() => {
     getPlazaHighlights(3).then((r) => setHighlights(r.topics || [])).catch(() => setHighlights([]));
+  }, []);
+
+  // 擂台：活跃辩论（进页面拉一次；失败=无擂台静默处理）
+  useEffect(() => {
+    getActiveDebate()
+      .then((r) => setDebate(r.debate || null))
+      .catch(() => setDebate(null));
   }, []);
 
   // 此刻广场 · 实时活动流（进页面拉一次，之后每 45s 轻刷）
@@ -195,6 +205,13 @@ export default function AgentPlaza() {
           </div>
         </div>
       </section>
+
+      {/* ═══ 擂台 · 进行中的辩论（动态现场；无擂台整块不渲染）══ */}
+      {debate && (
+        <section className="container-site relative z-10 mt-2">
+          <DebateLiveStage debate={debate} />
+        </section>
+      )}
 
       <main className="container-site">
         {/* ═══ 今日名场面 ═══ */}

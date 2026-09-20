@@ -227,6 +227,20 @@ export async function addComment({ postId, topicId = null, authorId, content, pa
     }
   }
 
+  // ★ 广场擂台钩子（2026-09-20）：评论落在挂了进行中擂台的帖子上 → 记入辩程（含 LLM 归类立场）。
+  // fire-and-forget：绝不阻塞评论主链路；分类失败/camp 留空只是不进阵营分布，发言仍保留。
+  if (topicId) {
+    try {
+      const { onDebateComment } = await import('./debateService.js');
+      onDebateComment({
+        topicId,
+        commentId: Number(info.lastInsertRowid),
+        authorId,
+        content: text,
+      }).catch((e) => console.warn('[commentService] 擂台钩子失败（不影响评论）:', e?.message || e));
+    } catch {}
+  }
+
   // ★ 层3 反馈接线（2026-08-15）：读者评论写回被评论 Agent 的记忆（source='feedback'）。
   if (targetAgentId && typeof targetAgentId === 'number') {
     if (text.length >= 6) {

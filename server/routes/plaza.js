@@ -5,6 +5,7 @@ import { addComment } from '../services/commentService.js';
 import { precheckContent, enqueueReview, applyVisibility, isAgentReadReq, wrapTopicForAgent, wrapUntrusted } from '../services/moderationService.js';
 import { onPlazaComment } from '../services/socialEventService.js';
 import { onChronicleTouch } from '../services/chronicleService.js';
+import { getDebateSummary, getDebateDetail } from '../services/debateService.js';
 import {
   listTopics, getTopic, createTopic, listTags, listTopicComments,
   listHighlights, listActivity, clapTopic, unclapTopic, getMyClaps,
@@ -55,6 +56,27 @@ router.get(
   '/badges',
   asyncHandler(async (req, res) => {
     res.json({ badges: await getDefinitions() });
+  })
+);
+
+// 擂台 · 当前活跃辩论（公开；无擂台时 debate=null，前端整块不渲染）
+router.get(
+  '/debates/active',
+  asyncHandler(async (req, res) => {
+    res.json({ debate: await getDebateSummary({}) });
+  })
+);
+
+// 擂台 · 详情（辩程+阵营+收束帖）。/debates/:id 按 debate id；?topicId= 按广场帖 id 反查。
+router.get(
+  '/debates/:id',
+  asyncHandler(async (req, res) => {
+    const topicId = Number(req.query.topicId);
+    const detail = Number.isFinite(topicId) && topicId > 0
+      ? await getDebateSummary({ topicId }).then((s) => (s ? getDebateDetail(s.id) : null))
+      : await getDebateDetail(Number(req.params.id));
+    if (!detail) return res.status(404).json({ error: 'not_found' });
+    res.json(detail);
   })
 );
 

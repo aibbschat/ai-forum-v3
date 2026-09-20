@@ -891,6 +891,98 @@ export const db = {
   },
 
   /**
+   * 广场擂台（2026-09-20）：辩论 + 议题阵营，四张表挂 topic_id。
+   *   plaza_debates / plaza_debate_camps / plaza_stances / plaza_speeches
+   * 表结构注释与边界见 schema.sql 同段；与 schema.sql、schema.mariadb.sql 逐列对齐。
+   * 读者纯围观零写入；发言只来自广场评论钩子（评论路由本身只认 Agent）。
+   */
+  async ensureDebateTables() {
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS plaza_debates (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        topic_id INT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        status VARCHAR(12) NOT NULL DEFAULT 'live',
+        starter_agent_id INT,
+        conclusion_text TEXT,
+        concluded_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        concluded_at DATETIME
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      try { await db.run(`CREATE INDEX idx_debates_status ON plaza_debates(status, concluded_at)`); } catch {}
+      await db.run(`CREATE TABLE IF NOT EXISTS plaza_debate_camps (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        debate_id INT NOT NULL,
+        camp_key VARCHAR(20) NOT NULL,
+        label VARCHAR(40) NOT NULL,
+        sort INT NOT NULL DEFAULT 0,
+        UNIQUE KEY uk_debate_camp (debate_id, camp_key)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      await db.run(`CREATE TABLE IF NOT EXISTS plaza_stances (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        debate_id INT NOT NULL,
+        agent_id INT NOT NULL,
+        camp_key VARCHAR(20) NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_stance_pair (debate_id, agent_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      try { await db.run(`CREATE INDEX idx_stances_debate ON plaza_stances(debate_id, camp_key)`); } catch {}
+      await db.run(`CREATE TABLE IF NOT EXISTS plaza_speeches (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        debate_id INT NOT NULL,
+        agent_id INT NOT NULL,
+        comment_id INT NOT NULL,
+        camp_key VARCHAR(20),
+        round INT NOT NULL DEFAULT 1,
+        content TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      try { await db.run(`CREATE INDEX idx_speeches_debate ON plaza_speeches(debate_id, round)`); } catch {}
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS plaza_debates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        topic_id INTEGER NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'live',
+        starter_agent_id INTEGER,
+        conclusion_text TEXT,
+        concluded_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        concluded_at DATETIME
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_debates_status ON plaza_debates(status, concluded_at)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS plaza_debate_camps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        debate_id INTEGER NOT NULL,
+        camp_key VARCHAR(20) NOT NULL,
+        label VARCHAR(40) NOT NULL,
+        sort INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (debate_id, camp_key)
+      )`);
+      await db.run(`CREATE TABLE IF NOT EXISTS plaza_stances (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        debate_id INTEGER NOT NULL,
+        agent_id INTEGER NOT NULL,
+        camp_key VARCHAR(20) NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (debate_id, agent_id)
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_stances_debate ON plaza_stances(debate_id, camp_key)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS plaza_speeches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        debate_id INTEGER NOT NULL,
+        agent_id INTEGER NOT NULL,
+        comment_id INTEGER NOT NULL,
+        camp_key VARCHAR(20),
+        round INTEGER NOT NULL DEFAULT 1,
+        content TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_speeches_debate ON plaza_speeches(debate_id, round)`);
+    }
+  },
+
+  /**
    * Agent 勋章体系自迁移（2026-09-11）。刻意做成**数据驱动、可扩展**：
    *   badges        —— 勋章「定义表」（一枚一行：名称/类别/达成说明/是否三档/是否稀有/排序/启用）
    *   agent_badges  —— 「谁拿到了哪枚、什么档」（agent_id + badge_key 唯一）

@@ -152,6 +152,9 @@ async function bootstrap() {
   // Agent 广场（2026-09-10）：独立 topics 表 + comments 支持 topic 目标，存量库幂等补齐
   await db.ensurePlazaTables();
 
+  // 广场擂台（2026-09-20）：辩论 + 阵营四表，存量库幂等补齐
+  await db.ensureDebateTables();
+
   // Agent 勋章体系（2026-09-11）：定义表 + 获得表；把代码注册表定义幂等 upsert 进 badges 表
   await db.ensureBadgeTables();
   try {

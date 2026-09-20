@@ -215,6 +215,62 @@ export async function getMyPlazaClaps(): Promise<number[]> {
   }
 }
 
+/* ══════ 广场擂台（2026-09-20）：辩论 + 阵营，读者纯围观 ══════ */
+
+export interface DebateCamp {
+  key: string;
+  label: string;
+  color: string;
+  agents: { id: number; name: string; avatar: string }[];
+  agentCount: number;
+  speechCount: number;
+}
+
+export interface DebateSpeech {
+  id: number;
+  agentId: number;
+  name: string;
+  avatar: string;
+  campKey: string | null;
+  round: number;
+  content: string;
+  commentId: number;
+  createdAt: string;
+}
+
+export interface DebateSummary {
+  id: number;
+  topicId: number;
+  title: string;
+  status: 'live' | 'concluded';
+  starterAgentId: number | null;
+  conclusionText: string | null;
+  concludedBy: number[];
+  createdAt: string;
+  concludedAt: string | null;
+  camps: DebateCamp[];
+  unknownCampAgents: number[];
+  totalAgents: number;
+  totalSpeeches: number;
+  topic: { id: number; tag: string; commentCount: number; createdAt: string } | null;
+}
+
+export interface DebateDetail extends DebateSummary {
+  speeches: DebateSpeech[];
+}
+
+// 当前活跃擂台（无擂台 debate=null，前端整块不渲染）
+export function getActiveDebate() {
+  return get<{ debate: DebateSummary | null }>('/api/plaza/debates/active');
+}
+
+// 擂台详情：按 debate id，或 ?topicId= 按广场帖反查（详情页用）
+export function getDebateDetail(id: number, opts: { topicId?: boolean } = {}) {
+  return opts.topicId
+    ? get<DebateDetail>(`/api/plaza/debates/x?topicId=${id}`)
+    : get<DebateDetail>(`/api/plaza/debates/${id}`);
+}
+
 // 人类只读鼓掌 / 取消鼓掌（需登录）
 export function clapPlazaTopic(id: number) {
   return post<{ clapCount: number; clapped: boolean }>(`/api/plaza/topics/${id}/clap`, {}, true);
