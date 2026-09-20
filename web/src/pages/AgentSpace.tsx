@@ -14,7 +14,7 @@ import ArticleCard from '../components/ArticleCard';
 import PlazaTopicCard from '../components/PlazaTopicCard';
 import Badge from '../components/Badge';
 import BackToTop from '../components/BackToTop';
-import { timeAgo, avatarOf } from '../lib';
+import { timeAgo, avatarOf, fileToAvatarDataUrl } from '../lib';
 import { BlockSkeleton, ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 
 /**
@@ -58,7 +58,7 @@ export default function AgentSpace() {
   const [nameDraft, setNameDraft] = useState('');
   const [savingName, setSavingName] = useState(false);
   const [nameErr, setNameErr] = useState('');
-  // 主人上传头像（2026-09-19）：点身份卡头像即选图，本地缩到 256² 再传。
+  // 主人上传头像（2026-09-19）：点身份卡头像即选图，本地缩到 256² 再传（见 lib.fileToAvatarDataUrl）。
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarErr, setAvatarErr] = useState('');
@@ -175,32 +175,6 @@ export default function AgentSpace() {
       setSavingName(false);
     }
   };
-
-  // 选图 → 中心裁正方形 → canvas 缩到 256² → webp data URL（浏览器不支持 webp 时自动回落 png）。
-  const fileToAvatarDataUrl = (file: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onerror = () => reject(new Error('读取失败'));
-      reader.onload = () => {
-        const img = new Image();
-        img.onerror = () => reject(new Error('图片无法解码'));
-        img.onload = () => {
-          const SIZE = 256;
-          const side = Math.min(img.width, img.height);
-          const sx = (img.width - side) / 2;
-          const sy = (img.height - side) / 2;
-          const canvas = document.createElement('canvas');
-          canvas.width = SIZE;
-          canvas.height = SIZE;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) { reject(new Error('浏览器不支持图片处理')); return; }
-          ctx.drawImage(img, sx, sy, side, side, 0, 0, SIZE, SIZE);
-          resolve(canvas.toDataURL('image/webp', 0.86));
-        };
-        img.src = reader.result as string;
-      };
-      reader.readAsDataURL(file);
-    });
 
   const onPickAvatar = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

@@ -24,6 +24,37 @@ export function avatarOf(url?: string | null): string {
   return url && String(url).trim() ? url : DEFAULT_AVATAR;
 }
 
+// 头像上传前本地缩放：选中的图片文件 → 中心裁正方形 → canvas 缩到 size² → webp data URL
+// （浏览器不支持 webp 编码时 toDataURL 自动回落 png）。人类与 Agent 头像上传共用，
+// 保证传给后端的 data URI 只有几十 KB，不再出现「原图过大→入库被截→显示不出来」。
+export function fileToAvatarDataUrl(file: File, size = 256): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('读取失败'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('图片无法解码'));
+      img.onload = () => {
+        const side = Math.min(img.width, img.height);
+        const sx = (img.width - side) / 2;
+        const sy = (img.height - side) / 2;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('浏览器不支持图片处理'));
+          return;
+        }
+        ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+        resolve(canvas.toDataURL('image/webp', 0.86));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 // 相对时间
 export function timeAgo(iso?: string): string {
   if (!iso) return '';

@@ -26,7 +26,7 @@ import {
 import Nav from '../components/Nav';
 import ArticleCard from '../components/ArticleCard';
 import CompanionManager from '../components/CompanionManager';
-import { categoryColor, avatarOf } from '../lib';
+import { categoryColor, avatarOf, fileToAvatarDataUrl } from '../lib';
 import { BlockSkeleton, ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 import VerifiedBadge from '../components/VerifiedBadge';
 import BackToTop from '../components/BackToTop';
@@ -132,15 +132,30 @@ export default function UserCenter() {
     navigate('/');
   };
 
-  const onPickAvatar = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onPickAvatar = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     e.target.value = ''; // 允许重复选择同一文件
     if (!f) return;
     setUploadError('');
     setUploadSuccess(false);
-    const reader = new FileReader();
-    reader.onload = () => uploadAvatar(String(reader.result));
-    reader.readAsDataURL(f);
+    if (!/^image\//.test(f.type)) {
+      setUploadError('请选择图片文件');
+      return;
+    }
+    if (f.size > 8 * 1024 * 1024) {
+      setUploadError('原图过大（>8MB），请先压缩');
+      return;
+    }
+    setUploading(true);
+    setUploadProgress(0);
+    try {
+      // 先本地缩到 256²，避免大图整条 base64 上传后超限被截（历史 bug）
+      const dataUrl = await fileToAvatarDataUrl(f);
+      uploadAvatar(dataUrl);
+    } catch (err) {
+      setUploading(false);
+      setUploadError((err as Error).message || '图片处理失败');
+    }
   };
 
   // 用 XHR 上传，以便拿到真实的上传进度（fetch 无法监听上传进度）

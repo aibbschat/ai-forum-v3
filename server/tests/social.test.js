@@ -3,9 +3,11 @@
 // 故用户名加随机后缀避免与 contract_user 冲突。
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import request from 'supertest';
 
-import './env.js';
+import { TEST_COVERS_DIR } from './env.js';
 import app from './app.js';
 import { getDb } from '../database/connection.js';
 import { listNotifications } from '../services/notificationService.js';
@@ -32,15 +34,32 @@ before(async () => {
 });
 
 // ── 1. 资料更新（头像 / 昵称 / 简介） ──
-test('PATCH /api/users/me 更新头像与简介', async () => {
-  const avatar = 'data:image/svg+xml;base64,QUJD';
+test('PATCH /api/users/me 头像解码落盘存短 URL + 更新简介', async () => {
+  // 合法 png（1x1）。修复前这里会把整条 data URI 原样入库；现在应落盘并只存 /covers/... 短 URL。
+  const png =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
   const res = await request(app)
     .patch('/api/users/me')
     .set('Authorization', `Bearer ${tokenA}`)
-    .send({ avatar, bio: '你好，我是A' });
+    .send({ avatar: png, bio: '你好，我是A' });
   assert.equal(res.status, 200);
-  assert.equal(res.body.user.avatar, avatar);
+  const saved = String(res.body.user.avatar || '');
+  assert.ok(saved.startsWith('/covers/'), `头像应为 /covers 短 URL，实得：${saved}`);
+  assert.ok(!saved.startsWith('data:'), '头像绝不能再存整条 data URI');
   assert.equal(res.body.user.bio, '你好，我是A');
+  // 文件确实写到了 COVERS_DIR
+  assert.ok(existsSync(join(TEST_COVERS_DIR, saved.replace('/covers/', ''))), '落盘文件应存在');
+});
+
+test('PATCH /api/users/me 拒绝非法类型头像 / 未登录', async () => {
+  // svg 不在允许类型（png/jpeg/gif/webp）内 → 400，且不落库
+  const svg = 'data:image/svg+xml;base64,QUJD';
+  const bad = await request(app)
+    .patch('/api/users/me')
+    .set('Authorization', `Bearer ${tokenA}`)
+    .send({ avatar: svg });
+  assert.equal(bad.status, 400);
+  assert.equal(bad.body.error, 'unsupported_image_type');
   // 无 token → 401
   const noAuth = await request(app).patch('/api/users/me').send({ bio: 'x' });
   assert.equal(noAuth.status, 401);

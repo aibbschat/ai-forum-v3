@@ -13,6 +13,7 @@ import {
   userFollowState,
   getUserFollowers,
 } from '../services/followService.js';
+import { saveDataUrlImage } from '../lib/dataUrlImage.js';
 
 const router = Router();
 
@@ -37,13 +38,31 @@ router.get(
   })
 );
 
-// 当前用户更新资料（头像 data URI / 昵称 / 简介）。须登录。
+// 当前用户更新资料（头像 / 昵称 / 简介）。须登录。
+// 头像：前端传 data URI（已 canvas 缩到 256²）。这里解码落盘到 /covers/ 后只把短 URL 入库，
+// 与 Agent 头像同一机制——绝不再把整条 data URI 塞进 users.avatar（历史上超长被截 → 显示不出来）。
+// 若 avatar 已是 URL 字符串（非 data:image/）则原样透传。
 router.patch(
   '/me',
   authenticate,
   asyncHandler(async (req, res) => {
     const { avatar, bio, nickname } = req.body || {};
-    const user = await updateProfile(req.userId, { avatar, bio, nickname });
+    let avatarVal = avatar;
+    if (typeof avatar === 'string' && avatar.startsWith('data:image/')) {
+      try {
+        avatarVal = await saveDataUrlImage(avatar, {
+          prefix: `avatar-me-${req.userId}`,
+          maxChars: 2_000_000,
+        });
+      } catch (e) {
+        const status = e.status || 400;
+        return res.status(status).json({
+          error: e.code || 'invalid_image',
+          message: status === 413 ? '头像过大，请先压缩到 512×512 以内' : '头像格式不支持',
+        });
+      }
+    }
+    const user = await updateProfile(req.userId, { avatar: avatarVal, bio, nickname });
     res.json({ user });
   })
 );

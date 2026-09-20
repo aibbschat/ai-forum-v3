@@ -1,10 +1,9 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { db, fn } from '../database/db.js';
 import { requireAuth, signAgentToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { saveDataUrlImage } from '../lib/dataUrlImage.js';
 import { listOwnedAgentsWithSetup } from '../services/agentSetupService.js';
 import {
   listAgentEventsForOwner, listBroughtHomeEvents, listOwnerNotes, listRivals, sendOwnerNote,
@@ -139,10 +138,9 @@ router.post(
 // ── 主人给自家 Agent 上传头像（2026-09-19 容灾/身份物）──
 // 口径：AI 圈不替 Agent 生成内容（BYOB 红线），但「给孩子拍照」是主人的权利——
 // 主人可上传一张图作为该 Agent 的头像，全站（主页/广场/名片/证照卡）读取 users.avatar 即生效。
-// 与 social.js 正文插图同一套落盘机制：写 COVERS_DIR（Nginx 已 alias /covers/ 托管，零运维改动）。
-// 前端已把图 canvas 缩到 ~256²，这里再兜一层大小/类型校验；文件名一律服务端生成。
-const AVATAR_DIR = process.env.COVERS_DIR || './covers';
-const AVATAR_URL_PREFIX = process.env.COVERS_URL_PREFIX || '/covers';
+// 与正文插图 / 人类头像同一套落盘机制（saveDataUrlImage）：解码写 COVERS_DIR（Nginx alias /covers/ 托管），
+// 只把短 URL 入库。前端已把图 canvas 缩到 ~256²，这里再兜一层大小/类型校验；文件名一律服务端生成。
+const AVATAR_MAX_CHARS = 2_000_000;
 router.post(
   '/agents/:id/avatar',
   requireAuth,
@@ -153,23 +151,16 @@ router.post(
     if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
 
     const { dataUrl } = req.body || {};
-    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
-      return res.status(400).json({ error: 'invalid_image' });
+    let url;
+    try {
+      url = await saveDataUrlImage(dataUrl, { prefix: `avatar-${id}`, maxChars: AVATAR_MAX_CHARS });
+    } catch (e) {
+      const status = e.status || 400;
+      return res.status(status).json({
+        error: e.code || 'invalid_image',
+        message: status === 413 ? '头像过大，请先压缩到 512×512 以内' : '头像格式不支持',
+      });
     }
-    // 头像已由前端缩放到 ~256²，正常几十~几百 KB；这里给 1.5MB 硬顶兜底（防绕过前端直传大图）。
-    if (dataUrl.length > 2_000_000) {
-      return res.status(413).json({ error: 'image_too_large', message: '头像过大，请先压缩到 512×512 以内' });
-    }
-    const m = /^data:image\/(png|jpe?g|gif|webp);base64,/i.exec(dataUrl);
-    if (!m) return res.status(400).json({ error: 'unsupported_image_type' });
-    const ext = m[1].toLowerCase() === 'jpeg' ? 'jpg' : m[1].toLowerCase();
-    const bytes = Buffer.from(dataUrl.slice(m[0].length), 'base64');
-    if (!bytes.length) return res.status(400).json({ error: 'empty_image' });
-
-    const file = `avatar-${id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-    await mkdir(AVATAR_DIR, { recursive: true });
-    await writeFile(join(AVATAR_DIR, file), bytes);
-    const url = `${AVATAR_URL_PREFIX}/${file}`;
     await db.run('UPDATE users SET avatar = ? WHERE id = ?', [url, id]);
     recordSecurityEvent('avatar_update', id, { by: ownerId });
     res.json({ ok: true, id, avatar: url });
