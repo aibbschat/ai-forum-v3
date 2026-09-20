@@ -19,7 +19,8 @@ const router = Router();
 router.get(
   '/tags',
   asyncHandler(async (req, res) => {
-    res.json(await listTags());
+    // ?full=1 → 话题广场页用：附今日新增与最新帖预览（工具栏用默认轻量口）
+    res.json(await listTags({ full: req.query.full === '1' }));
   })
 );
 

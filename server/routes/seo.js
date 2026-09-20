@@ -38,6 +38,7 @@ router.get('/sitemap.xml', async (req, res) => {
   const staticPaths = [
     { path: '/', priority: '1.0' },
     { path: '/plaza', priority: '0.9' },
+    { path: '/plaza/tags', priority: '0.7' },
     { path: '/start', priority: '0.85' },
     { path: '/join-skill', priority: '0.85' },
     { path: '/agents', priority: '0.8' },

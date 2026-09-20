@@ -157,21 +157,61 @@ export async function getTopic(id) {
 }
 
 // 话题榜：预设话题 + 实际热度（发过帖的话题按条数降序）
-export async function listTags() {
+export async function listTags({ full = false } = {}) {
+  const visFilter = `status = 1 AND COALESCE(visibility, 'public') NOT IN ('folded', 'removed')`;
   let hot = [];
   try {
     hot = await db.all(
-      `SELECT tag, COUNT(*) AS c FROM topics WHERE status = 1 AND COALESCE(visibility, 'public') NOT IN ('folded', 'removed') GROUP BY tag ORDER BY c DESC, tag ASC LIMIT 30`
+      `SELECT tag, COUNT(*) AS c FROM topics WHERE ${visFilter} GROUP BY tag ORDER BY c DESC, tag ASC LIMIT ${full ? 200 : 30}`
     );
   } catch {
     hot = [];
   }
   const hotMap = new Map(hot.map((r) => [r.tag, Number(r.c) || 0]));
-  return {
+  const base = {
     preset: PLAZA_TAGS,
     hot: hot.map((r) => ({ tag: r.tag, count: Number(r.c) || 0 })),
     // 预设话题连同热度一起给前端（没发过帖的显示 0，保证 chip 不空）
     presetWithCount: PLAZA_TAGS.map((t) => ({ tag: t, count: hotMap.get(t) || 0 })),
+  };
+  if (!full) return base;
+
+  // 话题广场页（2026-09-20）：每 tag 附今日新增 + 最新一条公开帖预览（让热议榜是"活的"）
+  const todayPred = isMaria
+    ? `DATE(created_at) = CURDATE()`
+    : `date(created_at) = date('now', 'localtime')`;
+  let counts = [];
+  try {
+    counts = await db.all(
+      `SELECT tag, COUNT(*) AS c, SUM(CASE WHEN ${todayPred} THEN 1 ELSE 0 END) AS tc
+         FROM topics WHERE ${visFilter} GROUP BY tag ORDER BY c DESC, tag ASC LIMIT 200`
+    );
+  } catch {
+    counts = hot.map((r) => ({ ...r, tc: 0 }));
+  }
+  let latestMap = new Map();
+  try {
+    const latestRows = await db.all(
+      `SELECT t.id, t.tag, t.content, t.created_at, u.nickname AS author, u.avatar AS avatar
+         FROM topics t
+         JOIN (SELECT tag, MAX(id) AS mid FROM topics WHERE ${visFilter} GROUP BY tag) m ON m.mid = t.id
+         JOIN users u ON u.id = t.agent_id`
+    );
+    latestMap = new Map(
+      latestRows.map((r) => [
+        r.tag,
+        { id: r.id, author: r.author, avatar: r.avatar, snippet: String(r.content || '').slice(0, 60), createdAt: r.created_at },
+      ])
+    );
+  } catch { /* latest 失败不影响计数榜 */ }
+  return {
+    ...base,
+    hot: counts.map((r) => ({
+      tag: r.tag,
+      count: Number(r.c) || 0,
+      todayCount: Number(r.tc) || 0,
+      latest: latestMap.get(r.tag) || null,
+    })),
   };
 }
 

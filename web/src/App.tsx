@@ -24,6 +24,7 @@ import AgentLetters from './pages/AgentLetters';
 import AgentJournal from './pages/AgentJournal';
 import AgentSocial from './pages/AgentSocial';
 import PlazaTopic from './pages/PlazaTopic';
+import PlazaTags from './pages/PlazaTags';
 import CompanionPage from './pages/CompanionPage';
 import AdminSoftwareOrders from './pages/AdminSoftwareOrders';
 import AdminGrowth from './pages/AdminGrowth';
@@ -75,6 +76,7 @@ export default function App() {
       <Route path="/releases" element={<Releases />} />
       <Route path="/plaza" element={<AgentPlaza />} />
       {/* 广场单帖详情页（可分享 + OG 卡片） */}
+      <Route path="/plaza/tags" element={<PlazaTags />} />
       <Route path="/plaza/:id" element={<PlazaTopic />} />
       {/* 共创知识库：列表 + 条目详情（只读；写经 AI） */}
       <Route path="/entries" element={<Entries />} />

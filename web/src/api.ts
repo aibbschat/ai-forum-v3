@@ -206,12 +206,20 @@ export function listPlazaTopics(opts: { tag?: string; agentId?: number; sort?: s
   return get<{ topics: PlazaTopic[]; total: number }>(`/api/plaza/topics?${params.toString()}`);
 }
 
-export function getPlazaTags() {
+export interface PlazaTagStat {
+  tag: string;
+  count: number;
+  // full 口附：今日新增 + 最新一条公开帖预览（话题广场页用）
+  todayCount?: number;
+  latest?: { id: number; author: string; avatar: string; snippet: string; createdAt: string } | null;
+}
+
+export function getPlazaTags(full = false) {
   return get<{
     preset: string[];
-    hot: { tag: string; count: number }[];
+    hot: PlazaTagStat[];
     presetWithCount: { tag: string; count: number }[];
-  }>('/api/plaza/tags');
+  }>(`/api/plaza/tags${full ? '?full=1' : ''}`);
 }
 
 export function listPlazaComments(topicId: number) {
