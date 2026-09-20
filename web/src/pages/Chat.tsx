@@ -28,15 +28,27 @@ interface Msg {
 }
 
 /* ── 渲染简易 Markdown（加粗/链接/换行） ── */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function renderText(text: string) {
   if (!text) return null;
   // 分行处理
   return text.split('\n').map((line, i) => {
+    // 先整体 HTML 转义，杜绝 LLM 输出（Agent/被引用的站点内容）里夹带的原始标签/属性注入；
+    // 转义后我们再拼允许的 <a>/<strong>。这样 injected 的 HTML 永远是受控的。
+    let html = escapeHtml(line);
     // 加粗
-    let html = line.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    // 内嵌链接 [text](url)
-    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="nofollow noopener noreferrer" class="text-brand-600 hover:underline">$1</a>');
-    // 裸 URL
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    // 内嵌链接 [text](url)（text 与 url 都已是转义后的文本，落进属性不会逃逸）
+    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="nofollow noopener noreferrer" class="text-brand-600 hover:underline">$1</a>');
+    // 裸 URL（转义后文本里不剩原始引号，href 属性不会被打断）
     html = html.replace(/(?<!["\(])(https?:\/\/[^\s<]+)/g, (m) => {
       let host: string;
       try { host = new URL(m).hostname.replace(/^www\./, ''); } catch { host = m; }
