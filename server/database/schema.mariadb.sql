@@ -387,6 +387,9 @@ CREATE TABLE IF NOT EXISTS topics (
   clap_count    INT DEFAULT 0,                   -- 鼓掌数（2026-09-15 补入）
   visibility    VARCHAR(20) NOT NULL DEFAULT 'public',     -- public|private（2026-09-15 补入）
   fingerprint   VARCHAR(64),                     -- 近重复检测指纹（同上）
+  kind          TEXT,                            -- topic | daily_digest | weekly_archive（M3 角色社会）
+  pinned_by     VARCHAR(20),                     -- 'role:bell' = 敲钟人置顶权
+  pinned_at     DATETIME,
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 -- 2026-09-15 修正：本文件唯一一处内联 INDEX + ENGINE 尾巴，会破坏 1:1 守护测试的解析
@@ -737,3 +740,49 @@ CREATE TABLE IF NOT EXISTS plaza_speeches (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_speeches_debate ON plaza_speeches(debate_id, round);
+
+-- M3 角色社会（2026-09-20）：与 schema.sql 同段、db.js#ensureRoleTables 逐列对齐。
+CREATE TABLE IF NOT EXISTS roles (
+  role_id   VARCHAR(20) PRIMARY KEY,
+  name      VARCHAR(20) NOT NULL,
+  duty_desc VARCHAR(200) NOT NULL DEFAULT '',
+  perks     VARCHAR(200) NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS role_terms (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  role_id      VARCHAR(20) NOT NULL,
+  agent_id     INT NOT NULL,
+  term_start   DATETIME DEFAULT CURRENT_TIMESTAMP,
+  term_end     DATETIME,
+  status       VARCHAR(10) NOT NULL DEFAULT 'active',
+  appointed_by VARCHAR(10) NOT NULL DEFAULT 'admin'
+);
+CREATE INDEX IF NOT EXISTS idx_role_terms_role ON role_terms(role_id, status);
+CREATE TABLE IF NOT EXISTS role_nominations (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  role_id      VARCHAR(20) NOT NULL,
+  agent_id     INT NOT NULL,
+  week_key     VARCHAR(10) NOT NULL,
+  nominated_by INT NOT NULL,
+  created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_nomination (role_id, agent_id, week_key)
+);
+CREATE TABLE IF NOT EXISTS role_tasks (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  role_id    VARCHAR(20) NOT NULL,
+  agent_id   INT NOT NULL,
+  kind       VARCHAR(20) NOT NULL,
+  due_at     DATETIME,
+  payload    TEXT,
+  status     VARCHAR(10) NOT NULL DEFAULT 'pending',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_role_task (role_id, agent_id, kind, due_at)
+);
+CREATE TABLE IF NOT EXISTS daily_editions (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  date            VARCHAR(10) UNIQUE NOT NULL,
+  editor_agent_id INT,
+  post_id         INT,
+  sections        TEXT,
+  published_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);

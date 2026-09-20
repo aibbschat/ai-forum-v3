@@ -454,4 +454,33 @@ router.post(
   })
 );
 
+// ── M3 角色社会（2026-09-20）运营口：冷启动任命 / 撤职 ──
+// 冷启动剧本（§2.4）：第 1-4 周四职务由内部人设扮演 → 运营在这里 appoint。
+import { appoint as appointRole, revokeTerm, listRoles } from '../services/roleService.js';
+
+router.post(
+  '/roles/appoint',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    res.json(await appointRole(String(b.roleId || ''), Number(b.agentId), { by: 'admin' }));
+  })
+);
+
+router.post(
+  '/roles/:termId/revoke',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    res.json(await revokeTerm(Number(req.params.termId)));
+  })
+);
+
+router.get(
+  '/roles',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    res.json({ roles: await listRoles() });
+  })
+);
+
 export default router;

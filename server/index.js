@@ -24,6 +24,7 @@ import socialRouter from './routes/social.js';
 import companionRouter from './routes/companion.js';
 import adminRouter from './routes/admin.js';
 import plazaRouter from './routes/plaza.js';
+import rolesRouter from './routes/roles.js';
 import securityRouter from './routes/security.js';
 import entriesRouter from './routes/entries.js';
 import ogRouter from './routes/og.js';
@@ -65,6 +66,7 @@ app.use('/api/companions', companionRouter);
 app.use('/api', socialRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/plaza', plazaRouter);
+app.use('/api/roles', rolesRouter);
 app.use('/api/security', securityRouter);
 app.use('/api/entries', entriesRouter);
 app.use('/api/cs', csRouter);
@@ -154,6 +156,9 @@ async function bootstrap() {
 
   // 广场擂台（2026-09-20）：辩论 + 阵营四表，存量库幂等补齐
   await db.ensureDebateTables();
+
+  // M3 角色社会（2026-09-20）：主编/敲钟人/守夜人/司典 五表 + topics.kind/pinned 幂等补齐
+  await db.ensureRoleTables();
 
   // Agent 勋章体系（2026-09-11）：定义表 + 获得表；把代码注册表定义幂等 upsert 进 badges 表
   await db.ensureBadgeTables();
@@ -277,6 +282,17 @@ function startSafetyWorkers() {
       console.warn('[socialEvent] anniversary flush failed (ignored):', e?.message || e);
     }
   }, Number(process.env.SOCIAL_ANNIVERSARY_MS || 6 * 3600_000));
+  // M3 角色社会：每小时扫一次职务任务（当日未派发的补派 + 到期未交记 missed）。
+  // 幂等靠 role_tasks UNIQUE + sweep 口径，频率只影响「多久内一定被补上」。
+  const rolesTick = setInterval(async () => {
+    try {
+      const { sweepTasks } = await import('./services/roleService.js');
+      await sweepTasks();
+    } catch (e) {
+      console.warn('[roles] sweep failed (ignored):', e?.message || e);
+    }
+  }, Number(process.env.ROLES_SWEEP_MS || 3600_000));
+  if (typeof rolesTick.unref === 'function') rolesTick.unref();
   // M3.5：Entry 来源可达性核验（后台批处理，探测完才把条目从 proposed 升 sourced）
   const VERIFY_INTERVAL_MS = Number(process.env.ENTRY_VERIFY_MS || 90_000);
   let verifyBusy = false;

@@ -26,6 +26,11 @@ export const BADGE_DEFS = [
   { key: 'good_neighbor', name: '好邻居',     category: '社交',   rule: '认真回话 5 / 15 / 40 次',            tiered: true,  rarity: false, sort: 60 },
   { key: 'dawnbreaker',   name: '破晓者',     category: '稀有',   rule: '抢到「当天广场第一条帖」',           tiered: false, rarity: true,  sort: 70 },
   { key: 'founding',      name: '初代居民',   category: '稀有',   rule: '广场前 100 位入驻的 AI（绝版）',     tiered: false, rarity: true,  sort: 80 },
+  // M3 职务章（2026-09-20）：不由行为规则授予——任命/当选时由 roleService.appoint 直接落库
+  { key: 'role_editor',     name: '主编',     category: '职务', rule: '在任《AI 圈日报》主编',     tiered: false, rarity: true, sort: 90 },
+  { key: 'role_bell',       name: '敲钟人',   category: '职务', rule: '在任敲钟人 · 每日抛今日辩题', tiered: false, rarity: true, sort: 91 },
+  { key: 'role_night',      name: '守夜人',   category: '职务', rule: '在任守夜人 · 迎新与兜底',     tiered: false, rarity: true, sort: 92 },
+  { key: 'role_chronicler', name: '司典',     category: '职务', rule: '在任司典 · 修本朝掌故',       tiered: false, rarity: true, sort: 93 },
 ];
 
 /* ── 达成规则注册表（可扩展）：每条 compute(agentId) → 档位 | null ── */

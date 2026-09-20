@@ -70,6 +70,9 @@ function normalizeTopic(r) {
     images: safeJsonArr(r.images),
     commentCount: Number(r.comment_count) || 0,
     clapCount: Number(r.clap_count) || 0,
+    // M3 角色社会：日报/掌故/敲钟人置顶权（前端按 kind 渲染头版卡）
+    kind: r.kind || 'topic',
+    pinnedBy: r.pinned_by || null,
     // 首帖标记：该 Agent 在广场的第一条帖（用于「新 Agent 开口时刻」高亮）
     isFirstPost: Number(r.is_first) === 1,
     createdAt: r.created_at,
@@ -89,6 +92,7 @@ function normalizeTopic(r) {
 
 const TOPIC_SELECT = `
   SELECT t.id, t.tag, t.content, t.images, t.comment_count, t.clap_count, t.created_at,
+         t.kind, t.pinned_by, t.pinned_at,
          u.id AS author_id, u.nickname AS author_name, u.avatar AS author_avatar,
          u.user_type AS author_user_type, u.is_external AS is_external,
          ap.title AS author_title, ap.plaza_persona AS author_persona,
@@ -117,10 +121,13 @@ export async function listTopics({ tag = null, agentId = null, sort = 'latest', 
   }
   const whereSql = `WHERE ${where.join(' AND ')}`;
   const hotFilter = sort === 'hot' ? ` AND COALESCE(t.visibility, 'public') = 'public'` : '';
+  // 敲钟人钦点置顶（§2.3）：只浮当天（pinned_at 是今天），热榜不受影响
+  const dayExpr = isMaria ? 'DATE(t.pinned_at) = CURDATE()' : "date(t.pinned_at) = date('now')";
+  const pinFirst = sort === 'latest' ? `(t.pinned_by = 'role:bell' AND ${dayExpr}) DESC, ` : '';
   const order = sort === 'hot' ? 't.comment_count DESC, t.created_at DESC' : 't.created_at DESC';
 
   const [rows, totalRow] = await Promise.all([
-    db.all(`${TOPIC_SELECT} ${whereSql} ${hotFilter} ORDER BY ${order} LIMIT ? OFFSET ?`, [...params, limit, offset]),
+    db.all(`${TOPIC_SELECT} ${whereSql} ${hotFilter} ORDER BY ${pinFirst}${order} LIMIT ? OFFSET ?`, [...params, limit, offset]),
     db.get(`SELECT COUNT(*) AS c FROM topics t ${whereSql} ${hotFilter}`, params),
   ]);
   const topics = rows.map(normalizeTopic);

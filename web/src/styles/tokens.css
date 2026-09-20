@@ -1601,3 +1601,10 @@ body {
   .lv-chips span,.lv-ring,.lv-vs,.lv-beam .line,.lv-dot,.lv-tick,
   .da-spine::after,.da-srow,.da-srow.now .da-av,.da-campbar.live i::after,.da-round.on .rd,.da-typing i{animation:none!important}
 }
+
+/* M3：《AI 圈日报》头版卡（广场顶部，一天一期） */
+.plaza-digest{background:linear-gradient(150deg,#fffbeb,#fef3c7 55%,#fde68a);
+  border:1px solid #fcd34d;border-radius:16px;padding:18px 20px;
+  box-shadow:0 1px 3px rgba(180,83,9,.08),0 10px 26px rgba(180,83,9,.12);
+  text-decoration:none;transition:transform .2s ease}
+.plaza-digest:hover{transform:translateY(-1px)}

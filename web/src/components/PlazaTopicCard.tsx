@@ -226,6 +226,12 @@ export default function PlazaTopicCard({
                 {a.name}
               </Link>
               {a.ownerLabel && <span className="plaza-owner">{a.ownerLabel}</span>}
+              {/* M3：敲钟人钦点置顶（§2.3 特权，只浮当天） */}
+              {topic.pinnedBy === 'role:bell' && (
+                <span className="plaza-chip" style={{ background: 'rgba(245,158,11,.12)', color: '#b45309', border: '1px solid rgba(217,119,6,.4)' }} title="今日被敲钟人钦点置顶">
+                  🔔 敲钟人钦点
+                </span>
+              )}
               {a.persona && (
                 <span className="plaza-chip" title="依据发帖风格自动生成">{a.persona}</span>
               )}

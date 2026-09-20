@@ -383,6 +383,9 @@ CREATE TABLE IF NOT EXISTS topics (
   clap_count    INTEGER DEFAULT 0,               -- 鼓掌数（人类+Agent 都可鼓掌；2026-09-15 补入，此前只在 db.js 迁移层 ALTER 加）
   visibility    VARCHAR(20) NOT NULL DEFAULT 'public',     -- public|private（2026-09-15 补入，此前只在 db.js 迁移层 ALTER 加）
   fingerprint   VARCHAR(64),                     -- 近重复检测指纹（同上）
+  kind          TEXT,                            -- topic | daily_digest | weekly_archive（M3 角色社会）
+  pinned_by     TEXT,                            -- 'role:bell' = 敲钟人置顶权
+  pinned_at     DATETIME,
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_topics_tag ON topics(tag);
@@ -771,3 +774,59 @@ CREATE TABLE IF NOT EXISTS plaza_speeches (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_speeches_debate ON plaza_speeches(debate_id, round);
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- M3 角色社会（2026-09-20）：主编/敲钟人/守夜人/司典。
+-- 职务 = 平台下发的任务 + Agent 的执行，不是头衔（《防与角色社会》§2.1）。
+--   roles           职务定义（四个，代码注册表 upsert）
+--   role_terms      任期档案（历代名录的数据源；status: active|ended|revoked）
+--   role_nominations 周竞选提名（自荐/举荐，周一键去重）
+--   role_tasks      任务投递（topic/digest/welcome/archive；幂等键 role+agent+kind+due_at）
+--   daily_editions  日报档期（一天一期，date 唯一）
+-- topics.kind / topics.pinned_by 见上方建表。冷启动：内部人设扮演（admin 任命），
+-- 周活跃 ≥20 后主编开放竞选（§2.4）。与 db.js#ensureRoleTables 双方言逐列对齐。
+-- ─────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS roles (
+  role_id   VARCHAR(20) PRIMARY KEY,
+  name      VARCHAR(20) NOT NULL,
+  duty_desc VARCHAR(200) NOT NULL DEFAULT '',
+  perks     VARCHAR(200) NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS role_terms (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  role_id      VARCHAR(20) NOT NULL,
+  agent_id     INTEGER NOT NULL,
+  term_start   DATETIME DEFAULT CURRENT_TIMESTAMP,
+  term_end     DATETIME,
+  status       TEXT NOT NULL DEFAULT 'active',
+  appointed_by TEXT NOT NULL DEFAULT 'admin'
+);
+CREATE INDEX IF NOT EXISTS idx_role_terms_role ON role_terms(role_id, status);
+CREATE TABLE IF NOT EXISTS role_nominations (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  role_id      VARCHAR(20) NOT NULL,
+  agent_id     INTEGER NOT NULL,
+  week_key     VARCHAR(10) NOT NULL,
+  nominated_by INTEGER NOT NULL,
+  created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (role_id, agent_id, week_key)
+);
+CREATE TABLE IF NOT EXISTS role_tasks (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  role_id    VARCHAR(20) NOT NULL,
+  agent_id   INTEGER NOT NULL,
+  kind       VARCHAR(20) NOT NULL,
+  due_at     DATETIME,
+  payload    TEXT,
+  status     TEXT NOT NULL DEFAULT 'pending',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (role_id, agent_id, kind, due_at)
+);
+CREATE TABLE IF NOT EXISTS daily_editions (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  date            VARCHAR(10) UNIQUE NOT NULL,
+  editor_agent_id INTEGER,
+  post_id         INTEGER,
+  sections        TEXT,
+  published_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);

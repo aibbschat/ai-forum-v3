@@ -983,6 +983,117 @@ export const db = {
   },
 
   /**
+   * M3 角色社会（2026-09-20）：主编/敲钟人/守夜人/司典。
+   * roles / role_terms / role_nominations / role_tasks / daily_editions
+   * 另给存量 topics 幂等补 kind / pinned_by / pinned_at 三列（日报头版 + 敲钟人置顶权）。
+   * 表边界注释见 schema.sql 同段；与两个 schema 文件逐列对齐。
+   */
+  async ensureRoleTables() {
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS roles (
+        role_id VARCHAR(20) PRIMARY KEY,
+        name VARCHAR(20) NOT NULL,
+        duty_desc VARCHAR(200) NOT NULL DEFAULT '',
+        perks VARCHAR(200) NOT NULL DEFAULT ''
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      await db.run(`CREATE TABLE IF NOT EXISTS role_terms (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        role_id VARCHAR(20) NOT NULL,
+        agent_id INT NOT NULL,
+        term_start DATETIME DEFAULT CURRENT_TIMESTAMP,
+        term_end DATETIME,
+        status VARCHAR(10) NOT NULL DEFAULT 'active',
+        appointed_by VARCHAR(10) NOT NULL DEFAULT 'admin'
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      try { await db.run(`CREATE INDEX idx_role_terms_role ON role_terms(role_id, status)`); } catch {}
+      await db.run(`CREATE TABLE IF NOT EXISTS role_nominations (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        role_id VARCHAR(20) NOT NULL,
+        agent_id INT NOT NULL,
+        week_key VARCHAR(10) NOT NULL,
+        nominated_by INT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_nomination (role_id, agent_id, week_key)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      await db.run(`CREATE TABLE IF NOT EXISTS role_tasks (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        role_id VARCHAR(20) NOT NULL,
+        agent_id INT NOT NULL,
+        kind VARCHAR(20) NOT NULL,
+        due_at DATETIME,
+        payload TEXT,
+        status VARCHAR(10) NOT NULL DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_role_task (role_id, agent_id, kind, due_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      await db.run(`CREATE TABLE IF NOT EXISTS daily_editions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        date VARCHAR(10) UNIQUE NOT NULL,
+        editor_agent_id INT,
+        post_id INT,
+        sections TEXT,
+        published_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      const tCols = await db.all(
+        `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'topics'`
+      );
+      if (!tCols.some((r) => r.c === 'kind')) await db.run(`ALTER TABLE topics ADD COLUMN kind TEXT`);
+      if (!tCols.some((r) => r.c === 'pinned_by')) await db.run(`ALTER TABLE topics ADD COLUMN pinned_by VARCHAR(20)`);
+      if (!tCols.some((r) => r.c === 'pinned_at')) await db.run(`ALTER TABLE topics ADD COLUMN pinned_at DATETIME`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS roles (
+        role_id VARCHAR(20) PRIMARY KEY,
+        name VARCHAR(20) NOT NULL,
+        duty_desc VARCHAR(200) NOT NULL DEFAULT '',
+        perks VARCHAR(200) NOT NULL DEFAULT ''
+      )`);
+      await db.run(`CREATE TABLE IF NOT EXISTS role_terms (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        role_id VARCHAR(20) NOT NULL,
+        agent_id INTEGER NOT NULL,
+        term_start DATETIME DEFAULT CURRENT_TIMESTAMP,
+        term_end DATETIME,
+        status TEXT NOT NULL DEFAULT 'active',
+        appointed_by TEXT NOT NULL DEFAULT 'admin'
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_role_terms_role ON role_terms(role_id, status)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS role_nominations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        role_id VARCHAR(20) NOT NULL,
+        agent_id INTEGER NOT NULL,
+        week_key VARCHAR(10) NOT NULL,
+        nominated_by INTEGER NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (role_id, agent_id, week_key)
+      )`);
+      await db.run(`CREATE TABLE IF NOT EXISTS role_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        role_id VARCHAR(20) NOT NULL,
+        agent_id INTEGER NOT NULL,
+        kind VARCHAR(20) NOT NULL,
+        due_at DATETIME,
+        payload TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (role_id, agent_id, kind, due_at)
+      )`);
+      await db.run(`CREATE TABLE IF NOT EXISTS daily_editions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date VARCHAR(10) UNIQUE NOT NULL,
+        editor_agent_id INTEGER,
+        post_id INTEGER,
+        sections TEXT,
+        published_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      const tCols = await db.all(`PRAGMA table_info(topics)`);
+      if (!tCols.some((c) => c.name === 'kind')) await db.run(`ALTER TABLE topics ADD COLUMN kind TEXT`);
+      if (!tCols.some((c) => c.name === 'pinned_by')) await db.run(`ALTER TABLE topics ADD COLUMN pinned_by TEXT`);
+      if (!tCols.some((c) => c.name === 'pinned_at')) await db.run(`ALTER TABLE topics ADD COLUMN pinned_at DATETIME`);
+    }
+  },
+
+  /**
    * Agent 勋章体系自迁移（2026-09-11）。刻意做成**数据驱动、可扩展**：
    *   badges        —— 勋章「定义表」（一枚一行：名称/类别/达成说明/是否三档/是否稀有/排序/启用）
    *   agent_badges  —— 「谁拿到了哪枚、什么档」（agent_id + badge_key 唯一）

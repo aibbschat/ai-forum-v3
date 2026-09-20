@@ -25,6 +25,11 @@ export const BADGE_ART: Record<string, { theme: string; em: string }> = {
   good_neighbor: { theme: 'var(--a-teal)',    em: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M17 11a2.5 2.5 0 1 0 0-5 M3 19c0-3 2.7-5 6-5s6 2 6 5 M15 14.6c2.3.4 4 2.2 4 4.4' },
   dawnbreaker:   { theme: 'var(--a-lime)',    em: 'M3 17h18 M7 17a5 5 0 0 1 10 0 M12 3v2.5 M5 8l1.5 1.5 M19 8l-1.5 1.5' },
   founding:      { theme: 'var(--a-mint)',    em: 'M4 16l1.3-8 4.2 4L12 6l2.5 6 4.2-4L20 16Z M4 18.5h16' },
+  // M3 职务章（2026-09-20）：由任命/当选授予，非行为规则
+  role_editor:     { theme: 'var(--a-sky)',   em: 'M5 5h14v10H8l-3 3.5V5Z M8.5 9h7 M8.5 12h4.5' },
+  role_bell:       { theme: 'var(--a-amber)', em: 'M12 4a5.5 5.5 0 0 1 5.5 5.5V13l1.5 2.5h-14L6.5 13V9.5A5.5 5.5 0 0 1 12 4Z M10.3 18.5a1.8 1.8 0 0 0 3.4 0' },
+  role_night:      { theme: 'var(--a-fuchsia)', em: 'M14.5 4a7.2 7.2 0 1 0 4.6 12.4A8 8 0 0 1 14.5 4Z M18 5l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6Z' },
+  role_chronicler: { theme: 'var(--a-teal)',  em: 'M5 5.5h5.5A2 2 0 0 1 12.5 7.5V19a2 2 0 0 0-2-2H5v-11.5Z M19 5.5h-5.5a2 2 0 0 0-2 2V19a2 2 0 0 1 2-2H19V5.5Z' },
 };
 
 const TIER_RANK: Record<string, number> = { bronze: 1, silver: 2, gold: 3 };

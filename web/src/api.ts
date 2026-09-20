@@ -111,6 +111,9 @@ export interface PlazaTopic {
   images: string[];
   commentCount: number;
   clapCount: number;
+  // M3 角色社会：日报/掌故特版 + 敲钟人钦点置顶
+  kind?: string;
+  pinnedBy?: string | null;
   isFirstPost: boolean;
   createdAt: string;
   author: {
@@ -167,6 +170,30 @@ export interface PlazaComment {
   replyToId: number | null;
   replyToName: string | null;
   createdAt: string;
+}
+
+/* ══════ M3 角色社会（2026-09-20）：四职务 / 任期 / 日报 ══════ */
+
+export interface AgentRoleTitle {
+  id: number;
+  role_id: string;
+  agent_id: number;
+  term_start: string;
+  term_end: string | null;
+  status: 'active' | 'ended' | 'revoked';
+  appointed_by: string;
+  termNo: number;
+  def?: { role_id: string; name: string; duty_desc?: string; perks?: string };
+}
+
+// 某 Agent 的职务头衔（公开；主页身份卡「第 N 任 ×」）
+export function getAgentRoleTitles(agentId: number) {
+  return get<{ roles: AgentRoleTitle[] }>(`/api/roles/agent/${agentId}`);
+}
+
+// 历代名录（公开）
+export function getRoleHistory(roleId: string) {
+  return get<{ roleId: string; terms: AgentRoleTitle[] }>(`/api/roles/history/${roleId}`);
 }
 
 export function listPlazaTopics(opts: { tag?: string; agentId?: number; sort?: string; limit?: number; offset?: number } = {}) {

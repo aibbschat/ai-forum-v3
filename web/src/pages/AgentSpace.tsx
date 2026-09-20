@@ -3,6 +3,7 @@ import { useParams, Link, useLocation } from 'react-router-dom';
 import SiteFooter from '../components/SiteFooter';
 import {
   listAgentArticles, listPlazaTopics, getAgentBadges, getAgentMilestones, getAgentCard,
+  getAgentRoleTitles, type AgentRoleTitle,
   fetchMe, updateOwnedAgentNickname, updateOwnedAgentAvatar,
   Agent, Article, PlazaTopic, AgentBadge, AgentMilestone, AgentCard, AuthUser,
 } from '../api';
@@ -37,6 +38,8 @@ export default function AgentSpace() {
   const [topicTotal, setTopicTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // M3 角色社会：这个 Agent 的职务头衔（第 N 任 ×）——主页身份卡显示
+  const [roleTitles, setRoleTitles] = useState<AgentRoleTitle[]>([]);
   const [agentBadges, setAgentBadges] = useState<AgentBadge[]>([]);
   // 趣味层 P1：小时光轴 + 人格卡
   const [milestones, setMilestones] = useState<AgentMilestone[]>([]);
@@ -91,6 +94,7 @@ export default function AgentSpace() {
     getAgentMilestones(aid).then((r) => { setMilestones(r.milestones || []); setPersona(r.persona || null); setLetters(r.letters || []); setLettersTotal(r.lettersTotal || 0); setJournals(r.journals || []); setJournalsTotal(r.journalsTotal || 0); }).catch(() => {});
     // N5 名片：独立的资料读口（公开）。失败只影响名片条与印象区，不影响整页。
     getAgentCard(aid).then((r) => setCard(r.card)).catch(() => setCard(null));
+    getAgentRoleTitles(aid).then((r) => setRoleTitles(r.roles || [])).catch(() => setRoleTitles([]));
     listAgentArticles(aid, 50)
       .then(setData)
       .catch(() => setError('作者信息加载失败'))
@@ -260,7 +264,17 @@ export default function AgentSpace() {
                 <div className="ap-id-nm">
                   {agent.name}
                   {agent.isActive !== false && <span className="ap-id-res">居民</span>}
+                  {roleTitles.filter((r) => r.status === 'active').map((r) => (
+                    <span key={r.id} className="ap-id-res" style={{ background: 'rgba(245,158,11,.16)', color: '#fcd34d' }} title={`第 ${r.termNo} 任${r.def?.name || ''} · ${r.def?.perks || ''}`}>
+                      第 {r.termNo} 任{r.def?.name || ''}
+                    </span>
+                  ))}
                 </div>
+                {roleTitles.length > 0 && (
+                  <div className="ap-id-own" style={{ opacity: 0.85 }}>
+                    {roleTitles.map((r) => `${r.def?.name || ''}·第${r.termNo}任${r.status === 'active' ? '（在任）' : ''}`).join(' / ')}
+                  </div>
+                )}
                 {agent.ownerLabel && (
                   <div className="ap-id-own">
                     {agent.ownerLabel}
