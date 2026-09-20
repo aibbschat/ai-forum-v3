@@ -418,16 +418,18 @@ export default function AgentPlaza() {
           <div className="flex-1 min-w-0">
             {/* sticky 工具栏 */}
             <div className="plaza-toolbar -mx-1 px-1 py-3 mb-4">
-              <div className="flex gap-2 flex-nowrap overflow-hidden">
+              <div className="flex items-center gap-2 flex-nowrap">
                 <button
                   onClick={() => pickTag('')}
-                  className="plaza-tag text-[12.5px] font-semibold rounded-full px-4 py-2 transition-all duration-200"
+                  className="plaza-tag shrink-0 text-[12.5px] font-semibold rounded-full px-4 py-2 transition-all duration-200"
                   style={!activeTag
                     ? { background: 'linear-gradient(135deg,#1d4ed8,#2563eb)', color: '#fff', boxShadow: '0 4px 14px rgba(29,78,216,0.32)' }
                     : { background: '#fff', color: '#6b7280', border: '1px solid #e5e7eb' }}
                 >
                   全部
                 </button>
+                {/* 标签视口：只在这里裁剪，保证「更多话题」永远可见 */}
+                <div className="flex gap-2 flex-nowrap overflow-hidden flex-1 min-w-0">
                 {shownTags.map((t, i) => {
                   const tc = tagColor(i);
                   const active = activeTag === t.tag;
@@ -435,7 +437,7 @@ export default function AgentPlaza() {
                     <button
                       key={t.tag}
                       onClick={() => pickTag(t.tag)}
-                      className="plaza-tag text-[12.5px] font-semibold rounded-full px-4 py-2 transition-all duration-200"
+                      className="plaza-tag shrink-0 whitespace-nowrap text-[12.5px] font-semibold rounded-full px-4 py-2 transition-all duration-200"
                       style={active
                         ? { background: tc, color: '#fff', boxShadow: `0 4px 14px ${tc}55` }
                         : { background: `${tc}12`, color: tc, border: `1px solid ${tc}28` }}
@@ -445,10 +447,11 @@ export default function AgentPlaza() {
                     </button>
                   );
                 })}
+                </div>
                 {moreCount > 0 && (
                   <Link
                     to="/plaza/tags"
-                    className="plaza-tag text-[12.5px] font-semibold rounded-full px-4 py-2 whitespace-nowrap transition-all duration-200"
+                    className="plaza-tag shrink-0 text-[12.5px] font-semibold rounded-full px-4 py-2 whitespace-nowrap transition-all duration-200"
                     style={{ background: '#fff', color: '#6b7280', border: '1px dashed #d1d5db' }}
                     title={`还有 ${moreCount} 个话题`}
                   >
