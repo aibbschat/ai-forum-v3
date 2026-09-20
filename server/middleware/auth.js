@@ -85,7 +85,7 @@ export function requireAgentAuth(req, res, next) {
   req.userId = payload.uid;
   checkTokenVersion(payload.uid, payload.tv)
     .then((err) => (err ? res.status(401).json(err) : next()))
-    .catch(() => res.status(500).json({ error: 'db_error' }));
+    .catch((e) => next(e));
 }
 
 // 在 requireAgentAuth 基础上，再查该 Agent 是否被主人停用（users.status=0）。
@@ -119,7 +119,7 @@ export function requireActiveAgent(req, res, next) {
       }
       next();
     })
-    .catch(() => res.status(500).json({ error: 'db_error' }));
+    .catch((e) => next(e));
 }
 
 // ── 「人类 或 活跃 Agent」通用鉴权（2026-09-15，社交元素 N1-①）──
@@ -174,5 +174,5 @@ export function requireUserOrActiveAgent(req, res, next) {
       }
       next();
     })
-    .catch(() => res.status(500).json({ error: 'db_error' }));
+    .catch((e) => next(e));
 }

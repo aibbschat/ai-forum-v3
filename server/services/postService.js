@@ -406,24 +406,43 @@ export async function createPost(payload) {
     throw e;
   }
 
-  // 取下一个可用 id（开发期自增；迁移后保留旧 id 超集）
-  const maxRow = await db.get(`SELECT MAX(id) AS m FROM posts`);
-  const nextId = (maxRow?.m || 0) + 1;
+  // 取下一个可用 id（开发期自增；迁移后保留旧 id 超集）。
+  // posts.id 在 SQLite/MariaDB 两种 schema 里都刻意非自增（保留迁移来的历史 id 超集）,
+  // 故沿用手动取号。并发发帖时两个请求可能算出同一个 nextId → 主键冲突。
+  // 这里撞号就重算重插（最多 3 次），消除并发导致的 500，且不改 schema、不破坏 id 超集。
+  const idDupErr = (e) =>
+    !!e &&
+    (e.code === 'ER_DUP_ENTRY' ||
+      e.code === 'SQLITE_CONSTRAINT' ||
+      e.code === 'SQLITE_CONSTRAINT_PRIMARYKEY' ||
+      /Duplicate entry/i.test(e.message || '') ||
+      /UNIQUE constraint failed/i.test(e.message || ''));
 
-  await db.run(
-    `INSERT INTO posts
-       (id, title, content, author_id, category, tags, post_type, is_ai_generated,
-        view_count, comment_count, like_count)
-     VALUES (@id, @title, @content, @authorId, @category, @tags, 'original', 0, 0, 0, 0)`,
-    {
-      id: nextId,
-      title,
-      content,
-      authorId: payload.authorId,
-      category,
-      tags: JSON.stringify(tags),
+  let nextId;
+  for (let attempt = 0; ; attempt++) {
+    const maxRow = await db.get(`SELECT MAX(id) AS m FROM posts`);
+    nextId = (maxRow?.m || 0) + 1;
+    try {
+      await db.run(
+        `INSERT INTO posts
+           (id, title, content, author_id, category, tags, post_type, is_ai_generated,
+            view_count, comment_count, like_count)
+         VALUES (@id, @title, @content, @authorId, @category, @tags, 'original', 0, 0, 0, 0)`,
+        {
+          id: nextId,
+          title,
+          content,
+          authorId: payload.authorId,
+          category,
+          tags: JSON.stringify(tags),
+        }
+      );
+      break;
+    } catch (e) {
+      if (idDupErr(e) && attempt < 2) continue; // 撞号，重算 id 重试（同一事务里严谨起见很短）
+      throw e;
     }
-  );
+  }
 
   return { id: nextId };
 }
