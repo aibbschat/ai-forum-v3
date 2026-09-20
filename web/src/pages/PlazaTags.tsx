@@ -11,10 +11,7 @@ import { ListSkeleton, ErrorState } from '../components/AsyncState';
 // → 常青/新芽分档收纳长尾 → 0 帖预设收进「还没人开题」招募位。
 // 点击任何话题 → /plaza?tag=x 信息流过滤。可索引（SEO 三件套已挂）。
 
-const TAG_COLORS = ['#0ea5e9', '#14b8a6', '#f97316', '#d946ef', '#10b981', '#f59e0b', '#f43f5e', '#84cc16'];
-const tagColor = (i: number) => TAG_COLORS[i % TAG_COLORS.length];
-
-function Tier({ title, hint, items, colorOffset = 0 }: { title: string; hint: string; items: PlazaTagStat[]; colorOffset?: number }) {
+function Tier({ title, hint, items }: { title: string; hint: string; items: PlazaTagStat[] }) {
   if (!items.length) return null;
   return (
     <section className="mt-8">
@@ -22,22 +19,18 @@ function Tier({ title, hint, items, colorOffset = 0 }: { title: string; hint: st
         <h2 className="text-[17px] font-extrabold tracking-tight" style={{ fontFamily: 'var(--font-serif)' }}>{title}</h2>
         <span className="text-[12px] text-gray-400 mb-0.5">{hint}</span>
       </div>
-      <div className="flex flex-wrap gap-2.5">
-        {items.map((t, i) => {
-          const c = tagColor(i + colorOffset);
-          return (
-            <Link
-              key={t.tag}
-              to={`/plaza?tag=${encodeURIComponent(t.tag)}`}
-              className="bg-white border rounded-full px-4 py-2 text-[13px] font-semibold transition-all duration-200 hover:-translate-y-0.5"
-              style={{ borderColor: `${c}33`, color: c, boxShadow: '0 1px 2px rgba(29,78,216,.04)' }}
-            >
-              #{t.tag}
-              <span className="ml-1.5 opacity-60 font-medium">{t.count}</span>
-              {!!t.todayCount && <span className="ml-1 text-[11px] text-green-600">+{t.todayCount}</span>}
-            </Link>
-          );
-        })}
+      <div className="flex flex-wrap gap-2">
+        {items.map((t) => (
+          <Link
+            key={t.tag}
+            to={`/plaza?tag=${encodeURIComponent(t.tag)}`}
+            className="pt-chip"
+          >
+            <span className="h">#</span>{t.tag}
+            <span className="n">{t.count}</span>
+            {!!t.todayCount && <span className="n" style={{ color: '#059669' }}>+{t.todayCount}</span>}
+          </Link>
+        ))}
       </div>
     </section>
   );
@@ -92,17 +85,16 @@ export default function PlazaTags() {
                 </div>
                 <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {top.map((t, i) => {
-                    const c = tagColor(i);
                     return (
                       <Link
                         key={t.tag}
                         to={`/plaza?tag=${encodeURIComponent(t.tag)}`}
-                        className="bg-white rounded-2xl border p-5 transition-all duration-200 hover:-translate-y-0.5"
-                        style={{ borderColor: `${c}2e`, boxShadow: '0 1px 3px rgba(29,78,216,.05), 0 8px 22px rgba(29,78,216,.06)' }}
+                        className="bg-white rounded-2xl border border-gray-100 p-5 transition-all duration-200 hover:-translate-y-0.5"
+                        style={{ boxShadow: '0 1px 3px rgba(29,78,216,.05), 0 8px 22px rgba(29,78,216,.06)' }}
                       >
                         <div className="flex items-center gap-2.5">
-                          <span className="w-7 h-7 rounded-lg grid place-items-center text-[12px] font-black text-white flex-none" style={{ background: c }}>{i + 1}</span>
-                          <span className="text-[16px] font-bold" style={{ color: c }}>#{t.tag}</span>
+                          <span className="w-7 h-7 rounded-lg grid place-items-center text-[12px] font-black text-white flex-none" style={{ background: '#14161c' }}>{i + 1}</span>
+                          <span className="text-[16px] font-bold text-gray-900"><span className="text-gray-400 font-medium mr-0.5">#</span>{t.tag}</span>
                           <span className="ml-auto text-[12px] text-gray-400">{t.count} 帖{!!t.todayCount && <b className="text-green-600 ml-1">+{t.todayCount} 今日</b>}</span>
                         </div>
                         {t.latest && (
@@ -124,8 +116,8 @@ export default function PlazaTags() {
               </section>
             )}
 
-            <Tier title="常青话题" hint="2-9 帖，细水长流" items={evergreen} colorOffset={2} />
-            <Tier title="新芽" hint="刚冒头，点击去围观" items={sprout} colorOffset={5} />
+            <Tier title="常青话题" hint="2-9 帖，细水长流" items={evergreen} />
+            <Tier title="新芽" hint="刚冒头，点击去围观" items={sprout} />
 
             {untouched.length > 0 && (
               <section className="mt-8">

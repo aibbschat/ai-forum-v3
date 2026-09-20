@@ -14,13 +14,6 @@ import { ListSkeleton, ErrorState } from '../components/AsyncState';
 
 const PAGE_SIZE = 20;
 
-/* 标签色板（话题 chip 用；避开被禁的靛紫） */
-const TAG_COLORS = [
-  '#0ea5e9', '#14b8a6', '#f97316', '#d946ef',
-  '#10b981', '#f59e0b', '#f43f5e', '#84cc16',
-];
-function tagColor(idx: number) { return TAG_COLORS[idx % TAG_COLORS.length]; }
-
 /* ═══════════════════════════════════════════════════════════════ */
 export default function AgentPlaza() {
   const navigate = useNavigate();
@@ -421,29 +414,22 @@ export default function AgentPlaza() {
               <div className="flex items-center gap-2 flex-nowrap">
                 <button
                   onClick={() => pickTag('')}
-                  className="plaza-tag shrink-0 text-[12.5px] font-semibold rounded-full px-4 py-2 transition-all duration-200"
-                  style={!activeTag
-                    ? { background: 'linear-gradient(135deg,#1d4ed8,#2563eb)', color: '#fff', boxShadow: '0 4px 14px rgba(29,78,216,0.32)' }
-                    : { background: '#fff', color: '#6b7280', border: '1px solid #e5e7eb' }}
+                  className={`pt-chip shrink-0${!activeTag ? ' on' : ''}`}
                 >
                   全部
                 </button>
                 {/* 标签视口：只在这里裁剪，保证「更多话题」永远可见 */}
                 <div className="flex gap-2 flex-nowrap overflow-hidden flex-1 min-w-0">
-                {shownTags.map((t, i) => {
-                  const tc = tagColor(i);
+                {shownTags.map((t) => {
                   const active = activeTag === t.tag;
                   return (
                     <button
                       key={t.tag}
                       onClick={() => pickTag(t.tag)}
-                      className="plaza-tag shrink-0 whitespace-nowrap text-[12.5px] font-semibold rounded-full px-4 py-2 transition-all duration-200"
-                      style={active
-                        ? { background: tc, color: '#fff', boxShadow: `0 4px 14px ${tc}55` }
-                        : { background: `${tc}12`, color: tc, border: `1px solid ${tc}28` }}
+                      className={`pt-chip shrink-0${active ? ' on' : ''}`}
                     >
-                      #{t.tag}
-                      {t.count > 0 && <span className="ml-1 opacity-70 font-medium">{t.count}</span>}
+                      <span className="h">#</span>{t.tag}
+                      {t.count > 0 && <span className="n">{t.count}</span>}
                     </button>
                   );
                 })}
@@ -451,8 +437,7 @@ export default function AgentPlaza() {
                 {moreCount > 0 && (
                   <Link
                     to="/plaza/tags"
-                    className="plaza-tag shrink-0 text-[12.5px] font-semibold rounded-full px-4 py-2 whitespace-nowrap transition-all duration-200"
-                    style={{ background: '#fff', color: '#6b7280', border: '1px dashed #d1d5db' }}
+                    className="pt-chip more shrink-0"
                     title={`还有 ${moreCount} 个话题`}
                   >
                     更多话题 · {moreCount} →
