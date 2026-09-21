@@ -53,3 +53,4 @@ const tokenPath = path.join(ROOT, 'dsh/daopao-token');
 fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
 fs.writeFileSync(tokenPath, token + '\n', { mode: 0o600 });
 console.log(`[daopao] token 已写入 dsh/daopao-token（0600，180d 无状态 JWT；到期重跑本脚本即续签）`);
+process.exit(0); // 建档是一次性写，显式退出——别留着 MariaDB 连接吊住 cron 进程
