@@ -86,7 +86,9 @@ function normalizeEntry(r) {
   if (!r) return null;
   return {
     id: r.id, domain: r.domain, slug: r.slug || null, title: r.title, state: r.state,
-    curRev: r.cur_rev ?? null, curatorAgentId: r.curator_agent_id ?? null, bodyMd: r.body_md || '',
+    curRev: r.cur_rev ?? null, curatorAgentId: r.curator_agent_id ?? null,
+    curatorName: r.curator_name ?? null, // v0.22.1 署名可见性：JOIN users 带出的补全者名（读侧直抄，不让 AI 反查）
+    bodyMd: r.body_md || '',
     // v0.22 懂AI知识迁移：悬赏来源标记 + 素材回链（仅展示，绝不进 claims 当可信锚）。
     source: r.source ?? null, originUrl: r.origin_url ?? null,
     // 摘要给卡片/搜索用，必须是纯文本：旧写法只去掉 [#>*_`~]，图片语法 `![alt](url)`
@@ -173,8 +175,9 @@ export async function lookupEntries({ domain = null, q = '', limit = 10, offset 
   if (q && q.trim()) { where.push(`(e.title LIKE ? OR e.body_md LIKE ?)`); const like = `%${q.trim()}%`; args.push(like, like); }
   const order = `ORDER BY CASE e.state WHEN 'corroborated' THEN 0 WHEN 'sourced' THEN 1 WHEN 'proposed' THEN 2 ELSE 3 END, e.updated_at DESC`;
   const rows = await db.all(
-    `SELECT e.*, rv.claims AS cur_claims FROM entries e
+    `SELECT e.*, rv.claims AS cur_claims, cu.nickname AS curator_name FROM entries e
        LEFT JOIN entry_revisions rv ON rv.id = e.cur_rev
+       LEFT JOIN users cu ON cu.id = e.curator_agent_id
       WHERE ${where.join(' AND ')} ${order} LIMIT ${L} OFFSET ${O}`,
     args,
   );
@@ -218,8 +221,9 @@ export async function getEntry(idOrSlug, { domain = null } = {}) {
   let where = `e.status = 1`;
   if (byId) { where += ` AND e.id = ?`; args.push(Number(key)); }
   else { where += ` AND e.slug = ?`; args.push(key); if (domain && ENTRY_DOMAINS.has(domain)) { where += ` AND e.domain = ?`; args.push(domain); } }
-  const sql = `SELECT e.*, rv.claims AS cur_claims FROM entries e
+  const sql = `SELECT e.*, rv.claims AS cur_claims, cu.nickname AS curator_name FROM entries e
     LEFT JOIN entry_revisions rv ON rv.id = e.cur_rev
+    LEFT JOIN users cu ON cu.id = e.curator_agent_id
     WHERE ${where} ORDER BY e.id ASC LIMIT 1`;
   return normalizeEntry(await db.get(sql, args));
 }
@@ -474,12 +478,14 @@ export async function createCuratedStub({ domain, title, summaryMd = '', originU
 // 悬赏池读口（公开只读）：未补全的 stub（dongai 萃取 + ai_gap 缺口）。run_cycle 简报与 /entries 页都吃它。
 export async function listBounties({ source = null, limit = 5 } = {}) {
   const L = Math.max(1, Math.min(20, Number(limit) || 5));
-  const where = [`state = 'stub'`, `status = 1`];
+  const where = [`e.state = 'stub'`, `e.status = 1`];
   const args = [];
   const s = String(source || '').trim();
-  if (s === 'ai_gap' || s === 'dongai') { where.push(`source = ?`); args.push(s); }
+  if (s === 'ai_gap' || s === 'dongai') { where.push(`e.source = ?`); args.push(s); }
   const rows = await db.all(
-    `SELECT * FROM entries WHERE ${where.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT ${L}`,
+    `SELECT e.*, cu.nickname AS curator_name FROM entries e
+       LEFT JOIN users cu ON cu.id = e.curator_agent_id
+      WHERE ${where.join(' AND ')} ORDER BY e.created_at DESC, e.id DESC LIMIT ${L}`,
     args,
   );
   return { bounties: rows.map(normalizeEntry) };

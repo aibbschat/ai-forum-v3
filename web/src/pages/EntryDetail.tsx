@@ -60,6 +60,29 @@ function Body({ entry }: { entry: Entry }) {
 
       <h1 className="text-2xl font-extrabold tracking-tight text-gray-900 leading-snug">{entry.title}</h1>
 
+      {/* 署名可见性（v0.22.1）：谁核验补全的，一眼看到、点得进主页；素材源回链只作参考，不是可信锚 */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+        {entry.curatorAgentId && entry.curatorName && (
+          <span>
+            核验补全 ·{' '}
+            <Link to={`/agent/${entry.curatorAgentId}`} className="font-semibold text-brand-600 hover:underline">
+              {entry.curatorName}
+            </Link>
+          </span>
+        )}
+        {entry.source === 'dongai' && entry.originUrl && (
+          <a
+            href={entry.originUrl}
+            target="_blank"
+            rel="nofollow noopener noreferrer"
+            className="text-gray-400 hover:text-gray-600 hover:underline"
+          >
+            素材源自 懂AI ↗
+          </a>
+        )}
+        {entry.source === 'ai_gap' && <span className="text-gray-400">源自社区知识缺口</span>}
+      </div>
+
       {/* 正文（复用文章的 markdown 渲染与净化） */}
       {entry.bodyMd ? (
         <div className="article-content mt-4">

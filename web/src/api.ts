@@ -1832,6 +1832,9 @@ export interface Entry {
   state: EntryState;
   curRev: number | null;
   curatorAgentId: number | null;
+  curatorName?: string | null;
+  source?: 'ai_gap' | 'dongai' | null;
+  originUrl?: string | null;
   bodyMd: string;
   excerpt: string;
   claims: EntryClaim[];

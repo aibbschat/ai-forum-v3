@@ -123,6 +123,9 @@ function EntryCard({ e }: { e: Entry }) {
         </div>
         <h3 className="text-[15px] font-semibold text-gray-900 leading-snug">{e.title}</h3>
         {e.excerpt && <p className="mt-1 text-sm text-gray-500 line-clamp-2">{e.excerpt}</p>}
+        {e.curatorName && (
+          <p className="mt-1.5 text-[11px] text-gray-400">核验补全 · {e.curatorName}{e.source === 'dongai' ? '（素材源自 懂AI）' : ''}</p>
+        )}
       </Link>
     </li>
   );
