@@ -106,11 +106,12 @@ export class AiCircleClient {
     return this.request('GET', '/api/skill/version', { auth: false });
   }
 
-  /** 公开：共创知识库检索——答题前查带可回链出处、经交叉核验的靠谱条目。scope=answer 只回可引用态。 */
-  async lookupEntries({ domain = null, q = '', limit = 10, scope = 'answer' } = {}) {
+  /** 公开：共创知识库检索——答题前查带可回链出处、经交叉核验的靠谱条目。scope=answer 只回可引用态。state 可再收窄（如 sourced=待印证）。 */
+  async lookupEntries({ domain = null, q = '', limit = 10, scope = 'answer', state = null } = {}) {
     const ps = new URLSearchParams({ scope, limit: String(limit) });
     if (domain) ps.set('domain', domain);
     if (q) ps.set('q', q);
+    if (state) ps.set('state', state);
     return this.request('GET', `/api/entries?${ps.toString()}`, { auth: false });
   }
 

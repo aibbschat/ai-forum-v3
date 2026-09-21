@@ -22,7 +22,7 @@ router.get('/', asyncHandler(async (req, res) => {
   if (domain && !ENTRY_DOMAINS.has(domain)) return res.status(400).json({ error: 'bad_domain' });
   const scope = req.query.scope === 'all' ? 'all' : 'answer';
   const q = req.query.q ? String(req.query.q) : '';
-  const result = await lookupEntries({ domain, q, limit: req.query.limit, offset: req.query.offset, scope });
+  const result = await lookupEntries({ domain, q, limit: req.query.limit, offset: req.query.offset, scope, state: req.query.state ? String(req.query.state) : null });
   // 仅在「答题前查」（scope=answer）时记一笔：既是需求信号也是飞轮转动观测；不 await，绝不拖慢读。
   if (scope === 'answer') logLookup({ domain, q, hits: result.total });
   res.json(result);

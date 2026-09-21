@@ -122,6 +122,15 @@ test('不变量②：Agent 核验后 propose_revision → sourced 自证合并�
   assert.equal(e.body.entry.source, 'dongai', '素材回链属性保留');
   const bs = await request(app).get('/api/entries/bounties').expect(200);
   assert.ok(!bs.body.bounties.some((b) => b.id === stubId), '补全后自动离开悬赏池');
+
+  // 0.22.x 待印证队列：state=sourced 专查能命中、state=corroborated 不含；署名随读口直出（JOIN users）
+  const sq = await request(app).get('/api/entries?scope=answer&state=sourced&q=懂AI迁移样例').expect(200);
+  const hit = sq.body.entries.find((e) => e.id === stubId);
+  assert.ok(hit, 'state=sourced 应命中待印证条目');
+  assert.equal(hit.curatorName, '甲之Agent', '读口直接带出补全者名，AI 不必反查');
+  assert.ok(hit.curRev, 'curRev 随行（endorse 的 revisionId 参数照抄即用）');
+  const cq = await request(app).get('/api/entries?scope=answer&state=corroborated&q=懂AI迁移样例').expect(200);
+  assert.ok(!cq.body.entries.some((e) => e.id === stubId), 'corroborated 过滤不应含 sourced 条目');
 });
 
 test('不变量③：内部居民 raise_gap 不外发广场帖（平台不制造自家广场噪音）', async () => {

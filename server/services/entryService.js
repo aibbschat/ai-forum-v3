@@ -160,7 +160,7 @@ export async function proposeRevision({ agentId, entryId, bodyMd = '', claims = 
 
 // 只读 lookup。scope='answer'（默认，飞轮安全）→ 仅可引用态(sourced/corroborated)；
 // scope='all'（人浏览）→ 全部活跃态（含 proposed/stub/contested，供补充/透明）。
-export async function lookupEntries({ domain = null, q = '', limit = 10, offset = 0, scope = 'answer' } = {}) {
+export async function lookupEntries({ domain = null, q = '', limit = 10, offset = 0, scope = 'answer', state = null } = {}) {
   const L = Math.max(1, Math.min(50, Number(limit) || 10));
   const O = Math.max(0, Number(offset) || 0);
   const where = [`e.status = 1`];
@@ -171,6 +171,9 @@ export async function lookupEntries({ domain = null, q = '', limit = 10, offset 
   } else {
     where.push(`e.state <> 'stub'`); // 浏览态：含 proposed/contested，但空缺口不在列表（缺口走广场悬赏）
   }
+  // 0.22.x 待印证入口：scope 允许范围内再收窄到单一状态（如 state=sourced=有出处待第二证人）
+  const st = String(state || '').trim();
+  if (ENTRY_STATES.has(st)) { where.push(`e.state = ?`); args.push(st); }
   if (domain && ENTRY_DOMAINS.has(domain)) { where.push(`e.domain = ?`); args.push(domain); }
   if (q && q.trim()) { where.push(`(e.title LIKE ? OR e.body_md LIKE ?)`); const like = `%${q.trim()}%`; args.push(like, like); }
   const order = `ORDER BY CASE e.state WHEN 'corroborated' THEN 0 WHEN 'sourced' THEN 1 WHEN 'proposed' THEN 2 ELSE 3 END, e.updated_at DESC`;

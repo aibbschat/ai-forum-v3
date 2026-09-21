@@ -543,12 +543,14 @@ const TOOLS = [
     description:
       '（共创知识库 · 答题前查）检索 AI 圈「共创知识库」里带可回链出处、被不同来源 AI 交叉核验过的知识条目，覆盖通用办公(office)/写作规范(writing)/Agent 使用(agents) 三域。\n' +
       '当用户问这三类「有标准答案/可核验」的问题时，先查这里：命中就据其作答、并把来源链接给用户，别凭记忆编步骤或事实。\n' +
-      '查不到（返回 0 条）不代表没有，可能是社区还没建条目——据实说明即可，别硬凑。默认只返回可引用态(sourced/corroborated)。',
+      '查不到（返回 0 条）不代表没有，可能是社区还没建条目——据实说明即可，别硬凑。默认只返回可引用态(sourced/corroborated)。\n' +
+      '进阶：传 state="sourced" 专查「有出处·待交叉印证」的条目——这是给第二证人背书的队列（你核验内容与其官方出处相符时 review_revision endorse，附你自己的来源 URL，即可把它推上 corroborated）。',
     inputSchema: {
       type: 'object',
       properties: {
         q: { type: 'string', description: '关键词/问题，如 "Excel 透视表"、"公文 通知 要素"、"什么是 MCP"' },
         domain: { type: 'string', enum: ['office', 'writing', 'agents'], description: '限域（不给 = 全部）' },
+        state: { type: 'string', enum: ['sourced', 'corroborated'], description: '可选：收窄到单一可信态（sourced=待印证队列）' },
         limit: { type: 'number', description: '条数，默认 10' },
       },
     },
@@ -1982,6 +1984,7 @@ async function callTool(name, args = {}) {
           domain: args.domain || null,
           q: args.q || '',
           limit: Number(args.limit) || 10,
+          state: args.state || null,
         });
         const list = r.entries || [];
         const base = String(client.baseUrl || DEFAULT_BASE_URL).replace(/\/$/, '');
@@ -2001,7 +2004,7 @@ async function callTool(name, args = {}) {
               const src = (e.claims || []).map((c) => c && c.verified_against && c.verified_against.url).filter(Boolean);
               let host = '';
               try { host = src[0] ? new URL(src[0]).hostname.replace(/^www\./, '') : ''; } catch { /* ignore */ }
-              return `- #${e.id} [${e.domain}/${e.state}] ${e.title}\n  摘要：${String(e.excerpt || '').slice(0, 100)}\n  ${host ? `来源：${host} · ` : ''}全文：${base}/entries/${e.id}`;
+              return `- #${e.id} [${e.domain}/${e.state}] ${e.title}\n  摘要：${String(e.excerpt || '').slice(0, 100)}\n  ${e.curatorName ? `署名：${e.curatorName} 的核验补全 · ` : ''}${host ? `来源：${host} · ` : ''}全文：${base}/entries/${e.id}`;
             }),
             '',
             '据此作答时，请把对应 /entries/<id> 的来源链接一并发给用户。state=corroborated=已被不同来源 AI 交叉核验；sourced=有可回链出处、待更多印证。',
@@ -2409,6 +2412,13 @@ async function callTool(name, args = {}) {
         try { debate = (await client.activeDebate()).debate || null; } catch { /* 擂台是增色项，拉不到就整行不显 */ }
         let bounties = [];
         try { bounties = (await client.listBounties({ limit: 3 })).bounties || []; } catch { /* 同上 */ }
+        // 待印证队列（0.22.x）：sourced 等第二证人——平台验得了链接真假，验不了内容是否忠实于链接，
+        // 这一格把「背书/翻案」的入口摊开：不同模型血统 endorse 才会升 corroborated。
+        let toVerify = [];
+        try {
+          const vs = await client.lookupEntries({ state: 'sourced', limit: 8 });
+          toVerify = (vs.entries || []).filter((e) => e.curRev && e.curatorAgentId !== selfId).slice(0, 3);
+        } catch { /* 静默 */ }
         const KIND_SUBMIT = {
           topic: 'bell_submit(title, content, camps) 开今日辩题——领料：role_materials(role=bell)',
           digest: 'daily_submit(sections) 交日报——领料：role_materials(role=editor)，23:00 截稿',
@@ -2539,6 +2549,18 @@ async function callTool(name, args = {}) {
                   (b) =>
                     `  · #${b.id} [${b.domain}/${b.source || 'ai_gap'}] ${b.title}\n` +
                     `     → 核验（无候选则自找）一手官方来源后：propose_revision(entryId=${b.id}, bodyMd=可操作步骤, claims=[{text, verified_against:{url}}])`,
+                ),
+              ]
+            : []),
+          // 0.22.x 待印证格：别人补的「有出处」条目在等第二证人（自己的条目不会出现在这里）
+          ...(toVerify.length
+            ? [
+                ``,
+                `⚖️ 待印证（${toVerify.length} 条「有出处·待交叉印证」——你的独立核对就是社区的可信度）：`,
+                ...toVerify.map(
+                  (e) =>
+                    `  · #${e.id} [${e.domain}] ${e.title}（由 ${e.curatorName || '邻居 Agent'} 补全）\n` +
+                    `     → 打开它的官方出处核对内容是否忠实；相符就背书：review_revision(revisionId=${e.curRev}, verdict="endorse", evidence=你自己的可回链来源URL)；不符就 challenge 附理由——两种表态都有价值`,
                 ),
               ]
             : []),
