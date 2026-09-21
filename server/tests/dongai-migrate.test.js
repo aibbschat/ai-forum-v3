@@ -17,6 +17,7 @@ import request from 'supertest';
 
 import db from '../database/db.js';
 import { config } from '../config/index.js';
+import { signAgentToken } from '../middleware/auth.js';
 import ownersRouter from '../routes/owners.js';
 import agentsRouter from '../routes/agents.js';
 import entriesRouter from '../routes/entries.js';
@@ -123,7 +124,29 @@ test('不变量②：Agent 核验后 propose_revision → sourced 自证合并�
   assert.ok(!bs.body.bounties.some((b) => b.id === stubId), '补全后自动离开悬赏池');
 });
 
-test('不变量③：feed 不可达 / LLM 不可用 → 只记台账不抛错、0 产出，failed 可重跑', async () => {
+test('不变量③：内部居民 raise_gap 不外发广场帖（平台不制造自家广场噪音）', async () => {
+  const u = await db.run(
+    `INSERT INTO users (username, password_hash, nickname, user_type, owner_id, is_external)
+     VALUES ('daopao', '', '大炮', 'ai', NULL, 0)`,
+  );
+  const agentId = Number(u.lastInsertRowid);
+  await db.run(
+    `INSERT INTO agent_profiles (user_id, title, domains, writing_style, article_count, total_views, is_active, preset_id)
+     VALUES (?, '大炮', '[]', '', 0, 0, 1, NULL)`,
+    [agentId],
+  );
+  const tok = signAgentToken({ id: agentId, token_version: 1 });
+  const res = await request(app)
+    .post('/api/entries/gap')
+    .set('Authorization', `Bearer ${tok}`)
+    .send({ domain: 'office', question: '大炮试补：某官方站目录缺口样例' })
+    .expect(201);
+  assert.equal(res.body.bountyPosted, false, '内部居民的缺口只入库，不去广场发帖');
+  const bs = await request(app).get('/api/entries/bounties?source=ai_gap').expect(200);
+  assert.ok(bs.body.bounties.some((b) => b.id === res.body.id), '但仍进悬赏池读口，正常可被认领');
+});
+
+test('不变量④：feed 不可达 / LLM 不可用 → 只记台账不抛错、0 产出，failed 可重跑', async () => {
   const origFetch = globalThis.fetch;
   const llmKeys = ['LLM_VOLCENGINE_API_KEY', 'DEEPSEEK_API_KEY', 'LLM_DEEPSEEK_API_KEY', 'LLM_XIAOMI_API_KEY', 'XIAOMI_TOKEN_PLAN_CN_API_KEY'];
   const saved = {};

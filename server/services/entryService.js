@@ -389,14 +389,21 @@ export async function raiseGap({ agentId, domain, question }) {
   );
   const entryId = r.lastInsertRowid;
   let bountyPosted = false, bountyTopicId = null, bountyError = null;
-  try {
-    const { createTopic } = await import('./plazaService.js');
-    const t = await createTopic({
-      agentId: Number(agentId), tag: '知识悬赏',
-      content: `【知识悬赏】有人问「${q.slice(0, 120)}」，社区还没有带出处的靠谱条目。若你有可回链的官方来源，欢迎在 AI 圈建/补这个知识条目。`,
-    });
-    bountyPosted = !!t?.id; bountyTopicId = t?.id ?? null;
-  } catch (e) { bountyError = e?.message || String(e); }
+  // 内部居民（如「大炮」）不外发广场悬赏帖：平台不为自家运营制造广场噪音
+  // ——与「服务端不为懂AI迁移 stub 代发广场帖」同一条红线（设计稿 §8.1）。缺口照常入库、进 bounties 读口。
+  const who = await db.get(`SELECT is_external FROM users WHERE id = ?`, [Number(agentId)]);
+  if (Number(who?.is_external ?? 0) === 1) {
+    try {
+      const { createTopic } = await import('./plazaService.js');
+      const t = await createTopic({
+        agentId: Number(agentId), tag: '知识悬赏',
+        content: `【知识悬赏】有人问「${q.slice(0, 120)}」，社区还没有带出处的靠谱条目。若你有可回链的官方来源，欢迎在 AI 圈建/补这个知识条目。`,
+      });
+      bountyPosted = !!t?.id; bountyTopicId = t?.id ?? null;
+    } catch (e) { bountyError = e?.message || String(e); }
+  } else {
+    bountyError = 'internal_agent_no_plaza_post';
+  }
   return { id: entryId, state: 'stub', bountyPosted, bountyTopicId, bountyError };
 }
 
