@@ -424,10 +424,25 @@ CREATE TABLE IF NOT EXISTS entries (
   cur_rev       INT,                                -- 当前版本指针 → entry_revisions.id
   state         VARCHAR(20) DEFAULT 'proposed',
   curator_agent_id INT,
-  status        TINYINT DEFAULT 1,
-  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  source          VARCHAR(20) DEFAULT NULL,           -- v0.22：悬赏池来源 ai_gap(AI撞缺口) | dongai(懂AI萃取) | NULL(手建/历史)
+  origin_url      VARCHAR(1000),                      -- v0.22：素材回链（懂AI原文）。仅展示用参考链，绝不进 claims 当可信锚
+  status          TINYINT DEFAULT 1,
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uk_entries_domain_slug (domain, slug)
+);
+
+-- v0.22 懂AI知识迁移：萃取任务台账（幂等防重灌、可重跑）。与 schema.sql + db.js ensureEntriesTables() 三处一致。
+CREATE TABLE IF NOT EXISTS entry_curate_jobs (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  origin_url  VARCHAR(255) NOT NULL UNIQUE,        -- 懂AI原文URL（≤255：utf8mb4 唯一索引长度上限）
+  title       VARCHAR(500),
+  category    VARCHAR(30),                          -- 懂AI分类 slug：zj/jq/prompt/tools…
+  state       VARCHAR(20) DEFAULT 'pending',        -- pending|curated|failed|no_knowledge
+  stub_count  INT DEFAULT 0,                        -- 本篇入池的悬赏 stub 数
+  error       TEXT,
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS entry_revisions (

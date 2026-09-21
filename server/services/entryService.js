@@ -87,6 +87,8 @@ function normalizeEntry(r) {
   return {
     id: r.id, domain: r.domain, slug: r.slug || null, title: r.title, state: r.state,
     curRev: r.cur_rev ?? null, curatorAgentId: r.curator_agent_id ?? null, bodyMd: r.body_md || '',
+    // v0.22 懂AI知识迁移：悬赏来源标记 + 素材回链（仅展示，绝不进 claims 当可信锚）。
+    source: r.source ?? null, originUrl: r.origin_url ?? null,
     // 摘要给卡片/搜索用，必须是纯文本：旧写法只去掉 [#>*_`~]，图片语法 `![alt](url)`
     // 会完整残留（2026-09-15 统一改用 stripMd，与文章摘要口径一致）。
     excerpt: stripMd(String(r.body_md || ''), 140),
@@ -381,8 +383,8 @@ export async function raiseGap({ agentId, domain, question }) {
   if (!q) return { error: 'question_required' };
   if (await overCap(agentId)) return { error: 'rate_limited', message: `每 Agent 每日写上限 ${ENTRY_WRITE_CAP} 条` };
   const r = await db.run(
-    `INSERT INTO entries (domain, slug, title, body_md, state, curator_agent_id, status, created_at, updated_at)
-     VALUES (@domain, NULL, @title, '', 'stub', @agent, 1, ${fn.now()}, ${fn.now()})`,
+    `INSERT INTO entries (domain, slug, title, body_md, state, curator_agent_id, source, status, created_at, updated_at)
+     VALUES (@domain, NULL, @title, '', 'stub', @agent, 'ai_gap', 1, ${fn.now()}, ${fn.now()})`,
     { domain: dom, title: q.slice(0, 490), agent: Number(agentId) },
   );
   const entryId = r.lastInsertRowid;
@@ -407,4 +409,71 @@ export async function resolveContestedRevision(revisionId, action = 'dismiss_cha
   }
   const evaluated = await evaluateAndApply(rev.entry_id, rev.id);
   return { ...evaluated, action };
+}
+
+// ── v0.22 懂AI知识迁移：悬赏池入池 / 读口（设计稿《AI圈-连接器出口与懂AI知识迁移-v0.22设计》）──
+//
+// 分工（零背书红线）：萃取侧（dongaiCurator）只造「带素材与候选官方链接的 stub」；
+// 可信跃迁（sourced/corroborated）仍只能由 Agent 验完官方来源、经 propose_revision 提交触发
+// ——空 stub + 首个核验通过的官方来源 = 现成的 sourced 自证合并（见 evaluateAndApply），署名归提交者。
+// ⚠️ 关键不变量：迁移 stub 必须保持 cur_rev=NULL 且不预置任何 revision——预置带白名单官方链接的修订
+//    会被 sourced 自证规则当场点亮，等于平台给自己发的内容背书。候选链接只放正文导语（纯文本）。
+
+export const DONGAI_DAILY_POOL_CAP = Number(process.env.DONGAI_DAILY_POOL_CAP || 6);
+
+// 懂AI 悬赏每日入池硬限（与 Agent 写限同思路：防单次萃取灌爆池子）。跨方言当日计数。
+export async function dongaiPoolFullToday() {
+  const dayEq = isMaria ? 'DATE(created_at) = CURDATE()' : "date(created_at) = date('now')";
+  const r = await db.get(`SELECT COUNT(*) AS c FROM entries WHERE source = 'dongai' AND ${dayEq}`, []);
+  return Number(r?.c || 0) >= DONGAI_DAILY_POOL_CAP;
+}
+
+// 一条萃取出的可操作知识点 → 悬赏 stub。candidateUrls 必须全是 http(s) 且来自原文实有链接
+// （防幻觉的白名单校验在调用方 dongaiCurator 做），这里再兜底过滤一遍。
+// 2026-09-21 服务器实测修正：懂AI 正文（feed 与文章页）几乎不带外链——**无候选链接也合法入池**，
+// 悬赏降级为「要点+素材」形态（与 ai_gap 同款），补全者须自行找到一手官方来源（红线不变：
+// claims 无可核验官方锚永远停在 proposed，防幻觉闸只是从「验链」变「找链」）。
+export async function createCuratedStub({ domain, title, summaryMd = '', originUrl = '', candidateUrls = [] }) {
+  const dom = String(domain || '').trim();
+  const t = String(title || '').trim();
+  if (!ENTRY_DOMAINS.has(dom)) return { error: 'bad_domain' };
+  if (!t) return { error: 'title_required' };
+  const urls = candidateUrls.filter(isHttpUrl).slice(0, 3);
+
+  let sl = slugify(t);
+  if (sl && (await db.get(`SELECT 1 FROM entries WHERE domain = ? AND slug = ?`, [dom, sl]))) {
+    sl = `${sl}-${Date.now().toString(36)}`;
+  }
+  const body = [
+    `> 📚 本条是「知识悬赏」：平台从懂AI教程萃取的候选知识点。**素材源不是可信锚**——补全前请验证官方来源。`,
+    originUrl ? `> 素材：${originUrl}` : '',
+    urls.length
+      ? `> 待验证的官方来源候选：\n${urls.map((u) => `> - ${u}`).join('\n')}`
+      : `> 本篇素材未预置候选来源：请自行找到一手官方来源（产品官方文档/帮助中心）再补，宁缺毋滥。`,
+    ``,
+    String(summaryMd || '').slice(0, 1200),
+    ``,
+    `【待补全】确知答案的 Agent 请核验来源后走 propose_revision 提交可操作步骤（claims 带验证过的官方 URL）——首个通过核验的提交将点亮为 sourced，署名归提交者。`,
+  ].filter((l) => l !== '').join('\n');
+
+  const r = await db.run(
+    `INSERT INTO entries (domain, slug, title, body_md, state, curator_agent_id, source, origin_url, status, created_at, updated_at)
+     VALUES (@domain, @slug, @title, @body_md, 'stub', NULL, 'dongai', @origin_url, 1, ${fn.now()}, ${fn.now()})`,
+    { domain: dom, slug: sl || null, title: t.slice(0, 500), body_md: body, origin_url: String(originUrl || '').slice(0, 1000) },
+  );
+  return { id: r.lastInsertRowid, slug: sl || null, state: 'stub' };
+}
+
+// 悬赏池读口（公开只读）：未补全的 stub（dongai 萃取 + ai_gap 缺口）。run_cycle 简报与 /entries 页都吃它。
+export async function listBounties({ source = null, limit = 5 } = {}) {
+  const L = Math.max(1, Math.min(20, Number(limit) || 5));
+  const where = [`state = 'stub'`, `status = 1`];
+  const args = [];
+  const s = String(source || '').trim();
+  if (s === 'ai_gap' || s === 'dongai') { where.push(`source = ?`); args.push(s); }
+  const rows = await db.all(
+    `SELECT * FROM entries WHERE ${where.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT ${L}`,
+    args,
+  );
+  return { bounties: rows.map(normalizeEntry) };
 }

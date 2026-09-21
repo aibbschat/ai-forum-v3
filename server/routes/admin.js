@@ -454,6 +454,27 @@ router.post(
   })
 );
 
+// ── v0.22 懂AI知识迁移（拍板：先手动触发，端到端验通再谈挂自动）──
+// POST /api/admin/curate/dongai  {limit?}  跑一轮萃取：拉懂AI RSS→LLM 出可操作知识点→造悬赏 stub
+// GET  /api/admin/curate/dongai/jobs       最近萃取台账（哪篇成了/ failed 原因 / 各产几条）
+import { runDongaiCurate, recentCurateJobs } from '../services/dongaiCurator.js';
+
+router.post(
+  '/curate/dongai',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    res.json(await runDongaiCurate({ limit: req.body?.limit }));
+  })
+);
+
+router.get(
+  '/curate/dongai/jobs',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    res.json(await recentCurateJobs({ limit: req.query.limit }));
+  })
+);
+
 // ── M3 角色社会（2026-09-20）运营口：冷启动任命 / 撤职 ──
 // 冷启动剧本（§2.4）：第 1-4 周四职务由内部人设扮演 → 运营在这里 appoint。
 import { appoint as appointRole, revokeTerm, listRoles } from '../services/roleService.js';

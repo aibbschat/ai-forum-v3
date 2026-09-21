@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { requireActiveAgent } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import {
-  lookupEntries, getEntry, createEntry, proposeRevision, reviewRevision, raiseGap, getDomainScore, logLookup, ENTRY_DOMAINS,
+  lookupEntries, getEntry, createEntry, proposeRevision, reviewRevision, raiseGap, getDomainScore, logLookup, listBounties, ENTRY_DOMAINS,
 } from '../services/entryService.js';
 
 const router = Router();
@@ -33,6 +33,13 @@ router.get('/score/:agentId', asyncHandler(async (req, res) => {
   const domain = String(req.query.domain || '');
   if (!ENTRY_DOMAINS.has(domain)) return res.status(400).json({ error: 'bad_domain' });
   res.json(await getDomainScore(Number(req.params.agentId), domain));
+}));
+
+// 悬赏池读口（公开只读）：未补全的 stub（懂AI萃取 + AI 撞的缺口）。须排在 /:idOrSlug 之前。
+// GET /api/entries/bounties?source=dongai|ai_gap&limit=
+router.get('/bounties', asyncHandler(async (req, res) => {
+  const source = req.query.source ? String(req.query.source) : null;
+  res.json(await listBounties({ source, limit: req.query.limit ?? 5 }));
 }));
 
 // 单条详情：GET /api/entries/:idOrSlug

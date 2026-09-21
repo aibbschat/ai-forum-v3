@@ -1404,10 +1404,24 @@ export const db = {
         cur_rev INT,
         state VARCHAR(20) DEFAULT 'proposed',
         curator_agent_id INT,
+        source VARCHAR(20) DEFAULT NULL,
+        origin_url VARCHAR(1000),
         status TINYINT DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uk_entries_domain_slug (domain, slug)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      // v0.22 懂AI知识迁移台账（新表，IF NOT EXISTS 幂等，重启自动补建）
+      await db.run(`CREATE TABLE IF NOT EXISTS entry_curate_jobs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        origin_url VARCHAR(255) NOT NULL UNIQUE,
+        title VARCHAR(500),
+        category VARCHAR(30),
+        state VARCHAR(20) DEFAULT 'pending',
+        stub_count INT DEFAULT 0,
+        error TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
       await db.run(`CREATE TABLE IF NOT EXISTS entry_revisions (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -1448,6 +1462,13 @@ export const db = {
         KEY idx_lookup_created (created_at),
         KEY idx_lookup_miss (hits, created_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      // 生产库 entries 已存在 → CREATE IF NOT EXISTS 不补列，逐列守卫补 source/origin_url（v0.22 懂AI迁移）。
+      const eCols = await db.all(
+        `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'entries'`
+      );
+      if (!eCols.some((r) => r.c === 'source')) await db.run(`ALTER TABLE entries ADD COLUMN source VARCHAR(20) DEFAULT NULL`);
+      if (!eCols.some((r) => r.c === 'origin_url')) await db.run(`ALTER TABLE entries ADD COLUMN origin_url VARCHAR(1000)`);
     } else {
       await db.run(`CREATE TABLE IF NOT EXISTS entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1458,10 +1479,23 @@ export const db = {
         cur_rev INTEGER,
         state VARCHAR(20) DEFAULT 'proposed',
         curator_agent_id INTEGER,
+        source VARCHAR(20) DEFAULT NULL,
+        origin_url VARCHAR(1000),
         status TINYINT DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE (domain, slug)
+      )`);
+      await db.run(`CREATE TABLE IF NOT EXISTS entry_curate_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        origin_url VARCHAR(255) NOT NULL UNIQUE,
+        title VARCHAR(500),
+        category VARCHAR(30),
+        state VARCHAR(20) DEFAULT 'pending',
+        stub_count INTEGER DEFAULT 0,
+        error TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_entries_domain_state ON entries(domain, state)`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_entries_curator ON entries(curator_agent_id)`);
@@ -1507,6 +1541,10 @@ export const db = {
       )`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_lookup_created ON entry_lookup_log(created_at)`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_lookup_miss ON entry_lookup_log(hits, created_at)`);
+      // 既有 SQLite 库 entries 补列守卫（v0.22，与 MariaDB 分支对称）。
+      const eColsSqlite = await db.all(`PRAGMA table_info(entries)`);
+      if (!eColsSqlite.some((c) => c.name === 'source')) await db.run(`ALTER TABLE entries ADD COLUMN source VARCHAR(20)`);
+      if (!eColsSqlite.some((c) => c.name === 'origin_url')) await db.run(`ALTER TABLE entries ADD COLUMN origin_url VARCHAR(1000)`);
     }
   },
 
