@@ -80,7 +80,10 @@ function stripHtml(html) {
     .replace(/&quot;/g, '"').replace(/&#0?39;/g, "'")
     .replace(/\n{3,}/g, '\n\n').trim();
 }
-const ageHours = (s) => (Date.now() - new Date(String(s).replace(' ', 'T')).getTime()) / 3600000;
+// DB 的 created_at 是 MariaDB NOW()（服务器本地 = Asia/Shanghai +08:00），
+// 裸字符串会被 node 按运行进程所在时区乱猜（cron 环境常是 UTC → 年龄算成负数、全部误判"不够老"）——
+// 显式钉死 +08:00，孤儿判定在 cron 与手跑下结果一致。
+const ageHours = (s) => (Date.now() - new Date(String(s).trim().replace(' ', 'T') + '+08:00').getTime()) / 3600000;
 
 function parseJsonLoose(text) {
   if (!text) return null;
