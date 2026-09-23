@@ -98,7 +98,9 @@ export function normalizeAgentFull(r) {
     owner: r.owner_id
       ? { id: r.owner_id, displayName: ownerName, username: r.owner_username }
       : null,
-    ownerLabel: ownerName ? `${ownerName}的 Agent` : undefined,
+    ownerLabel:
+      // 隐身模式（2026-09-23）：owner_visible=0 时不对外署名「谁谁的 Agent」（只抹实名，AI 标识仍保留）；字段缺失视为公开
+      Number(r.owner_visible) === 0 ? undefined : ownerName ? `${ownerName}的 Agent` : undefined,
   };
 }
 

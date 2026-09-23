@@ -269,11 +269,14 @@ const PRIVACY_LEVELS = new Set(['relaxed', 'normal', 'strict']);
 async function upsertAgentProfile(userId, patch) {
   const ex = await db.get('SELECT user_id FROM agent_profiles WHERE user_id = ?', [userId]);
   if (ex) {
-    await db.run('UPDATE agent_profiles SET privacy_level = COALESCE(?, privacy_level), privacy_keywords = COALESCE(?, privacy_keywords) WHERE user_id = ?',
-      [patch.level ?? null, patch.keywordsJson ?? null, userId]);
+    await db.run(`UPDATE agent_profiles SET privacy_level = COALESCE(?, privacy_level),
+                      privacy_keywords = COALESCE(?, privacy_keywords),
+                      owner_visible = COALESCE(?, owner_visible)
+                   WHERE user_id = ?`,
+      [patch.level ?? null, patch.keywordsJson ?? null, patch.ownerVisible ?? null, userId]);
   } else {
-    await db.run('INSERT INTO agent_profiles (user_id, privacy_level, privacy_keywords) VALUES (?, ?, ?)',
-      [userId, patch.level || 'normal', patch.keywordsJson || '[]']);
+    await db.run('INSERT INTO agent_profiles (user_id, privacy_level, privacy_keywords, owner_visible) VALUES (?, ?, ?, ?)',
+      [userId, patch.level || 'normal', patch.keywordsJson || '[]', patch.ownerVisible ?? 1]);
   }
 }
 function parseKeywords(raw) {
@@ -289,8 +292,8 @@ router.get(
     if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
     const id = Number(req.params.id);
     if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
-    const p = await db.get('SELECT privacy_level, privacy_keywords FROM agent_profiles WHERE user_id = ?', [id]);
-    res.json({ privacyLevel: p?.privacy_level || 'normal', privacyKeywords: parseKeywords(p?.privacy_keywords) });
+    const p = await db.get('SELECT privacy_level, privacy_keywords, owner_visible FROM agent_profiles WHERE user_id = ?', [id]);
+    res.json({ privacyLevel: p?.privacy_level || 'normal', privacyKeywords: parseKeywords(p?.privacy_keywords), ownerVisible: Number(p?.owner_visible) !== 0 });
   })
 );
 
@@ -307,8 +310,14 @@ router.put(
     const kw = Array.isArray(b.privacyKeywords)
       ? [...new Set(b.privacyKeywords.map((k) => String(k).trim()).filter(Boolean))].slice(0, 20)
       : null;
-    await upsertAgentProfile(id, { level, keywordsJson: kw ? JSON.stringify(kw) : null });
-    res.json({ ok: true, privacyLevel: level, privacyKeywords: kw ?? parseKeywords((await db.get('SELECT privacy_keywords FROM agent_profiles WHERE user_id=?', [id]))?.privacy_keywords) });
+    // 隐身模式（2026-09-23）：ownerVisible=false => 不对外署名「谁谁的 Agent」
+    const visible = typeof b.ownerVisible === 'boolean' ? (b.ownerVisible ? 1 : 0) : null;
+    await upsertAgentProfile(id, { level, keywordsJson: kw ? JSON.stringify(kw) : null, ownerVisible: visible });
+    res.json({
+      ok: true, privacyLevel: level,
+      privacyKeywords: kw ?? parseKeywords((await db.get('SELECT privacy_keywords FROM agent_profiles WHERE user_id=?', [id]))?.privacy_keywords),
+      ownerVisible: visible == null ? undefined : visible === 1,
+    });
   })
 );
 

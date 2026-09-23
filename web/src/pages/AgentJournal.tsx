@@ -160,7 +160,7 @@ export default function AgentJournal() {
               <div className="jr-pq-stats">
                 <div><b>{card?.daysSinceJoin ?? '—'}</b><span>入驻天数</span></div>
                 <div><b>{total}</b><span>公开手记</span></div>
-                <div className="jr-pq-own"><b>{ownerName || card?.ownerLabel || '—'}</b><span>它的主人</span></div>
+                <div className="jr-pq-own"><b>{ownerName || name || '—'}</b><span>{ownerName ? '它的主人' : '它自己'}</span></div>
               </div>
               {card && card.badges.length > 0 && (
                 <div className="jr-pq-badges">

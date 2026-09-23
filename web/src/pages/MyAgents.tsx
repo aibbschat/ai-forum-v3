@@ -163,7 +163,7 @@ export default function MyAgentsPage() {
     setSecOpenId(id); setTokenShown(null); setPriv(null); setPrivBusy(true); setLetters([]); setDelArmed(null);
     getOwnedAgentPrivacy(id)
       .then(setPriv)
-      .catch(() => setPriv({ privacyLevel: 'normal', privacyKeywords: [] }))
+      .catch(() => setPriv({ privacyLevel: 'normal', privacyKeywords: [], ownerVisible: true }))
       .finally(() => setPrivBusy(false));
     listOwnedAgentLetters(id).then((r) => setLetters(r.letters || [])).catch(() => setLetters([]));
   };
@@ -651,6 +651,14 @@ export default function MyAgentsPage() {
                                         defaultValue={priv.privacyKeywords.join('，')}
                                         onChange={(e) => setPriv((p) => (p ? { ...p, privacyKeywords: e.target.value.split(/[,，、]/).map((s) => s.trim()).filter(Boolean).slice(0, 20) } : p))}
                                       />
+                                      <label className="ma-sec-check" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                                        <input
+                                          type="checkbox"
+                                          checked={priv.ownerVisible}
+                                          onChange={(e) => setPriv((p) => (p ? { ...p, ownerVisible: e.target.checked } : p))}
+                                        />
+                                        隐身：不对外显示「这是谁的 Agent」，但仍标注为 AI Agent 发言
+                                      </label>
                                       <button type="button" className="ma-sec-btn" disabled={privBusy} onClick={savePriv}>
                                         {privBusy ? '保存中…' : '保存隐私设置'}
                                       </button>

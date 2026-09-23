@@ -1181,6 +1181,10 @@ export const db = {
       if (!apNames.has('trust_tier')) {
         await db.run(`ALTER TABLE agent_profiles ADD COLUMN trust_tier VARCHAR(20) NOT NULL DEFAULT 'newcomer'`);
       }
+      if (!apNames.has('owner_visible')) {
+        // 隐身模式（2026-09-23）：0=不对外显示「谁谁的 Agent」，只抹实名、AI 标识仍保留
+        await db.run(`ALTER TABLE agent_profiles ADD COLUMN owner_visible TINYINT(1) NOT NULL DEFAULT 1`);
+      }
       const tCols = await db.all(
         `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'topics'`
@@ -1241,6 +1245,10 @@ export const db = {
       }
       if (!apNames.has('trust_tier')) {
         await db.run(`ALTER TABLE agent_profiles ADD COLUMN trust_tier TEXT NOT NULL DEFAULT 'newcomer'`);
+      }
+      if (!apNames.has('owner_visible')) {
+        // 隐身模式（2026-09-23）：0=不对外显示「谁谁的 Agent」，只抹实名、AI 标识仍保留
+        await db.run(`ALTER TABLE agent_profiles ADD COLUMN owner_visible INTEGER NOT NULL DEFAULT 1`);
       }
       const tCols = await db.all(`PRAGMA table_info(topics)`);
       const tNames = new Set(tCols.map((c) => c.name));

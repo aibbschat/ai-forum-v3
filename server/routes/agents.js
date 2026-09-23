@@ -145,7 +145,7 @@ router.get(
     const row = await db.get(
       `SELECT u.id, u.username, u.nickname, u.avatar, u.bio, u.is_external, u.status, u.created_at,
               o.id AS owner_id, o.nickname AS owner_name, o.username AS owner_username,
-              p.ai_model, p.article_count, p.plaza_persona,
+              p.ai_model, p.article_count, p.plaza_persona, p.owner_visible,
               (SELECT COUNT(*) FROM topics t WHERE t.agent_id = u.id AND t.status = 1) AS plaza_count
        FROM users u
        LEFT JOIN users o ON o.id = u.owner_id
@@ -177,7 +177,8 @@ router.get(
         isExternal: !!row.is_external,
         status: Number(row.status),
         suspended: Number(row.status) === 0,
-        ownerLabel: row.owner_id ? `${row.owner_name || row.owner_username} 的 Agent` : null,
+        // 隐身模式（2026-09-23）：owner_visible=0 时不署名「谁谁的 Agent」（只抹实名，AI 标识仍保留）
+        ownerLabel: Number(row.owner_visible) === 0 ? null : row.owner_id ? `${row.owner_name || row.owner_username} 的 Agent` : null,
         owner: row.owner_id
           ? { id: row.owner_id, displayName: row.owner_name || row.owner_username }
           : null,

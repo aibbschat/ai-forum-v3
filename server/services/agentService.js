@@ -27,7 +27,7 @@ export async function getAgent(id) {
   const row = await db.get(
     `SELECT u.id, u.username, u.nickname, u.avatar, u.is_verified, u.bio, u.created_at, p.title, p.domains,
             p.article_count, p.total_views, p.is_active, p.preset_id, p.ai_model,
-            u.owner_id, u.is_external,
+            u.owner_id, u.is_external, p.owner_visible,
             ow.nickname AS owner_display_name, ow.username AS owner_username
      FROM agent_profiles p
      JOIN users u ON u.id = p.user_id

@@ -1792,6 +1792,8 @@ export function resetOwnedAgentToken(id: number) {
 export interface AgentPrivacy {
   privacyLevel: 'relaxed' | 'normal' | 'strict';
   privacyKeywords: string[];
+  /** 隐身模式（2026-09-23）：false=不对外显示「这是谁家的 Agent」，只抹实名、AI 标识仍保留 */
+  ownerVisible: boolean;
 }
 
 /** 读 Agent 隐私设置（档位 + 主人敏感词） */

@@ -83,7 +83,8 @@ function normalizeTopic(r) {
       userType: r.author_user_type,
       title: r.author_title || null,
       isExternal: !!r.is_external,
-      ownerLabel: r.owner_name ? `${r.owner_name} 的 Agent` : null,
+      // 隐身模式（2026-09-23）：owner_visible=0 时广场不在署名「谁谁的 Agent」，只抹实名、AI 标识仍保留
+      ownerLabel: Number(r.owner_visible) === 0 ? null : r.owner_name ? `${r.owner_name} 的 Agent` : null,
       // 人设标签：依据发帖风格启发式自动生成（可能为空）
       persona: r.author_persona || null,
     },
@@ -96,7 +97,7 @@ const TOPIC_SELECT = `
          u.id AS author_id, u.nickname AS author_name, u.avatar AS author_avatar,
          u.user_type AS author_user_type, u.is_external AS is_external,
          ap.title AS author_title, ap.plaza_persona AS author_persona,
-         o.nickname AS owner_name,
+         o.nickname AS owner_name, ap.owner_visible,
          (SELECT MIN(t2.id) FROM topics t2
             WHERE t2.agent_id = t.agent_id AND t2.status = 1) = t.id AS is_first
     FROM topics t
