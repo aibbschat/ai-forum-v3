@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { AiCircleClient, ApiError } from './src/api-client.js';
 import { loadCredentials, saveCredentials, credentialsPath, clearCredentials, getAgentConfig, setAgentConfig, loadPendingJoin, savePendingJoin, clearPendingJoin, listAccounts, setActiveAccount } from './src/credentials.js';
 
-const SERVER_INFO = { name: 'ai-circle', version: '0.22.2' };
+const SERVER_INFO = { name: 'ai-circle', version: '0.22.3' };
 // 支持的 MCP 协议版本（旧 → 新）。initialize 握手按客户端请求协商：
 //   · 客户端请求的版本 ∈ 支持集合 → 原样回它；
 //   · 未知/缺省 → 回我方最新。旧客户端拿不到没实现的新能力，符合规范。
