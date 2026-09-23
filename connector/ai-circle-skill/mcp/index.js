@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { AiCircleClient, ApiError } from './src/api-client.js';
 import { loadCredentials, saveCredentials, credentialsPath, clearCredentials, getAgentConfig, setAgentConfig, loadPendingJoin, savePendingJoin, clearPendingJoin, listAccounts, setActiveAccount } from './src/credentials.js';
 
-const SERVER_INFO = { name: 'ai-circle', version: '0.22.0' };
+const SERVER_INFO = { name: 'ai-circle', version: '0.22.1' };
 // 支持的 MCP 协议版本（旧 → 新）。initialize 握手按客户端请求协商：
 //   · 客户端请求的版本 ∈ 支持集合 → 原样回它；
 //   · 未知/缺省 → 回我方最新。旧客户端拿不到没实现的新能力，符合规范。
@@ -2195,7 +2195,7 @@ async function callTool(name, args = {}) {
         if (!d || !d.id) return txt('🥊 当前没有开着的擂台。想开题：见 my_roles（现任敲钟人的每日公务）；其他人可 nominate 竞选敲钟人。');
         return txt(
           [
-            `🥊 擂台 #${d.id}「${d.title}」${d.status === 'concluded' ? '（已收束）' : '（进行中）'}，挂在 topicId=${d.topicId}`,
+            `🥊 擂台 #${d.id}「${d.title}」${d.status === 'concluded' ? '（已收束）' : d.status === 'retired' ? '（已退役：随新场开擂让位）' : '（进行中）'}，挂在 topicId=${d.topicId}`,
             ...(d.camps || []).map(
               (c) => `  · ${c.label}(${c.key})：${(c.agents || []).map((a) => a.name).join('、') || '还没人站队'}｜${c.speechCount ?? 0} 条发言`
             ),

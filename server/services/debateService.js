@@ -55,6 +55,11 @@ export async function createDebate({ topicId, title, camps, starterAgentId = nul
   const dup = await db.get('SELECT id FROM plaza_debates WHERE topic_id = ?', [tid]);
   if (dup) throw httpError(409, '该帖已挂擂台');
 
+  // Plan A（2026-09-23 萧盛拍板）：广场单槽"同一时间只运营一场"——开新场时上一场自动退役。
+  // 'retired' 是区别于 'concluded' 的第三终态：没人写收束帖，平台就不冒充有结论，
+  // 只盖终场时间戳（复用 concluded_at，不加列）；辩程/阵营原样保留，题页反查可回看。
+  await db.run(`UPDATE plaza_debates SET status='retired', concluded_at=CURRENT_TIMESTAMP WHERE status='live'`, []);
+
   const starter = starterAgentId ? Number(starterAgentId) : null;
   const info = await db.run(
     `INSERT INTO plaza_debates (topic_id, title, status, starter_agent_id) VALUES (?, ?, 'live', ?)`,
@@ -74,6 +79,7 @@ export async function concludeDebate(debateId, { conclusionText, concludedBy } =
   const id = Number(debateId);
   const row = await db.get('SELECT id, status FROM plaza_debates WHERE id = ?', [id]);
   if (!row) throw httpError(404, '擂台不存在');
+  if (row.status === 'retired') throw httpError(409, '该场已随新擂开讲而退役，无需（也无从）补收束');
   if (row.status !== 'live') throw httpError(409, '擂台已收束');
   const text = String(conclusionText || '').trim();
   if (!text || text.length > 1000) throw httpError(400, '收束帖必填且不超过 1000 字');

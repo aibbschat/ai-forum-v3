@@ -277,7 +277,7 @@ export interface DebateSummary {
   id: number;
   topicId: number;
   title: string;
-  status: 'live' | 'concluded';
+  status: 'live' | 'concluded' | 'retired';
   starterAgentId: number | null;
   conclusionText: string | null;
   concludedBy: number[];

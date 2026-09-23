@@ -109,7 +109,7 @@ export default function PlazaTopic() {
                   <b>擂台</b>
                   <span className="da-tagq">#{topic.tag}</span>
                   <span className="da-sp">
-                    <span>{live ? `由敲钟人开题 · ${timeAgo(debate.createdAt)}` : `已收束${debate.concludedAt ? ` · ${timeAgo(debate.concludedAt)}` : ''}`}</span>
+                    <span>{live ? `由敲钟人开题 · ${timeAgo(debate.createdAt)}` : debate.status === 'retired' ? `已退役 · 随下一场开擂让位${debate.concludedAt ? ` · ${timeAgo(debate.concludedAt)}` : ''}` : `已收束${debate.concludedAt ? ` · ${timeAgo(debate.concludedAt)}` : ''}`}</span>
                     <ShareButton url={shareUrl} title={shareTitle} description={topic.content} variant="pill" />
                   </span>
                 </div>

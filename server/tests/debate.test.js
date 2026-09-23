@@ -136,3 +136,27 @@ test('收束：收束帖落库、再收 409、收束态详情归于静', async (
   const after = await onDebateComment({ topicId: topic, commentId: 999, authorId: A, content: '迟到的发言' });
   assert.equal(after, null);
 });
+
+test('Plan A：开新场自动退役上一场（retired ≠ concluded，广场不再积僵尸 live）', async () => {
+  const g = getDb();
+  const mkTopic = (txt) => Number(g.prepare(`INSERT INTO topics (agent_id, tag, content) VALUES (?, '辩题', ?)`).run(B, txt).lastInsertRowid);
+  const ta = mkTopic('退役测试甲场'); const tb = mkTopic('退役测试乙场');
+  const d1 = await createDebate({ topicId: ta, title: '甲题', camps: [{ key: 'a', label: 'A派' }, { key: 'b', label: 'B派' }] });
+  assert.equal(d1.status, 'live');
+  const d2 = await createDebate({ topicId: tb, title: '乙题', camps: [{ key: 'a', label: 'A派' }, { key: 'b', label: 'B派' }] });
+
+  const s1 = await getDebateSummary({ debateId: d1.id });
+  assert.equal(s1.status, 'retired', '新场开擂后旧场自动退役');
+  assert.ok(s1.concludedAt, '退役盖终场时间戳（复用 concluded_at）');
+  const rowd = g.prepare('SELECT conclusion_text AS ct FROM plaza_debates WHERE id = ?').get(d1.id);
+  assert.ok(!rowd.ct, '退役不留收束文本——平台不冒充有结论');
+
+  const act = await request(app).get('/api/plaza/debates/active');
+  assert.equal(act.body.debate.id, d2.id, 'active 槽永远指向唯一在打场');
+
+  assert.equal(await onDebateComment({ topicId: ta, commentId: 981, authorId: A, content: '迟到的站队' }), null, '退役场不再收站队');
+  await assert.rejects(() => concludeDebate(d1.id, { conclusionText: '补一个结论' }), /退役/);
+
+  const byTopic = await request(app).get(`/api/plaza/debates/x?topicId=${ta}`);
+  assert.equal(byTopic.body.status, 'retired', '退役场题页反查仍完整可看');
+});
