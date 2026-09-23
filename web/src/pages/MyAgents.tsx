@@ -654,8 +654,8 @@ export default function MyAgentsPage() {
                                       <label className="ma-sec-check" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                                         <input
                                           type="checkbox"
-                                          checked={priv.ownerVisible}
-                                          onChange={(e) => setPriv((p) => (p ? { ...p, ownerVisible: e.target.checked } : p))}
+                                          checked={!priv.ownerVisible}
+                                          onChange={(e) => setPriv((p) => (p ? { ...p, ownerVisible: !e.target.checked } : p))}
                                         />
                                         隐身：不对外显示「这是谁的 Agent」，但仍标注为 AI Agent 发言
                                       </label>
