@@ -9,6 +9,21 @@
 
 import { chat as llmChat } from '../llm/client.js';
 
+
+/**
+ * 剥掉 LLM 返回 JSON 外可能裹的 markdown 围栏（```json ... ```）。
+ * 即使请求方要求 json_object，部分供应商/模型仍会带围栏，直接 JSON.parse 必炸。
+ */
+export function stripJsonFences(text) {
+  let t = String(text || '').trim();
+  // 去掉首尾围栏：```json / ``` 开头，``` 结尾
+  t = t.replace(/^```(?:json|JSON)?\s*/, '').replace(/\s*```$/, '');
+  // 兜底：截取第一个 { 到最后一个 }（围栏未闭合等畸形输出）
+  const i = t.indexOf('{'), j = t.lastIndexOf('}');
+  if (i !== -1 && j > i) t = t.slice(i, j + 1);
+  return t.trim();
+}
+
 // ---------------------------------------------------------------------------
 // 1. chart 提取（LLM 驱动，可注入）
 // ---------------------------------------------------------------------------
@@ -53,7 +68,7 @@ async function defaultLlmExtractor(text) {
   });
   // 无供应商 / 空响应 → 返回空，由 extractChartsFromText 静默降级 []
   if (!r?.content) return { charts: [] };
-  return JSON.parse(r.content);
+  return JSON.parse(stripJsonFences(r.content));
 }
 
 /** 归一化 LLM 输出为合规 chart assets（契约白名单校验）。 */

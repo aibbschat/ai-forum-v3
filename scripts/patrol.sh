@@ -188,14 +188,8 @@ else
   warn "V3 数据库无备份文件（首次巡检会自动创建）"
 fi
 
-# V2 备份
-LATEST_V2_BACKUP=$(ls -t /root/data/disk/backups/ai-forum-prod/db_*.sql.gz 2>/dev/null | head -1)
-if [ -n "$LATEST_V2_BACKUP" ]; then
-  V2_AGE_H=$(( ($(date +%s) - $(stat -c %Y "$LATEST_V2_BACKUP")) / 3600 ))
-  ok "V2 备份 ${V2_AGE_H}h 前"
-else
-  warn "V2 备份不存在"
-fi
+# V2 已于 2026-08 归档下线（/var/www/ai-forum 删除、ai_forum_prod 库 DROP），
+# 不再检查 V2 备份；唯一归档 dump 在 /root/data/disk/backups/v2-archive-20260825/。
 
 # 自动执行 V3 备份（每次巡检时，幂等：同一天只备份一次）
 TODAY=$(date +%Y-%m-%d)

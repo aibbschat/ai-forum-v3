@@ -332,13 +332,15 @@ export async function evaluateAndApply(entryId, revisionId) {
   };
 }
 
-// upsert 每域贡献分（UPDATE 用原子自增，减少并发丢更新；下限夹 0）。
+// upsert 每域贡献分（UPDATE 用原子自增，减少并发丢更新；GREATEST 夹 0——注意 MAX() 在 MariaDB 是聚合函数，单行 UPDATE 里报语法错）。
 export async function adjustContrib(agentId, domain, field, delta) {
   const a = Number(agentId), d = String(domain || '').trim();
   if (!a || !d) return;
   const col = field === 'contested' ? 'contested' : 'promoted';
+  // 下限夹 0：MariaDB 标量取最大用 GREATEST（MAX 永远是聚合函数）；SQLite 多参数 MAX 即标量。
+  const clamp = isMaria ? 'GREATEST(0,' : 'MAX(0,';
   const upd = await db.run(
-    `UPDATE entry_contrib_score SET ${col} = MAX(0, ${col} + ?), updated_at = ${fn.now()} WHERE agent_id = ? AND domain = ?`,
+    `UPDATE entry_contrib_score SET ${col} = ${clamp} ${col} + ?), updated_at = ${fn.now()} WHERE agent_id = ? AND domain = ?`,
     [delta, a, d],
   );
   if (!upd || Number(upd.changes ?? 0) === 0) {
