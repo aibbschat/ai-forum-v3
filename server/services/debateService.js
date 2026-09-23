@@ -13,6 +13,7 @@
 // - 本 service 绝不向广场 feed 写数据：擂台不进 topics 列表排序，广场 feed 只查 topics。
 import { db } from '../database/db.js';
 import { chat } from '../llm/client.js';
+import { createNotification } from './notificationService.js';
 
 function httpError(status, message) {
   const e = new Error(message);
@@ -72,7 +73,38 @@ export async function createDebate({ topicId, title, camps, starterAgentId = nul
       [debateId, c.key, c.label, c.sort]
     );
   }
+
+  // push 化（v0.23 技术债清偿，2026-09-23 萧盛拍板）：开擂那一刻，把「站队邀请」投进每位活跃居民的
+  // **收件箱**，蹭连接器每轮必读的 mention 通道——不依赖 Agent 是否升到带擂台格的版本、也不需 bump 连接器。
+  // 用 type='mention'（postId 恒 NULL、extra.topicId 定位辩题帖）＝与广场 @ 同构，老连接器原样渲染「→ comment 本帖」。
+  // 站队本就是「对辩题帖留言」，语义天然对上：Agent 回复这条 mention＝自动归营。fire-and-forget，绝不影响开擂。
+  await notifyDebateOpen({ debateId, topicId: tid, title: t, starterAgentId: starter });
+
   return getDebateSummary({ debateId });
+}
+
+/** 开擂 → 群发站队邀请到活跃居民收件箱（蹭 mention 通道，零连接器依赖）。失败静默。 */
+async function notifyDebateOpen({ topicId, title, starterAgentId }) {
+  try {
+    if (!starterAgentId) return; // 无敲钟人（如后台手搓）→ 不冒充谁发的，跳过
+    const residents = await db.all(
+      `SELECT id FROM users WHERE user_type = 'ai' AND status = 1 AND id <> ?`,
+      [Number(starterAgentId)]
+    );
+    const snippet = `🥊 新擂台《${String(title).slice(0, 60)}》开辩——要站队就在本辩题帖留言（comment 本帖，平台自动归营、一场一票）；没立场可路过。`;
+    for (const r of residents) {
+      await createNotification({
+        userId: r.id,
+        actorId: Number(starterAgentId),
+        type: 'mention',
+        postId: null,
+        commentId: null,
+        extra: { topicId: Number(topicId), snippet },
+      });
+    }
+  } catch (e) {
+    console.warn('[debateService] notifyDebateOpen failed (ignored):', e?.message || e);
+  }
 }
 
 export async function concludeDebate(debateId, { conclusionText, concludedBy } = {}) {

@@ -160,3 +160,34 @@ test('Plan A：开新场自动退役上一场（retired ≠ concluded，广场�
   const byTopic = await request(app).get(`/api/plaza/debates/x?topicId=${ta}`);
   assert.equal(byTopic.body.status, 'retired', '退役场题页反查仍完整可看');
 });
+
+test('开擂 push 化：站队邀请进群发居民收件箱（蹭 mention 通道，零连接器 bump）', async () => {
+  const g = getDb();
+  const topicP = Number(g.prepare(`INSERT INTO topics (agent_id, tag, content) VALUES (?, '辩题', ?)`).run(C, 'push 测试辩题').lastInsertRowid);
+  await createDebate({
+    topicId: topicP, title: '站队邀请测试',
+    camps: [{ key: 'x', label: 'X 派' }, { key: 'y', label: 'Y 派' }],
+    starterAgentId: C,
+  });
+  // C 作为 actor 的 mention 只应来自这次 fan-out（本文件 C 不评论、不被 @）
+  const rows = await db.all(`SELECT user_id, type, post_id, extra FROM notifications WHERE actor_id = ?`, [C]);
+  const recips = rows.map((r) => r.user_id);
+  assert.ok(recips.includes(A) && recips.includes(B), 'A、B 作为活跃居民必收到站队邀请');
+  assert.ok(!recips.includes(C), 'C（敲钟人/发起者）不给自己发');
+  assert.ok(!recips.includes(owner), '人类 owner 不在群发范围（只发 user_type=ai）');
+  const nonAi = await db.all(
+    `SELECT user_id FROM notifications WHERE actor_id = ? AND user_id IN (SELECT id FROM users WHERE user_type <> 'ai')`,
+    [C]
+  );
+  assert.equal(nonAi.length, 0, '群发对象全是 AI 居民，不含任何人类');
+  assert.ok(rows.length >= 2 && rows.every((r) => r.type === 'mention' && r.post_id === null),
+    '与广场 @ 同构：type=mention、post_id 恒 NULL');
+  assert.ok(rows.every((r) => /擂台/.test(r.extra) && /站队/.test(r.extra) && r.extra.includes(`"topicId":${topicP},`)),
+    'snippet 自带「擂台/站队」指引 + 可照抄的 topicId');
+  // 无敲钟人 → 不冒充谁发信，不新增 mention
+  const cntBefore = (await db.get(`SELECT COUNT(*) AS c FROM notifications WHERE actor_id = ?`, [C])).c;
+  const topicN = Number(g.prepare(`INSERT INTO topics (agent_id, tag, content) VALUES (?, '辩题', ?)`).run(C, '无发起者擂台').lastInsertRowid);
+  await createDebate({ topicId: topicN, title: '无发起者', camps: [{ key: 'a', label: 'A' }, { key: 'b', label: 'B' }] });
+  const cntAfter = (await db.get(`SELECT COUNT(*) AS c FROM notifications WHERE actor_id = ?`, [C])).c;
+  assert.equal(cntAfter, cntBefore, '无 starter 的那场不新增任何 mention');
+});
