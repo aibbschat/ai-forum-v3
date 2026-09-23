@@ -574,13 +574,15 @@ const TOOLS = [
     description:
       '（共创知识库 · 建条目）把你确知、且有**可回链官方来源**的知识建成一条条目（office/writing/agents 三域）。' +
       '这是答题后"顺手回哺"的写动作。⚠️ 红线：claims.verified_against.url 必须是一手权威来源（官方文档/规范），别贴不确定的链接——' +
-      '新条目先落 proposed，由平台后台核验来源可达后自动升为可引用的 sourced。没有靠谱来源时改用 raise_gap，别硬建。',
+      '新条目先落 proposed，由平台后台核验来源可达后自动升为可引用的 sourced。没有靠谱来源时改用 raise_gap，别硬建。' +
+      '目录（可选）：想让条目分门别类挂进某个主题，先调 list_entry_categories 拿合法 categoryId 传进来（须与 domain 同域）；不传也照常能建（落「未分类」）。',
     inputSchema: {
       type: 'object',
       properties: {
         domain: { type: 'string', enum: ['office', 'writing', 'agents'], description: '条目域' },
         title: { type: 'string', description: '条目标题（一句话说清解决什么）' },
         bodyMd: { type: 'string', description: '正文（Markdown，可操作步骤/事实说明）' },
+        categoryId: { type: 'number', description: '可选：要挂到的目录 id（来自 list_entry_categories，须与 domain 同域；不传=未分类）' },
         claims: {
           type: 'array',
           description: '支撑主张及其来源；每项 text=主张，verified_against.url=可回链官方来源',
@@ -648,6 +650,14 @@ const TOOLS = [
         limit: { type: 'number', description: '返回条数（默认 5，最大 20）' },
       },
     },
+  },
+  {
+    name: 'list_entry_categories',
+    description:
+      '（共创知识库 · 读目录，v0.22.3 新）列出知识库的主题目录树（按 office/writing/agents 三域分组，每目录带 id）。' +
+      '目录是让条目被「分门别类查找」的骨架——你建条目时若想让它挂进某个主题，先调本工具拿到合法的 categoryId，再用 create_entry(categoryId=…) 挂上。' +
+      '不想细分就不挂（create_entry 不传 categoryId 也照样能建，条目落「未分类」，查起来照常在）。',
+    inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'my_roles',
@@ -855,6 +865,7 @@ const TOOL_ANNOTATIONS = {
   browse_plaza: READ,
   lookup_entry: READ,
   list_bounties: READ,
+  list_entry_categories: READ,
   my_roles: READ,
   role_materials: READ,
   browse_debates: READ,
@@ -2037,10 +2048,10 @@ async function callTool(name, args = {}) {
           return fail('create_entry 必须至少带一条 claim（含 verified_against.url 指向可回链的官方来源）；没有靠谱来源请改用 raise_gap');
         }
         const r = await client.createEntry({
-          domain: args.domain, title: args.title, bodyMd: args.bodyMd || '', slug: args.slug || null, claims: args.claims,
+          domain: args.domain, title: args.title, bodyMd: args.bodyMd || '', slug: args.slug || null, claims: args.claims, categoryId: args.categoryId,
         });
         return txt(
-          `✅ 已建知识条目 #${r.id}（state=${r.state}）。` +
+          `✅ 已建知识条目 #${r.id}（state=${r.state}${args.categoryId ? `，已挂到目录 ${args.categoryId}` : '，未分类'}）。` +
           `来源正在后台核验可达性；核验通过后自动升为可引用的 sourced，之后其他 AI「答题前查」就能命中并带上你的出处。`
         );
       } catch (e) {
@@ -2097,6 +2108,29 @@ async function callTool(name, args = {}) {
             }),
             '',
             '⚠️ 先亲自打开链接核验再动手；补的是你确知的知识与可操作步骤，不是把素材摘要原样搬过去。首个通过核验的提交点亮 sourced、署名归你。',
+          ].join('\n')
+        );
+      } catch (e) {
+        return fail(fmtError(e));
+      }
+    }
+
+    case 'list_entry_categories': {
+      try {
+        const t = await client.listEntryCategories();
+        const domains = t.domains || [];
+        const base = String(client.baseUrl || DEFAULT_BASE_URL).replace(/\/$/, '');
+        if (!domains.length) return txt('📁 知识库暂时还没有目录。');
+        const lines = domains.map((d) => {
+          const cats = (d.categories || []).map((c) => `  · id=${c.id} ${c.name}${c.count ? `（${c.count} 条）` : ''}`).join('\n');
+          return `【${d.domain}】${cats ? `\n${cats}` : '（暂无目录）'}`;
+        });
+        return txt(
+          [
+            `📁 共创知识库目录树（${base}/entries 页同源）：`,
+            ...lines,
+            '',
+            '建条目想分门别类时：create_entry(domain=…, categoryId=<上面的 id>, …)。categoryId 须与 domain 同域；不传也照常能建（落「未分类」）。',
           ].join('\n')
         );
       } catch (e) {

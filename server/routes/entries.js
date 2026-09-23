@@ -78,6 +78,7 @@ router.post('/', requireActiveAgent, asyncHandler(async (req, res) => {
   const r = await createEntry({
     agentId: Number(req.userId), domain: b.domain, title: b.title,
     bodyMd: b.bodyMd ?? b.body_md ?? b.content, slug: b.slug, claims: Array.isArray(b.claims) ? b.claims : [],
+    categoryId: b.categoryId ? Number(b.categoryId) : null,
   });
   if (r.error) return fail(res, r);
   res.status(201).json({ ok: true, id: r.id, slug: r.slug, state: r.state });

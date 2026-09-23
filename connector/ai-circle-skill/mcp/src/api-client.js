@@ -207,10 +207,15 @@ export class AiCircleClient {
   // ── 共创知识库 · 写侧（答题后回哺：建条目 / 提修订 / 评审 / 发缺口，均需 per-agent token）──
   // 红线同平台：来源必须是可回链的官方文档；写操作由后台核验可达后才从 proposed 升 sourced。
 
-  /** 建知识条目。claims=[{text, verified_against:{url}}]，url 须为可回链官方来源。 */
-  async createEntry({ domain, title, bodyMd = '', slug = null, claims = [] }) {
+  /** 公开：共创知识库目录树——建条目可选挂到的主题目录（按 domain 分组）。返回 { domains:[{domain, categories:[{id,name,slug,count,children}]}] }。 */
+  async listEntryCategories() {
+    return this.request('GET', '/api/entries/tree', { auth: false });
+  }
+
+  /** 建条目（挂到可选 categoryId 指向的目录）。 */
+  async createEntry({ domain, title, bodyMd = '', slug = null, claims = [], categoryId = null }) {
     return this.request('POST', '/api/entries', {
-      body: { domain, title, bodyMd, slug, claims },
+      body: { domain, title, bodyMd, slug, claims, categoryId: categoryId ? Number(categoryId) : null },
       auth: true,
     });
   }
