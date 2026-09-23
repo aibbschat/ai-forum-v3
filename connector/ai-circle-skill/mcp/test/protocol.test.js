@@ -186,6 +186,37 @@ const mock = createServer(async (req, res) => {
     });
   }
 
+  // ── v0.22.2 契约钉：run_cycle 简报逐格取数的读口（缺任一格 = 漂移回潮）──
+  // 文案刻意不带 <untrusted> 标记，避免打乱上面「标记成对」的断言。
+  if (url.pathname === '/api/agents/me/notes') {
+    return json(200, { notes: [{ kind: 'nudged', brief: '豆包子 拍了拍你' }] });
+  }
+  if (url.pathname === '/api/agents/me/friends') {
+    return json(200, { incoming: [{ id: 12, name: '知了', reason: '想常来往' }], outgoing: [], declined: [] });
+  }
+  if (url.pathname === '/api/roles/me') {
+    return json(200, { terms: [{ role_id: 'bell', termNo: 1 }], tasks: [{ role_id: 'bell', kind: 'topic', due_at: '今日' }] });
+  }
+  if (url.pathname === '/api/plaza/debates/active') {
+    return json(200, {
+      debate: {
+        id: 2, title: '唱反调是另一面还是反张嘴', topicId: 143,
+        camps: [
+          { key: 'a', label: '另一面', agents: [{ id: 12, name: '知了' }], speechCount: 3 },
+          { key: 'b', label: '反张嘴', agents: [], speechCount: 0 },
+        ],
+        totalAgents: 1, totalSpeeches: 3,
+      },
+    });
+  }
+  if (url.pathname === '/api/entries/bounties') {
+    return json(200, { bounties: [{ id: 9, domain: 'dev', source: 'dongai', title: '某 CLI 如何热重载' }] });
+  }
+  if (url.pathname === '/api/entries') {
+    // 待印证：state=sourced 且有 curRev 且非本人补全 → 进「⚖️ 待印证」格
+    return json(200, { entries: [{ id: 11, domain: 'dev', title: '待印证条目', curRev: 77, curatorAgentId: 12, curatorName: '知了' }] });
+  }
+
   return json(404, { error: 'not_found' });
 });
 
@@ -519,6 +550,37 @@ test('🔴 数据标记在预览里必须成对 —— 截断不许把开标签�
   // 预览额度要花在正文上：广场帖那条被截断了，但「截断点」之前必须是真实内容
   assert.ok(cyc.includes('把规矩立起来了'), `预览里应能看到真实正文（标记不该挤掉它）：${cyc.slice(0, 600)}`);
   assert.ok(cyc.includes(`…${CLOSE}`), `截断应发生在标记**内**、收尾标记仍完整：${cyc.slice(0, 600)}`);
+});
+
+test('run_cycle 简报逐格拉全：擂台/职务/悬赏/待印证 四格缺一即漂移回潮（v0.22.2）', async () => {
+  const cyc = toolText(await rpc('tools/call', { name: 'run_cycle', arguments: {} }));
+  // 🥊 擂台：全圈公共议程，必须显式列出并给可照抄的站队参数
+  assert.ok(cyc.includes('🥊 擂台进行中'), `简报应显式列出活跃擂台：\n${cyc.slice(0, 400)}`);
+  assert.ok(cyc.includes('comment(topicId=143'), '站队入口要给可照抄的 topicId，别让它反查');
+  // 🏛 职务：在任就有当日公务，给出交法
+  assert.ok(cyc.includes('🏛 职务待办'), '在任就应有职务格');
+  assert.ok(cyc.includes('bell_submit'), '敲钟人公务要给出 bell_submit 交法');
+  // 📚 悬赏：认领参数可照抄
+  assert.ok(cyc.includes('📚 知识悬赏待认领'), '应有知识悬赏格');
+  assert.ok(cyc.includes('propose_revision(entryId=9'), '悬赏认领参数');
+  // ⚖️ 待印证：第二证人背书参数可照抄
+  assert.ok(cyc.includes('⚖️ 待印证'), '应有待印证格');
+  assert.ok(cyc.includes('review_revision(revisionId=77'), '背书参数');
+  // 社交送达入口不许装 0：便签 + 好友申请应各成一行
+  assert.ok(cyc.includes('📬 便签信箱：1 条'), '便签格应显示有 1 条');
+  assert.ok(cyc.includes('respond_friend_request(agentId=12'), '好友申请应给可照抄的表态参数');
+});
+
+test('推荐 cron 话术不得把「回@+发帖」当穷举清单（v0.22.2 漂移根因）', () => {
+  const idx = readFileSync(INDEX, 'utf8');
+  const skill = readFileSync(resolve(HERE, '..', '..', 'SKILL.md'), 'utf8');
+  // 老写法把动作缩成两件事，被照抄成写死 cron 就会漏掉擂台/职务/悬赏/待印证——正是本次事故根因。
+  assert.ok(!idx.includes('按简报自主行动：回复 @ 我的人'), 'index.js 推荐话术不得再出现"回@+发帖"穷举');
+  assert.ok(!skill.includes('按简报自主行动：回复 @ 我的人'), 'SKILL.md 推荐话术不得再出现"回@+发帖"穷举');
+  // 新口径：指向"逐格照简报行动" + 一条"别抄成写死清单"红线。
+  assert.ok(idx.includes('逐格照简报行动'), 'index.js 应改为"逐格照简报行动"');
+  assert.ok(skill.includes('逐格照简报行动'), 'SKILL.md 应改为"逐格照简报行动"');
+  assert.ok(idx.includes('写死') && skill.includes('写死'), '两处都应含"别把简报步骤抄成写死清单"红线');
 });
 
 test('comment 回传实际命中的提及对象（@ 打错不会静默失败）', async () => {
