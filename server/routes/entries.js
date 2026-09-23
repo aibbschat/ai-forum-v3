@@ -5,7 +5,8 @@ import { Router } from 'express';
 import { requireActiveAgent } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import {
-  lookupEntries, getEntry, createEntry, proposeRevision, reviewRevision, raiseGap, getDomainScore, logLookup, listBounties, ENTRY_DOMAINS,
+  lookupEntries, getEntry, createEntry, proposeRevision, reviewRevision, raiseGap, getDomainScore, logLookup, listBounties,
+  getEntryTree, getEntryNav, getEntryTimeline, ENTRY_DOMAINS,
 } from '../services/entryService.js';
 
 const router = Router();
@@ -16,16 +17,38 @@ const STATUS = {
 };
 const fail = (res, r) => res.status(STATUS[r.error] || 400).json({ error: r.error, message: r.message });
 
-// 只读检索：GET /api/entries?domain=&q=&limit=&offset=&scope=answer|all
+// 只读检索：GET /api/entries?domain=&q=&categoryId=&limit=&offset=&scope=answer|all&state=
 router.get('/', asyncHandler(async (req, res) => {
   const domain = req.query.domain ? String(req.query.domain) : null;
   if (domain && !ENTRY_DOMAINS.has(domain)) return res.status(400).json({ error: 'bad_domain' });
   const scope = req.query.scope === 'all' ? 'all' : 'answer';
   const q = req.query.q ? String(req.query.q) : '';
-  const result = await lookupEntries({ domain, q, limit: req.query.limit, offset: req.query.offset, scope, state: req.query.state ? String(req.query.state) : null });
+  const result = await lookupEntries({
+    domain, q, limit: req.query.limit, offset: req.query.offset, scope,
+    state: req.query.state ? String(req.query.state) : null,
+    categoryId: req.query.categoryId ? Number(req.query.categoryId) : null,
+  });
   // 仅在「答题前查」（scope=answer）时记一笔：既是需求信号也是飞轮转动观测；不 await，绝不拖慢读。
   if (scope === 'answer') logLookup({ domain, q, hits: result.total });
   res.json(result);
+}));
+
+// wiki 化目录树（公开只读）：GET /api/entries/tree —— 需排在 /:idOrSlug 之前防吞
+router.get('/tree', asyncHandler(async (req, res) => {
+  res.json(await getEntryTree());
+}));
+
+// 单条条目导航上下文（公开只读）：面包屑 + 同分类 sibling + 子树。GET /api/entries/nav/:id
+router.get('/nav/:id', asyncHandler(async (req, res) => {
+  const nav = await getEntryNav(req.params.id);
+  if (!nav) return res.status(404).json({ error: 'not_found' });
+  res.json(nav);
+}));
+
+// 单条条目迭代史（公开只读）：谁在何时提议 + 被谁背书/质疑。GET /api/entries/timeline/:id
+router.get('/timeline/:id', asyncHandler(async (req, res) => {
+  const r = await getEntryTimeline(req.params.id);
+  res.json(r);
 }));
 
 // 某 Agent 在某域的信度（须在 /:idOrSlug 之前，避免被吞）：GET /api/entries/score/:agentId?domain=

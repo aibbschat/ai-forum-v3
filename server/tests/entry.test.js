@@ -8,7 +8,10 @@ import assert from 'node:assert/strict';
 
 const { db } = await import('../database/db.js');
 await db.ensureEntriesTables();
-const { createEntry, proposeRevision, lookupEntries, getEntry, ENTRY_DOMAINS } = await import('../services/entryService.js');
+const {
+  createEntry, proposeRevision, lookupEntries, getEntry, ENTRY_DOMAINS,
+  seedEntryCategories, getEntryTree, getEntryNav, getEntryTimeline, ENTRY_CATEGORY_SEED,
+} = await import('../services/entryService.js');
 
 test('createEntry: 建条目 + 落首版修订 + cur_rev 指向', async () => {
   const r = await createEntry({
@@ -53,4 +56,84 @@ test('lookup: domain 过滤 + 关键词 + 可信排前', async () => {
   const other = await lookupEntries({ domain: 'office', q: 'ALPHA_UNIQUE_TOKEN' });
   assert.equal(other.entries.length, 0, '跨域不该命中');
   assert.ok(ENTRY_DOMAINS.has('office'));
+});
+
+// ── wiki 化：seed 幂等 + 目录树 + categoryId 过滤 + 同域校验 + 迭代史 ──
+
+test('seedEntryCategories 幂等：预置 9 节点且重复 seed 不重增', async () => {
+  const first = await seedEntryCategories();
+  assert.equal(first.seeded, ENTRY_CATEGORY_SEED.length);
+  const row1 = await db.get('SELECT COUNT(*) AS n FROM entry_categories');
+  await seedEntryCategories(); // 再跑一次，靠 INSERT OR IGNORE(domain,parent_id,slug) 防重
+  const row2 = await db.get('SELECT COUNT(*) AS n FROM entry_categories');
+  assert.equal(row2.n, row1.n, '重复 seed 不应新增节点');
+});
+
+test('getEntryTree：按 domain 分组 + 每目录附带挂载 active 条目 count', async () => {
+  const { domains } = await getEntryTree();
+  const office = domains.find((d) => d.domain === 'office');
+  assert.ok(office, '应有 office 域');
+  const table = office.categories.find((c) => c.slug === 'spreadsheet');
+  assert.ok(table, 'office 下应有「表格」目录');
+  // 挂一条 office/表格 条目，count 应 +1；seed 后的空 count 为 0
+  const before = table.count;
+  const created = await createEntry({
+    agentId: 1001, domain: 'office', title: '表格 COUNTIF 用在哪', bodyMd: '条件计数。',
+    categoryId: table.id,
+  });
+  assert.ok(created.id);
+  const { domains: d2 } = await getEntryTree();
+  const table2 = d2.find((dd) => dd.domain === 'office').categories.find((c) => c.slug === 'spreadsheet');
+  assert.equal(table2.count, before + 1, '挂载后目录 count 应 +1');
+});
+
+test('createEntry categoryId：同域合法挂载 + 非法/异域回退 NULL', async () => {
+  const t = await getEntryTree();
+  const officeTable = t.domains.find((d) => d.domain === 'office').categories.find((c) => c.slug === 'spreadsheet');
+  const agentsMcp = t.domains.find((d) => d.domain === 'agents').categories.find((c) => c.slug === 'mcp');
+  const ok = await createEntry({ agentId: 1, domain: 'office', title: '同域挂载', bodyMd: 'x', categoryId: officeTable.id });
+  assert.equal((await getEntry(ok.id)).categoryId, officeTable.id, '同域合法目录应挂上');
+  const cross = await createEntry({ agentId: 1, domain: 'office', title: '跨域挂载', bodyMd: 'x', categoryId: agentsMcp.id });
+  assert.equal((await getEntry(cross.id)).categoryId, null, '异域目录应回退 NULL');
+  const bogus = await createEntry({ agentId: 1, domain: 'office', title: '不存在的目录', bodyMd: 'x', categoryId: 999999 });
+  assert.equal((await getEntry(bogus.id)).categoryId, null, '不存在的目录应回退 NULL');
+});
+
+test('lookupEntries categoryId 过滤：只返回挂该目录的条目', async () => {
+  const t = await getEntryTree();
+  const officeTable = t.domains.find((d) => d.domain === 'office').categories.find((c) => c.slug === 'spreadsheet');
+  const created = await createEntry({ agentId: 1, domain: 'office', title: '表格专属条目', bodyMd: 'y', categoryId: officeTable.id });
+  const r = await lookupEntries({ scope: 'all', categoryId: officeTable.id });
+  const ids = r.entries.map((e) => e.id);
+  assert.ok(ids.includes(created.id), '挂到该目录的条目应被 categoryId 过滤命中');
+  for (const e of r.entries) assert.equal(e.categoryId, officeTable.id, '命中条目的 categoryId 应一致');
+  // 用另一个域目录过滤，跨域+不同目录的条目不该出现
+  const agentsMcp = t.domains.find((d) => d.domain === 'agents').categories.find((c) => c.slug === 'mcp');
+  const r2 = await lookupEntries({ scope: 'all', categoryId: agentsMcp.id });
+  assert.ok(!r2.entries.some((e) => e.id === created.id), '其他目录过滤不应含本条目');
+});
+
+test('scope=all&state=stub：列「待补缺口」stub 条目', async () => {
+  // 直接落一条 stub 态（raiseGap 的产物模拟）：绕过 agentWritesToday 直接 UPDATE
+  const stub = await createEntry({ agentId: 1, domain: 'writing', title: '公文落款细节', bodyMd: 'zz' });
+  await db.run(`UPDATE entries SET state='stub' WHERE id = ?`, [stub.id]);
+  const all = await lookupEntries({ scope: 'all', state: 'stub' });
+  const stubIds = all.entries.filter((e) => e.state === 'stub').map((e) => e.id);
+  assert.ok(stubIds.includes(stub.id), 'spec=all&state=stub 应列出 stub 缺口');
+});
+
+test('getEntryNav：同分类 sibling + 面包屑；getEntryTimeline：首版 proposer 正确', async () => {
+  const t = await getEntryTree();
+  const officeTable = t.domains.find((d) => d.domain === 'office').categories.find((c) => c.slug === 'spreadsheet');
+  const a = await createEntry({ agentId: 1001, domain: 'office', title: '导航条目A', bodyMd: 'AA', categoryId: officeTable.id });
+  await db.run(`UPDATE entries SET state='sourced' WHERE id=?`, [a.id]);
+  const b = await createEntry({ agentId: 1001, domain: 'office', title: '导航条目B', bodyMd: 'BB', categoryId: officeTable.id });
+  // b 是 proposed（同分类但不可引用 → 不进 siblings）
+  const nav = await getEntryNav(a.id);
+  assert.ok(nav.categoryId === officeTable.id, 'nav 应带出分类');
+  assert.equal(nav.siblings.some((s) => s.id === b.id), false, 'proposed 不是可引用态，不应进 siblings');
+  assert.ok(Array.isArray(nav.breadcrumb) && nav.breadcrumb.length >= 1, '应有面包屑');
+  const tl = await getEntryTimeline(a.id);
+  assert.ok(tl.timeline.length >= 1, '应有至少首版');
+  assert.equal(tl.timeline[0].proposer.id, 1001, '首版提案者应为建条目 Agent');
 });

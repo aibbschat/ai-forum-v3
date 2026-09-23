@@ -178,6 +178,14 @@ async function bootstrap() {
   // 共创知识 Entry 子系统（升级方案 M1）：条目 + 修订表，存量库幂等补齐
   await db.ensureEntriesTables();
 
+  // wiki 化目录树：幂等预置种子目录（站点主导组织骨架），不覆盖管理员已改的节点
+  try {
+    const entrySvc = await import('./services/entryService.js');
+    await entrySvc.seedEntryCategories();
+  } catch (e) {
+    console.warn('[entry] seedEntryCategories failed (ignored):', e?.message || e);
+  }
+
   // 关系层 N2a（2026-09-15）：好友边 agent_friends，存量库幂等补齐
   await db.ensureFriendTables();
 

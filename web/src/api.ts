@@ -1835,6 +1835,7 @@ export interface Entry {
   curRev: number | null;
   curatorAgentId: number | null;
   curatorName?: string | null;
+  categoryId?: number | null;
   source?: 'ai_gap' | 'dongai' | null;
   originUrl?: string | null;
   bodyMd: string;
@@ -1844,10 +1845,12 @@ export interface Entry {
   updatedAt?: string;
 }
 
-export function listEntries(opts: { domain?: string; q?: string; limit?: number; offset?: number; scope?: 'answer' | 'all' } = {}) {
+export function listEntries(opts: { domain?: string; q?: string; categoryId?: number | null; limit?: number; offset?: number; scope?: 'answer' | 'all'; state?: string } = {}) {
   const params = new URLSearchParams();
   if (opts.domain) params.set('domain', opts.domain);
   if (opts.q) params.set('q', opts.q);
+  if (opts.state) params.set('state', opts.state);
+  if (opts.categoryId) params.set('categoryId', String(opts.categoryId));
   if (opts.scope) params.set('scope', opts.scope);
   if (opts.limit) params.set('limit', String(opts.limit));
   if (opts.offset) params.set('offset', String(opts.offset));
@@ -1856,5 +1859,51 @@ export function listEntries(opts: { domain?: string; q?: string; limit?: number;
 
 export function getEntry(idOrSlug: number | string) {
   return get<{ entry: Entry }>(`/api/entries/${encodeURIComponent(String(idOrSlug))}`);
+}
+
+// wiki 化目录树（2026-09-23）：站点主导组织骨架。
+export interface EntryCategoryNode {
+  id: number;
+  name: string;
+  slug: string;
+  count: number;
+  children: EntryCategoryNode[];
+}
+export interface EntryTreeDomain {
+  domain: string;
+  categories: EntryCategoryNode[];
+}
+export function getEntryTree() {
+  return get<{ domains: EntryTreeDomain[] }>('/api/entries/tree');
+}
+
+// 单条条目导航上下文：面包屑 + 同分类 sibling + 子树。
+export interface EntryNav {
+  domain: string;
+  categoryId: number | null;
+  breadcrumb: { id: number; name: string; slug: string }[];
+  siblings: { id: number; title: string; state: EntryState; slug: string | null; domain: string }[];
+  children: { id: number; name: string; slug: string }[];
+}
+export function getEntryNav(id: number | string) {
+  return get<EntryNav>(`/api/entries/nav/${encodeURIComponent(String(id))}`);
+}
+
+// 单条条目迭代史：谁提的、被谁背书/质疑。
+export interface EntryTimelineRev {
+  revisionId: number;
+  proposer: { id: number; name: string } | null;
+  state: EntryState;
+  createdAt?: string;
+  hasBody: boolean;
+  reviews: {
+    verdict: 'endorse' | 'challenge';
+    evidence: string;
+    createdAt?: string;
+    reviewer: { id: number; name: string } | null;
+  }[];
+}
+export function getEntryTimeline(id: number | string) {
+  return get<{ timeline: EntryTimelineRev[] }>(`/api/entries/timeline/${encodeURIComponent(String(id))}`);
 }
 

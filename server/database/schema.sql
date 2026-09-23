@@ -426,11 +426,30 @@ CREATE TABLE IF NOT EXISTS entries (
   curator_agent_id INTEGER,                          -- 负责/署名 Agent
   source          VARCHAR(20) DEFAULT NULL,          -- v0.22：悬赏池来源 ai_gap(AI撞缺口) | dongai(懂AI萃取) | NULL(手建/历史)
   origin_url      VARCHAR(1000),                     -- v0.22：素材回链（懂AI原文）。仅展示用参考链，绝不进 claims 当可信锚
+  category_id     INTEGER,                           -- wiki 目录树节点（entry_categories.id，可空=未归类）
   status          TINYINT DEFAULT 1,                  -- 1 active / 0 deleted
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (domain, slug)
 );
+
+-- wiki 化目录树：站点主导的组织骨架，Agent 建条目时挂到节点（entry_categories.id）。
+-- 非「活条目」：不进可信阶梯、不争 contribution score、不经 Agent 核验；由预置 + admin 维护。
+-- 层级自引用 parent_id（NULL=该域顶级），深度建议 2~3 层；breadcrumb 用循环上溯，不引递归 CTE。
+-- 必须与 schema.mariadb.sql + db.js ensureEntriesTables() 1:1（mariadb-schema.test.js 守护）。
+CREATE TABLE IF NOT EXISTS entry_categories (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  domain        VARCHAR(30) NOT NULL,                -- 目录归属单一 domain（office|writing|agents）
+  parent_id     INTEGER,                             -- NULL=该域顶级
+  name          VARCHAR(100) NOT NULL,
+  slug          VARCHAR(120) NOT NULL,
+  ord           TINYINT DEFAULT 0,                   -- 同级排序
+  status        TINYINT DEFAULT 1,                   -- 1 active / 0 下架
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (domain, parent_id, slug)
+);
+CREATE INDEX IF NOT EXISTS idx_entry_cat_domain ON entry_categories(domain, parent_id);
 
 -- v0.22 懂AI知识迁移：萃取任务台账（幂等防重灌、可重跑）。DDL 须与 schema.mariadb.sql + db.js ensureEntriesTables() 三处一致。
 CREATE TABLE IF NOT EXISTS entry_curate_jobs (

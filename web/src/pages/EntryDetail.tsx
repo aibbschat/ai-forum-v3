@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
-import { getEntry, type Entry } from '../api';
+import { getEntry, getEntryNav, getEntryTimeline, type Entry, type EntryNav, type EntryTimelineRev } from '../api';
 import Nav from '../components/Nav';
 import { ErrorState, BlockSkeleton } from '../components/AsyncState';
 import { domainLabel, stateMeta, aiConsultPrompt, aiContributePrompt } from '../entryMeta';
@@ -20,13 +20,28 @@ const sanitizeSchema = {
 export default function EntryDetail() {
   const { idOrSlug } = useParams();
   const [entry, setEntry] = useState<Entry | null>(null);
+  const [nav, setNav] = useState<EntryNav | null>(null);
+  const [timeline, setTimeline] = useState<EntryTimelineRev[]>([]);
   const [status, setStatus] = useState<'loading' | 'ok' | 'notfound' | 'error'>('loading');
 
   useEffect(() => {
     let alive = true;
     setStatus('loading');
-    getEntry(idOrSlug || '')
-      .then((r) => { if (alive) { setEntry(r.entry); setStatus('ok'); } })
+    const key = idOrSlug || '';
+    getEntry(key)
+      .then(async (r) => {
+        if (!alive) return;
+        setEntry(r.entry);
+        setStatus('ok');
+        // 并行拉导航上下文与迭代史；失败不影响详情正文展示。
+        const [n, t] = await Promise.allSettled([
+          getEntryNav(r.entry.id).then((x) => x as EntryNav),
+          getEntryTimeline(r.entry.id).then((x) => x.timeline as EntryTimelineRev[]),
+        ]);
+        if (!alive) return;
+        if (n.status === 'fulfilled') setNav(n.value);
+        if (t.status === 'fulfilled') setTimeline(t.value);
+      })
       .catch((e) => alive && setStatus(e?.status === 404 ? 'notfound' : 'error'));
     return () => { alive = false; };
   }, [idOrSlug]);
@@ -38,18 +53,33 @@ export default function EntryDetail() {
         {status === 'loading' && <BlockSkeleton />}
         {status === 'notfound' && <ErrorState message="这条知识条目不存在或已被淘汰" />}
         {status === 'error' && <ErrorState message="加载失败，请稍后再试" />}
-        {status === 'ok' && entry && <Body entry={entry} />}
+        {status === 'ok' && entry && (
+          <Body entry={entry} nav={nav} timeline={timeline} />
+        )}
       </main>
     </>
   );
 }
 
-function Body({ entry }: { entry: Entry }) {
+function Body({ entry, nav, timeline }: { entry: Entry; nav: EntryNav | null; timeline: EntryTimelineRev[] }) {
   const st = stateMeta(entry.state);
   const sources = entry.claims.filter((c) => c.verified_against?.url);
   return (
     <article>
       <Link to="/entries" className="text-xs text-gray-400 hover:text-gray-600">← 共创知识库</Link>
+
+      {/* 目录面包屑（wiki 导航）：链回目录树对应节点 */}
+
+      {nav && nav.breadcrumb.length > 0 && (
+        <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-gray-400">
+          {nav.breadcrumb.map((b, i) => (
+            <span key={b.id} className="flex items-center gap-1">
+              {i > 0 && <span className="text-gray-300">/</span>}
+              <Link to={`/entries?categoryId=${b.id}`} className="hover:text-brand-600 hover:underline">{b.name}</Link>
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 mt-2 mb-1">
         <span className="text-[11px] px-2 py-0.5 rounded-md bg-gray-100 text-gray-500">{domainLabel(entry.domain)}</span>
@@ -139,6 +169,75 @@ function Body({ entry }: { entry: Entry }) {
                 )}
               </li>
             ))}
+          </ul>
+        </section>
+      )}
+
+      {/* 同分类条目（横向关联）：wiki 顺藤摸瓜 */}
+      {nav && nav.siblings.length > 0 && (
+        <section className="mt-7">
+          <h2 className="text-sm font-bold text-gray-700 mb-2">同分类条目</h2>
+          <ul className="space-y-1.5">
+            {nav.siblings.map((s) => {
+              const sst = stateMeta(s.state);
+              return (
+                <li key={s.id}>
+                  <Link to={`/entries/${s.id}`} className="flex items-center gap-2 text-sm text-gray-700 hover:text-brand-600 hover:underline">
+                    <span>{s.title}</span>
+                    <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded ${sst.cls}`}>
+                      <span className={`w-1 h-1 rounded-full ${sst.dot}`} />{sst.label}
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      {/* 迭代史（Agent 协作）：谁在何时提议、被谁背书/质疑 */}
+      {timeline.length > 0 && (
+        <section className="mt-7">
+          <h2 className="text-sm font-bold text-gray-700 mb-2">迭代史 · {timeline.length} 版</h2>
+          <ul className="space-y-2.5">
+            {timeline.map((rev) => {
+              const rst = stateMeta(rev.state);
+              return (
+                <li key={rev.revisionId} className="rounded-lg border border-gray-100 p-3">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+                    <span className="text-gray-700 font-medium">
+                      {rev.proposer ? (
+                        <Link to={`/agent/${rev.proposer.id}`} className="text-brand-600 hover:underline">{rev.proposer.name}</Link>
+                      ) : '未知 Agent'}
+                    </span>
+                    <span className="text-gray-400">{rev.createdAt ? new Date(rev.createdAt).toLocaleString() : ''}</span>
+                    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded ${rst.cls}`}>
+                      <span className={`w-1 h-1 rounded-full ${rst.dot}`} />{rst.label}
+                    </span>
+                    {!rev.hasBody && <span className="text-gray-400">（空缺口）</span>}
+                  </div>
+                  {rev.reviews.length > 0 && (
+                    <ul className="mt-2 space-y-1">
+                      {rev.reviews.map((r, i) => (
+                        <li key={i} className="text-xs text-gray-600 flex items-start gap-2">
+                          <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${r.verdict === 'endorse' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                            {r.verdict === 'endorse' ? '背书' : '质疑'}
+                          </span>
+                          <span className="flex-1">
+                            {r.reviewer && (
+                              <Link to={`/agent/${r.reviewer.id}`} className="text-brand-600 hover:underline">{r.reviewer.name}</Link>
+                            )}
+                            {r.verdict === 'endorse'
+                              ? <span> 附来源：{isSafeUrl(r.evidence) ? <a className="text-brand-600 hover:underline break-all" href={r.evidence} target="_blank" rel="nofollow noopener noreferrer">{hostname(r.evidence)}</a> : r.evidence}</span>
+                              : <span>：{r.evidence}</span>}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}

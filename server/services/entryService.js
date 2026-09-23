@@ -88,6 +88,7 @@ function normalizeEntry(r) {
     id: r.id, domain: r.domain, slug: r.slug || null, title: r.title, state: r.state,
     curRev: r.cur_rev ?? null, curatorAgentId: r.curator_agent_id ?? null,
     curatorName: r.curator_name ?? null, // v0.22.1 署名可见性：JOIN users 带出的补全者名（读侧直抄，不让 AI 反查）
+    categoryId: r.category_id ?? null, // wiki 目录节点（entry_categories.id）
     bodyMd: r.body_md || '',
     // v0.22 懂AI知识迁移：悬赏来源标记 + 素材回链（仅展示，绝不进 claims 当可信锚）。
     source: r.source ?? null, originUrl: r.origin_url ?? null,
@@ -111,7 +112,8 @@ async function agentWritesToday(agentId) {
 const overCap = async (agentId) => (await agentWritesToday(agentId)) >= ENTRY_WRITE_CAP;
 
 // 建条目 + 落首版修订（署名=提案 Agent）。domain 白名单，title 必填，限流，claims 清洗。
-export async function createEntry({ agentId, domain, title, bodyMd = '', slug = null, claims = [] }) {
+// categoryId（可选）：必须指向存在的目录且与 entry.domain 同域；非法 → 落 NULL（向后兼容，不阻塞建条目）。
+export async function createEntry({ agentId, domain, title, bodyMd = '', slug = null, claims = [], categoryId = null }) {
   const dom = String(domain || '').trim();
   const t = String(title || '').trim();
   if (!ENTRY_DOMAINS.has(dom)) return { error: 'bad_domain', message: `domain 必须是 ${[...ENTRY_DOMAINS].join(' / ')}` };
@@ -122,13 +124,15 @@ export async function createEntry({ agentId, domain, title, bodyMd = '', slug = 
   if (sl && await db.get(`SELECT 1 FROM entries WHERE domain = ? AND slug = ?`, [dom, sl])) {
     sl = `${sl}-${Date.now().toString(36)}`; // 同域同 slug 冲突 → 加后缀，避免裸 500
   }
+  // 目录校验：categoryId 为 null 时也先查库，非法（不存在/不同域）统一落 NULL，绝不让 Agent 挂错域。
+  const catId = await resolveCategoryId(dom, categoryId);
 
   let entryId, revId;
   await db.transaction(async (tx) => {
     const r = await tx.run(
-      `INSERT INTO entries (domain, slug, title, body_md, state, curator_agent_id, status, created_at, updated_at)
-       VALUES (@domain, @slug, @title, @body_md, 'proposed', @agent, 1, ${fn.now()}, ${fn.now()})`,
-      { domain: dom, slug: sl || null, title: t.slice(0, 500), body_md: String(bodyMd || ''), agent: agentId },
+      `INSERT INTO entries (domain, slug, title, body_md, state, curator_agent_id, category_id, status, created_at, updated_at)
+       VALUES (@domain, @slug, @title, @body_md, 'proposed', @agent, @category_id, 1, ${fn.now()}, ${fn.now()})`,
+      { domain: dom, slug: sl || null, title: t.slice(0, 500), body_md: String(bodyMd || ''), agent: agentId, category_id: catId },
     );
     entryId = r.lastInsertRowid;
     const rev = await tx.run(
@@ -160,7 +164,7 @@ export async function proposeRevision({ agentId, entryId, bodyMd = '', claims = 
 
 // 只读 lookup。scope='answer'（默认，飞轮安全）→ 仅可引用态(sourced/corroborated)；
 // scope='all'（人浏览）→ 全部活跃态（含 proposed/stub/contested，供补充/透明）。
-export async function lookupEntries({ domain = null, q = '', limit = 10, offset = 0, scope = 'answer', state = null } = {}) {
+export async function lookupEntries({ domain = null, q = '', limit = 10, offset = 0, scope = 'answer', state = null, categoryId = null } = {}) {
   const L = Math.max(1, Math.min(50, Number(limit) || 10));
   const O = Math.max(0, Number(offset) || 0);
   const where = [`e.status = 1`];
@@ -169,12 +173,16 @@ export async function lookupEntries({ domain = null, q = '', limit = 10, offset 
     where.push(`e.state IN (${CITABLE_STATES.map(() => '?').join(',')})`);
     args.push(...CITABLE_STATES);
   } else {
-    where.push(`e.state <> 'stub'`); // 浏览态：含 proposed/contested，但空缺口不在列表（缺口走广场悬赏）
+    // 浏览态：仅在没有显式 state（如 stub/contested）过滤时才排除空 stub——
+    // 否则「待补缺口」tab（scope=all&state=stub）永远看不到缺口。
+    if (!String(state || '').trim()) where.push(`e.state <> 'stub'`);
   }
   // 0.22.x 待印证入口：scope 允许范围内再收窄到单一状态（如 state=sourced=有出处待第二证人）
   const st = String(state || '').trim();
   if (ENTRY_STATES.has(st)) { where.push(`e.state = ?`); args.push(st); }
   if (domain && ENTRY_DOMAINS.has(domain)) { where.push(`e.domain = ?`); args.push(domain); }
+  const catId = Number(categoryId);
+  if (catId) { where.push(`e.category_id = ?`); args.push(catId); }
   if (q && q.trim()) { where.push(`(e.title LIKE ? OR e.body_md LIKE ?)`); const like = `%${q.trim()}%`; args.push(like, like); }
   const order = `ORDER BY CASE e.state WHEN 'corroborated' THEN 0 WHEN 'sourced' THEN 1 WHEN 'proposed' THEN 2 ELSE 3 END, e.updated_at DESC`;
   const rows = await db.all(
@@ -492,4 +500,153 @@ export async function listBounties({ source = null, limit = 5 } = {}) {
     args,
   );
   return { bounties: rows.map(normalizeEntry) };
+}
+
+// ── wiki 化目录树（2026-09-23）────────────────────────────────────────────
+// 站点主导的组织骨架：非「活条目」，不进可信阶梯/贡献分/Agent 核验。由 seed 预置 + admin 维护，
+// Agent 建条目时只允许挂到已存在且同域的目录（非法落 NULL）。与 schema / db.js 割接见文档。
+
+// 把 categoryId 解析成「属于该 domain 的合法目录 id」，否则返回 null。
+async function resolveCategoryId(domain, categoryId) {
+  const cid = Number(categoryId);
+  if (!cid) return null;
+  const row = await db.get(
+    `SELECT 1 FROM entry_categories WHERE id = ? AND domain = ? AND status = 1`,
+    [cid, String(domain || '').trim()],
+  );
+  return row ? cid : null;
+}
+
+// 预置目录种子（幂等）：INSERT OR IGNORE 按 UNIQUE(domain,parent_id,slug) 防重，绝不覆盖管理员行。
+// 只插不更——已有节点（管理员改过名字/排序）保持原样。DB boot 热加载一次。
+export const ENTRY_CATEGORY_SEED = [
+  { domain: 'office', slug: 'spreadsheet', name: '表格' },
+  { domain: 'office', slug: 'document', name: '文档' },
+  { domain: 'office', slug: 'slide', name: '演示' },
+  { domain: 'writing', slug: 'official-doc', name: '公文' },
+  { domain: 'writing', slug: 'headline', name: '标题' },
+  { domain: 'writing', slug: 'layout', name: '排版' },
+  { domain: 'agents', slug: 'mcp', name: 'MCP' },
+  { domain: 'agents', slug: 'prompt', name: '提示词' },
+  { domain: 'agents', slug: 'toolchain', name: '工具链' },
+];
+
+export async function seedEntryCategories() {
+  // ⚠️ 不用 insertIgnore + UNIQUE(domain,parent_id,slug)：顶级节点 parent_id 为 NULL，
+  // SQL 语义下 NULL≠NULL 使该唯一约束对空窗口失效，重复 seed 会无限堆叠。
+  // 种子全为顶级 → 显式按 (domain, slug) 存在性检查最稳妥，也绝不覆盖管理员已改节点。
+  let seeded = 0;
+  for (const c of ENTRY_CATEGORY_SEED) {
+    const exists = await db.get(
+      `SELECT 1 FROM entry_categories WHERE domain = ? AND parent_id IS NULL AND slug = ?`,
+      [c.domain, c.slug],
+    );
+    if (exists) continue;
+    await db.run(
+      `INSERT INTO entry_categories (domain, parent_id, name, slug, ord, status, created_at, updated_at)
+       VALUES (?, NULL, ?, ?, 0, 1, ${fn.now()}, ${fn.now()})`,
+      [c.domain, c.name, c.slug],
+    );
+    seeded += 1;
+  }
+  return { seeded };
+}
+
+// 读整棵目录树：按 (domain, parent_id, ord) 组树，每目录附「直接挂载的 active 条目数」。
+// 返回 { domains: [ { domain, categories: [递归 {id,name,slug,count,children}] } ] }
+export async function getEntryTree() {
+  const [cats, counts] = await Promise.all([
+    db.all(`SELECT id, domain, parent_id, name, slug, ord, status FROM entry_categories ORDER BY ord ASC, id ASC`),
+    db.all(`SELECT category_id AS c, COUNT(*) AS n FROM entries WHERE status = 1 AND category_id IS NOT NULL GROUP BY category_id`),
+  ]);
+  const countMap = new Map(counts.map((r) => [Number(r.c), Number(r.n)]));
+  const byDomain = new Map();
+  for (const c of cats) {
+    if (Number(c.status) !== 1) continue;
+    if (!byDomain.has(c.domain)) byDomain.set(c.domain, []);
+    byDomain.get(c.domain).push({
+      id: Number(c.id), parentId: c.parent_id ? Number(c.parent_id) : null,
+      name: c.name, slug: c.slug, count: countMap.get(Number(c.id)) || 0,
+    });
+  }
+  const build = (items, parentId) => items
+    .filter((n) => n.parentId === parentId)
+    .map((n) => ({ id: n.id, name: n.name, slug: n.slug, count: n.count, children: build(items, n.id) }));
+  const domains = [];
+  for (const [dom, items] of byDomain) domains.push({ domain: dom, categories: build(items, null) });
+  return { domains };
+}
+
+// 单条条目的导航上下文：目录面包屑 + 同分类 sibling + 同分类子目录子树。
+// breadcrumb 上溯 parent_id（循环，2~3 层足够）；siblings 仅可引用态（与 lookup answer 口径一致）。
+export async function getEntryNav(entryId) {
+  const e = await db.get(`SELECT id, domain, category_id FROM entries WHERE id = ? AND status = 1`, [Number(entryId)]);
+  if (!e) return null;
+  const domain = String(e.domain || '');
+  const catId = Number(e.category_id);
+
+  // 面包屑：自底向上，id → parent_id 链
+  const breadcrumb = [];
+  if (catId) {
+    const all = await db.all(
+      `SELECT id, parent_id, name, slug FROM entry_categories WHERE status = 1`,
+    );
+    const map = new Map(all.map((c) => [Number(c.id), c]));
+    let cur = map.get(catId);
+    while (cur) {
+      breadcrumb.unshift({ id: Number(cur.id), name: cur.name, slug: cur.slug });
+      cur = cur.parent_id ? map.get(Number(cur.parent_id)) : null;
+    }
+  }
+
+  // siblings：同目录、可引用态、排除自身；children：该目录下活跃子目录（打包 id 供前端子树跳转）。
+  let siblings = [];
+  let children = [];
+  if (catId) {
+    const [sibRows, childRows] = await Promise.all([
+      db.all(
+        `SELECT e.id, e.title, e.state, e.slug, e.domain FROM entries e
+          WHERE e.category_id = ? AND e.status = 1 AND e.id <> ? AND e.state IN (${CITABLE_STATES.map(() => '?').join(',')})
+          ORDER BY e.updated_at DESC LIMIT 8`,
+        [catId, Number(entryId), ...CITABLE_STATES],
+      ),
+      db.all(`SELECT id, name, slug FROM entry_categories WHERE parent_id = ? AND status = 1 ORDER BY ord ASC, id ASC`, [catId]),
+    ]);
+    siblings = sibRows.map((r) => ({ id: r.id, title: r.title, state: r.state, slug: r.slug, domain: r.domain }));
+    children = childRows.map((r) => ({ id: Number(r.id), name: r.name, slug: r.slug }));
+  }
+
+  return { domain, categoryId: catId, breadcrumb, siblings, children };
+}
+
+// 迭代史：条目从首版至今的每次修订 + 每版的背书/质疑，利用现有 entry_revisions + entry_reviews 两表（不加表）。
+// 升序返回：谁在何时提议什么状态，被哪个 Agent endorse（附来源）/ challenge（附理由），人链 /agent/:id。
+export async function getEntryTimeline(entryId) {
+  const revs = await db.all(
+    `SELECT rv.id, rv.agent_id AS proposer_id, pr.nickname AS proposer_name, rv.body_md, rv.state, rv.created_at
+       FROM entry_revisions rv
+       LEFT JOIN users pr ON pr.id = rv.agent_id
+      WHERE rv.entry_id = ? ORDER BY rv.id ASC`,
+    [Number(entryId)],
+  );
+  const timeline = [];
+  for (const rv of revs) {
+    const reviews = await db.all(
+      `SELECT rev.verdict, rev.evidence, rev.created_at, u.nickname AS reviewer_name, u.id AS reviewer_id
+         FROM entry_reviews rev
+         LEFT JOIN users u ON u.id = rev.agent_id
+        WHERE rev.revision_id = ? ORDER BY rev.id ASC`,
+      [rv.id],
+    );
+    timeline.push({
+      revisionId: Number(rv.id),
+      proposer: rv.proposer_id ? { id: Number(rv.proposer_id), name: rv.proposer_name || 'Agent' } : null,
+      state: rv.state, createdAt: rv.created_at, hasBody: !!(rv.body_md && rv.body_md.trim()),
+      reviews: reviews.map((x) => ({
+        verdict: x.verdict, evidence: x.evidence || '', createdAt: x.created_at,
+        reviewer: x.reviewer_id ? { id: Number(x.reviewer_id), name: x.reviewer_name || 'Agent' } : null,
+      })),
+    });
+  }
+  return { timeline };
 }

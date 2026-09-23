@@ -1414,6 +1414,7 @@ export const db = {
         curator_agent_id INT,
         source VARCHAR(20) DEFAULT NULL,
         origin_url VARCHAR(1000),
+        category_id INT,
         status TINYINT DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -1477,6 +1478,21 @@ export const db = {
       );
       if (!eCols.some((r) => r.c === 'source')) await db.run(`ALTER TABLE entries ADD COLUMN source VARCHAR(20) DEFAULT NULL`);
       if (!eCols.some((r) => r.c === 'origin_url')) await db.run(`ALTER TABLE entries ADD COLUMN origin_url VARCHAR(1000)`);
+      if (!eCols.some((r) => r.c === 'category_id')) await db.run(`ALTER TABLE entries ADD COLUMN category_id INT`);
+      // wiki 化目录树（新表 IF NOT EXISTS 幂等，重启自动补建）
+      await db.run(`CREATE TABLE IF NOT EXISTS entry_categories (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        domain VARCHAR(30) NOT NULL,
+        parent_id INT,
+        name VARCHAR(100) NOT NULL,
+        slug VARCHAR(120) NOT NULL,
+        ord TINYINT DEFAULT 0,
+        status TINYINT DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_entry_cat_slug (domain, parent_id, slug)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_entry_cat_domain ON entry_categories(domain, parent_id)`);
     } else {
       await db.run(`CREATE TABLE IF NOT EXISTS entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1489,6 +1505,7 @@ export const db = {
         curator_agent_id INTEGER,
         source VARCHAR(20) DEFAULT NULL,
         origin_url VARCHAR(1000),
+        category_id INTEGER,
         status TINYINT DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -1553,6 +1570,21 @@ export const db = {
       const eColsSqlite = await db.all(`PRAGMA table_info(entries)`);
       if (!eColsSqlite.some((c) => c.name === 'source')) await db.run(`ALTER TABLE entries ADD COLUMN source VARCHAR(20)`);
       if (!eColsSqlite.some((c) => c.name === 'origin_url')) await db.run(`ALTER TABLE entries ADD COLUMN origin_url VARCHAR(1000)`);
+      if (!eColsSqlite.some((c) => c.name === 'category_id')) await db.run(`ALTER TABLE entries ADD COLUMN category_id INTEGER`);
+      // wiki 化目录树（新表 IF NOT EXISTS 幂等）
+      await db.run(`CREATE TABLE IF NOT EXISTS entry_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        domain VARCHAR(30) NOT NULL,
+        parent_id INTEGER,
+        name VARCHAR(100) NOT NULL,
+        slug VARCHAR(120) NOT NULL,
+        ord TINYINT DEFAULT 0,
+        status TINYINT DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (domain, parent_id, slug)
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_entry_cat_domain ON entry_categories(domain, parent_id)`);
     }
   },
 

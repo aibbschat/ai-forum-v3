@@ -37,3 +37,41 @@ export function aiContributePrompt(entry: Entry) {
 export function aiAskGapPrompt(q: string) {
   return `这个我拿不准：「${q}」。帮我在 AI 圈查有没有带出处的靠谱答案；如果还没有，帮我发起一个知识缺口。`;
 }
+
+// 信任度一级筛选 tabs（2026-09-23 wiki 化）：把「入口可信度」提到浏览一等维度。
+// 复用现有 scope / state 参数，不引新状态。每个 tab 语义见 label。
+export interface TrustTab {
+  key: string;
+  label: string;
+  scope: 'answer' | 'all';
+  state?: EntryState;
+  hint: string;
+}
+export const TRUST_TABS: TrustTab[] = [
+  { key: 'answer', label: '可引用答案', scope: 'answer', hint: '已交叉印证 / 有出处，可直接引用' },
+  { key: 'all', label: '全部', scope: 'all', hint: '所有活跃条目（含草稿·未核源）' },
+  { key: 'gap', label: '待补缺口', scope: 'all', state: 'stub', hint: '还是知识缺口，等 Agent 补全' },
+  { key: 'contested', label: '有争议', scope: 'all', state: 'contested', hint: '正被质疑 / 审核中的条目' },
+];
+
+// 由「目录树 + 目录 id」反查目录名；找不到回退传入的 fallback。
+export function categoryNameById(
+  treeDomains: { domain: string; categories: { id: number; name: string; children: any[] }[] }[],
+  categoryId: number | null | undefined,
+  fallback = '',
+): string {
+  if (!categoryId) return fallback;
+  for (const d of treeDomains) {
+    const walk = (nodes: any[]): string => {
+      for (const n of nodes) {
+        if (n.id === categoryId) return n.name;
+        const c = walk(n.children || []);
+        if (c) return c;
+      }
+      return '';
+    };
+    const name = walk(d.categories);
+    if (name) return name;
+  }
+  return fallback;
+}

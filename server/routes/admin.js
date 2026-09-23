@@ -9,7 +9,7 @@ import { db, fn } from '../database/db.js';
 import { config } from '../config/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { applyVisibility, syncTrustTier } from '../services/moderationService.js';
-import { resolveContestedRevision, topMisses } from '../services/entryService.js';
+import { resolveContestedRevision, topMisses, ENTRY_DOMAINS } from '../services/entryService.js';
 import { growthOverview } from '../services/growthService.js';
 
 const router = Router();
@@ -501,6 +501,90 @@ router.get(
   requireAdmin,
   asyncHandler(async (req, res) => {
     res.json({ roles: await listRoles() });
+  })
+);
+
+// ── wiki 化目录树管理（2026-09-23）：站点主导的组织骨架，admin 维护。──
+// GET 全部目录（含直接挂载条目数）→ 支持前端目录管理面板预览。
+router.get(
+  '/entry-categories',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const [cats, counts] = await Promise.all([
+      db.all(`SELECT c.* FROM entry_categories c ORDER BY c.domain ASC, c.ord ASC, c.id ASC`),
+      db.all(`SELECT category_id AS c, COUNT(*) AS n FROM entries WHERE status = 1 AND category_id IS NOT NULL GROUP BY category_id`),
+    ]);
+    const countMap = new Map(counts.map((r) => [Number(r.c), Number(r.n)]));
+    res.json({ categories: cats.map((r) => ({ ...r, count: countMap.get(Number(r.id)) || 0 })) });
+  })
+);
+
+// 创建目录节点。校验：domain 白名单、name 必填、parent 必须同域存在、slug 同域同级唯一。
+router.post(
+  '/entry-categories',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    const domain = String(b.domain || '').trim();
+    const name = String(b.name || '').trim();
+    const slug = String(b.slug || '').trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 120);
+    const parentId = b.parentId ? Number(b.parentId) : null;
+    const ord = Number(b.ord) || 0;
+    if (ENTRY_DOMAINS && !ENTRY_DOMAINS.has(domain)) {
+      return res.status(400).json({ error: 'bad_domain' });
+    }
+    if (!name) return res.status(400).json({ error: 'name_required' });
+    if (!slug) return res.status(400).json({ error: 'slug_required' });
+    if (parentId) {
+      const p = await db.get(`SELECT 1 FROM entry_categories WHERE id = ? AND domain = ? AND status = 1`, [parentId, domain]);
+      if (!p) return res.status(400).json({ error: 'bad_parent' });
+    }
+    const dup = await db.get(`SELECT 1 FROM entry_categories WHERE domain = ? AND parent_id ${parentId ? '= ?' : 'IS NULL'} AND slug = ?`, parentId ? [domain, parentId, slug] : [domain, slug]);
+    if (dup) return res.status(409).json({ error: 'duplicate_slug' });
+    const r = await db.run(
+      `INSERT INTO entry_categories (domain, parent_id, name, slug, ord, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 1, ${fn.now()}, ${fn.now()})`,
+      [domain, parentId, name, slug, ord],
+    );
+    res.status(201).json({ ok: true, id: r.lastInsertRowid });
+  })
+);
+
+// 更新目录：重命名 / 改排序 / 挂新父 / 上下架。status=0 下架后 GET tree 不再返回该节点。
+router.patch(
+  '/entry-categories/:id',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const b = req.body || {};
+    const sets = [];
+    const params = [];
+    if (b.name !== undefined) { sets.push('name = ?'); params.push(String(b.name).slice(0, 100)); }
+    if (b.ord !== undefined) { sets.push('ord = ?'); params.push(Number(b.ord) || 0); }
+    if (b.status !== undefined) { sets.push('status = ?'); params.push(b.status === 0 || b.status === '0' ? 0 : 1); }
+    if (b.parentId !== undefined) {
+      const pid = b.parentId ? Number(b.parentId) : null;
+      sets.push('parent_id = ?'); params.push(pid);
+    }
+    if (!sets.length) return res.status(400).json({ error: 'nothing_to_update' });
+    params.push(id);
+    await db.run(`UPDATE entry_categories SET ${sets.join(', ')}, updated_at = ${fn.now()} WHERE id = ?`, params);
+    res.json({ ok: true });
+  })
+);
+
+// 删除目录：仅当无条目挂载且无子节点时可物理删除；否则报 409（避免产生孤儿条目）。
+router.delete(
+  '/entry-categories/:id',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const kids = await db.get(`SELECT COUNT(*) AS n FROM entry_categories WHERE parent_id = ?`, [id]);
+    const entries = await db.get(`SELECT COUNT(*) AS n FROM entries WHERE category_id = ?`, [id]);
+    if (Number(kids?.n) > 0) return res.status(409).json({ error: 'has_children' });
+    if (Number(entries?.n) > 0) return res.status(409).json({ error: 'has_entries' });
+    await db.run(`DELETE FROM entry_categories WHERE id = ?`, [id]);
+    res.json({ ok: true });
   })
 );
 
