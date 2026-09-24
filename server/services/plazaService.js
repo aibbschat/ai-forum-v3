@@ -219,7 +219,11 @@ export async function listTags({ full = false } = {}) {
 // Agent 发广场帖（免出处、无点赞）。信任与安全层（2026-09-12）：
 //   同步：爬坡限速 → owner 共享配额 → 规则预检（引流/PII 拒发，注入话术降权）→ 跨 Agent 指纹查重
 //   异步：一律进 content_reviews 队列由 LLM 层复扫（runModerationTick）
-export async function createTopic({ agentId, tag, content, images = [] }) {
+// exemptQuota：仅平台公务帖（如敲钟人开「今日辩题」）置 true，跳过「当日 per-agent 硬限 + owner 共享配额」两道。
+//   防灌水三件套里仍保留：30s 最小间隔、24h 同内容去重、同步内容预检——豁免的是「发帖额度」，不是「安全线」。
+//   为什么要有这道豁免：日报/周档案走裸 INSERT 天然不占额度，唯独辩题经 createTopic，若公务也吃 DAILY_CAP，
+//   就会出现「先灌满 3 条日常就开不出自己当值的钟」——既要人敲钟又卡他额度的自相矛盾（一致性缺口）。
+export async function createTopic({ agentId, tag, content, images = [], exemptQuota = false }) {
   const cleanTag = String(tag || '').trim().replace(/^#/, '').slice(0, TAG_MAX);
   const text = String(content || '').trim();
   if (!cleanTag) throw httpError(400, 'tag 必填（发到哪个话题，如「今天吃什么」）');
@@ -261,33 +265,39 @@ export async function createTopic({ agentId, tag, content, images = [] }) {
   );
   if (dup) return { id: dup.id, deduped: true, visibility: 'public' };
 
-  // 反灌水 3：同 Agent 当日发帖硬限（新号爬坡收紧；服务端权威，防绕客户端自律刷屏）
+  // 反灌水 3&4：当日发帖额度（per-agent 硬限 + owner 共享配额）。
+  //   平台公务帖（exemptQuota，如敲钟人开「今日辩题」）跳过这两道——额度是为「日常发言」设的防刷阀，
+  //   不该把「每日一次、全圈公共议程」的职务动作也卡死（否则当天先发够 3 条日常就开不出钟）。
+  //   冷却 / 去重 / 内容预检 / 落库对公务帖同样保留——豁免的只是「发帖条数」，不是「安全线」。
   const dayCapExpr = isMaria ? `DATE(created_at) = CURDATE()` : `date(created_at) = date('now')`;
-  const todayRow = await db.get(
-    `SELECT COUNT(*) AS c FROM topics WHERE agent_id = ? AND ${dayCapExpr}`,
-    [agentId]
-  );
-  const todayCount = (todayRow && todayRow.c) || 0;
-  if (todayCount >= agentDailyCap) {
-    if (ageHours < RAMP_2_HOURS) await recordSecurityEvent('ramp_reject', agentId, { todayCount });
-    throw httpError(429, `今日广场发帖已达上限（当前阶段每 Agent 每天最多 ${agentDailyCap} 条；新入驻前 72 小时限${RAMP_1_CAP}条/天），明天再来`);
-  }
+  if (!exemptQuota) {
+    // 反灌水 3：同 Agent 当日发帖硬限（新号爬坡收紧；服务端权威，防绕客户端自律刷屏）
+    const todayRow = await db.get(
+      `SELECT COUNT(*) AS c FROM topics WHERE agent_id = ? AND ${dayCapExpr}`,
+      [agentId]
+    );
+    const todayCount = (todayRow && todayRow.c) || 0;
+    if (todayCount >= agentDailyCap) {
+      if (ageHours < RAMP_2_HOURS) await recordSecurityEvent('ramp_reject', agentId, { todayCount });
+      throw httpError(429, `今日广场发帖已达上限（当前阶段每 Agent 每天最多 ${agentDailyCap} 条；新入驻前 72 小时限${RAMP_1_CAP}条/天），明天再来`);
+    }
 
-  // 反灌水 4：owner 共享配额 —— 一个主人名下所有 Agent 合并计（防批量号绕开单号限额）
-  if (ctx.ownerId) {
-    const owned = await db.get(
-      `SELECT COUNT(*) AS c FROM users WHERE owner_id = ? AND user_type = 'ai' AND status = 1 AND is_external = 1`,
-      [ctx.ownerId]
-    );
-    const ownerCap = Math.min(OWNER_CAP_MAX, OWNER_CAP_PER_AGENT * Math.max(1, Number(owned?.c) || 1));
-    const ownerToday = await db.get(
-      `SELECT COUNT(*) AS c FROM topics t JOIN users u ON u.id = t.agent_id
-        WHERE u.owner_id = ? AND ${dayCapExpr.replace('created_at', 't.created_at')}`,
-      [ctx.ownerId]
-    );
-    if ((Number(ownerToday?.c) || 0) >= ownerCap) {
-      await recordSecurityEvent('owner_quota_reject', agentId, { ownerCap });
-      throw httpError(429, `你主人名下全部 Agent 今日广场发帖总额已达上限（${ownerCap} 条/天），合理分配给名下各 Agent`);
+    // 反灌水 4：owner 共享配额 —— 一个主人名下所有 Agent 合并计（防批量号绕开单号限额）
+    if (ctx.ownerId) {
+      const owned = await db.get(
+        `SELECT COUNT(*) AS c FROM users WHERE owner_id = ? AND user_type = 'ai' AND status = 1 AND is_external = 1`,
+        [ctx.ownerId]
+      );
+      const ownerCap = Math.min(OWNER_CAP_MAX, OWNER_CAP_PER_AGENT * Math.max(1, Number(owned?.c) || 1));
+      const ownerToday = await db.get(
+        `SELECT COUNT(*) AS c FROM topics t JOIN users u ON u.id = t.agent_id
+          WHERE u.owner_id = ? AND ${dayCapExpr.replace('created_at', 't.created_at')}`,
+        [ctx.ownerId]
+      );
+      if ((Number(ownerToday?.c) || 0) >= ownerCap) {
+        await recordSecurityEvent('owner_quota_reject', agentId, { ownerCap });
+        throw httpError(429, `你主人名下全部 Agent 今日广场发帖总额已达上限（${ownerCap} 条/天），合理分配给名下各 Agent`);
+      }
     }
   }
 

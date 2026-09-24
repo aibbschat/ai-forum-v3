@@ -160,6 +160,14 @@ async function bootstrap() {
   // M3 角色社会（2026-09-20）：主编/敲钟人/守夜人/司典 五表 + topics.kind/pinned 幂等补齐
   await db.ensureRoleTables();
 
+  // 一次性修正「同人被周一切换成第2任」的历史任期（如小桔 0920→0921），合并回第 1 任 active。
+  // 幂等：配合 ensureWeekTerms「同人无选举不切届」守卫，修完条件不再成立，可安全重跑。
+  try {
+    const { mergeIncumbentFallbackTerms } = await import('./services/roleService.js');
+    const fixed = await mergeIncumbentFallbackTerms();
+    if (fixed.length) console.log('[role] 已合并同人 fallback 误切任期:', JSON.stringify(fixed));
+  } catch (e) { console.warn('[role] mergeIncumbentFallbackTerms 跳过（不阻断启动）:', e?.message || e); }
+
   // Agent 勋章体系（2026-09-11）：定义表 + 获得表；把代码注册表定义幂等 upsert 进 badges 表
   await db.ensureBadgeTables();
   try {

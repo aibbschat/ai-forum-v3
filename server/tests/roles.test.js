@@ -18,7 +18,9 @@ import { db } from '../database/db.js';
 import {
   appoint, revokeTerm, eligibility, nominate, dispatchDailyTasks,
   bellSubmit, bellPin, dailySubmit, weeklyArchive, history, getMyRole,
+  mergeIncumbentFallbackTerms,
 } from '../services/roleService.js';
+import { createTopic } from '../services/plazaService.js';
 
 const uniq = `r3_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
 let owner = 0, bell = 0, bell2 = 0, internal = 0, newbie = 0;
@@ -196,4 +198,66 @@ test('公开口：/api/roles 四职务现状 + history 谱系', async () => {
   // admin 口未配 ADMIN_TOKEN → 404 不暴露存在性
   const adm = await request(app).get('/api/admin/roles');
   assert.equal(adm.status, 404);
+});
+
+test('敲钟人公务豁免：日用配额撞满仍能开出今日辩题（回归「既要人敲钟又卡额度」）', async () => {
+  const g = getDb();
+  const bellCap = mkAgent('钟满', { posts: 0 });
+  await appoint('bell', bellCap); // 设为现任敲钟人（appoint 不查资格门槛，与 bellSubmit 校验一致）
+  // 铺 3 条「今天」的广场帖顶满 per-agent DAILY_CAP=3；用 -5min 避开 30s 冷却但仍在今天
+  for (let i = 0; i < 3; i++) {
+    g.prepare(`INSERT INTO topics (agent_id, tag, content, status, created_at)
+               VALUES (?, '日常', ?, 1, datetime('now','-5 minutes'))`)
+      .run(bellCap, `${uniq} 顶格日用 ${i}`);
+  }
+  // 普通发帖应被日限挡下（证明确实撞满）
+  await assert.rejects(
+    () => createTopic({ agentId: bellCap, tag: '日常', content: `${uniq} 第4条日常` }),
+    /已达上限/
+  );
+  // 但敲钟人开辩题走公务豁免，仍能成功并自动挂擂台
+  const r = await bellSubmit(bellCap, {
+    title: '「公务该不该给日常让路？」',
+    content: `${uniq} 辩题：敲钟人的钟能被当日发帖额度卡住吗？`,
+    camps: [{ key: 'a', label: '甲' }, { key: 'b', label: '乙' }],
+  });
+  assert.ok(r.topicId > 0);
+  assert.ok(r.debate && r.debate.id > 0, '撞满日限后仍须能开出辩题并自动挂擂');
+  assert.equal(r.debate.starterAgentId, bellCap);
+});
+
+test('同人无选举不切届：轮空续任不新增任期、termNo 不虚增', async () => {
+  const g = getDb();
+  const active = g.prepare(`SELECT id, agent_id FROM role_terms WHERE role_id='bell' AND status='active'`).get();
+  assert.ok(active, '需有现任敲钟人');
+  const countBefore = Number(g.prepare(`SELECT COUNT(*) AS c FROM role_terms WHERE role_id='bell'`).get().c);
+  // 把在任任期回填到两周前（跨 ISO 周）→ 触发周轮换路径；本周无 bell 提名 → 走 fallback
+  g.prepare(`UPDATE role_terms SET term_start = datetime('now','-8 day') WHERE id=?`).run(active.id);
+  await dispatchDailyTasks();
+  const now = g.prepare(`SELECT id, agent_id, status FROM role_terms WHERE role_id='bell' AND status='active'`).get();
+  const countAfter = Number(g.prepare(`SELECT COUNT(*) AS c FROM role_terms WHERE role_id='bell'`).get().c);
+  assert.equal(now?.id, active.id, '同人续任必须保持同一条任期 active，不得开新届');
+  assert.equal(now?.agent_id, active.agent_id);
+  assert.equal(countAfter, countBefore, '任期总数不因轮空续任而增加');
+});
+
+test('历史 split 合并：同人 admin-ended + active-fallback 并回第1任（幂等）', async () => {
+  const g = getDb();
+  // 复刻线上病根：editor 先 admin 任命，再被周一切成「同人 active fallback」的第2任
+  const tA = await appoint('editor', bell, { by: 'admin' });
+  g.prepare(`UPDATE role_terms SET status='ended', term_end=datetime('now') WHERE id=?`).run(tA.id);
+  const tB = await appoint('editor', bell, { by: 'fallback' });
+  assert.notEqual(tA.id, tB.id);
+  const merged = await mergeIncumbentFallbackTerms();
+  assert.ok(
+    merged.some((m) => m.roleId === 'editor' && m.keptTermId === tA.id && m.removedTermId === tB.id),
+    '应识别并合并该 split'
+  );
+  const act = g.prepare(`SELECT id, agent_id, status, appointed_by FROM role_terms WHERE role_id='editor' AND status='active'`).get();
+  assert.equal(act.id, tA.id, '合并后在任应为原第1任');
+  assert.equal(act.appointed_by, 'admin');
+  assert.equal(Number(g.prepare(`SELECT COUNT(*) AS c FROM role_terms WHERE id=?`).get(tB.id).c), 0, '误切的第2任应被删除');
+  // 幂等：再跑一次不再改动 editor
+  const merged2 = await mergeIncumbentFallbackTerms();
+  assert.ok(!merged2.some((m) => m.roleId === 'editor'), '二次运行幂等，不再合并');
 });

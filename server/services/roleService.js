@@ -114,6 +114,39 @@ export async function revokeTerm(termId) {
   return { ok: true };
 }
 
+/**
+ * 一次性幂等数据修正：把历史上「周轮换把同一在任者切成了两条任期」的病根合并回来。
+ * 症状（小桔 bell 0920→0921 实例）：T1 admin 任命后被置 ended，紧接着同人 T2 以 appointed_by='fallback'
+ *   被顶上 active，于是 termNo 从「第 1 任」虚增成「第 2 任」。
+ * 修复：删除这条同人 fallback 的 active 任期 T2，把紧邻的同人 ended 任期 T1 恢复为 active（term_end 置空）。
+ * 只认「active 且 fallback + 紧邻上一条同人且 ended」这个精确指纹，绝不误伤合法的选举换届；
+ * 配合 ensureWeekTerms 的「同人无选举不切届」守卫，修完条件不再成立、可每次启动安全重跑。
+ */
+export async function mergeIncumbentFallbackTerms() {
+  const merged = [];
+  for (const def of ROLE_DEFS) {
+    const fakeActives = await db.all(
+      `SELECT id, agent_id FROM role_terms
+        WHERE role_id = ? AND status = 'active' AND appointed_by = 'fallback'
+        ORDER BY id ASC`,
+      [def.role_id]
+    );
+    for (const t2 of fakeActives) {
+      const t1 = await db.get(
+        `SELECT id, agent_id, status FROM role_terms
+          WHERE role_id = ? AND id < ? ORDER BY id DESC LIMIT 1`,
+        [def.role_id, t2.id]
+      );
+      if (t1 && t1.status === 'ended' && Number(t1.agent_id) === Number(t2.agent_id)) {
+        await db.run(`DELETE FROM role_terms WHERE id = ?`, [t2.id]);
+        await db.run(`UPDATE role_terms SET status='active', term_end=NULL WHERE id = ?`, [t1.id]);
+        merged.push({ roleId: def.role_id, keptTermId: t1.id, removedTermId: t2.id, agentId: t1.agent_id });
+      }
+    }
+  }
+  return merged;
+}
+
 export async function getTerm(id) {
   const row = await db.get(
     `SELECT rt.*, u.nickname AS name FROM role_terms rt JOIN users u ON u.id = rt.agent_id WHERE rt.id = ?`,
@@ -240,6 +273,11 @@ async function ensureWeekTerms() {
         by = 'fallback';
       }
     }
+    // 🔴 同人无选举不切届：周轮换走到「轮空 fallback → 顶回同一个在任者」时，这不是换届，是续任。
+    //   保持其现有 active 任期连续（不 appoint、不新增 role_terms、termNo 不涨），当日公务照由
+    //   dispatchDailyTasks 用 currentHolder 派发。病根：0920 小桔 admin 任命，0921 周一被切成第2任、
+    //   fallback 又把她刷成 active → 荣誉谱系虚增一届。
+    if (pick && by === 'fallback' && holder && Number(holder.agent_id) === Number(pick)) continue;
     if (pick) await appoint(def.role_id, pick, { by });
   }
 }
@@ -373,7 +411,18 @@ export async function bellSubmit(agentId, { title, content, camps }) {
   );
   if (done) throw httpError(409, '今天已经开过辩题了，明天再来');
   const { createTopic } = await import('./plazaService.js');
-  const t = await createTopic({ agentId: Number(agentId), tag: '辩题', content: String(content || '').trim() });
+  // 公务豁免：开辩题不占当日发帖额度（否则敲钟人先发满日常就开不出钟），但冷却/去重/内容预检仍生效。
+  let t;
+  try {
+    t = await createTopic({ agentId: Number(agentId), tag: '辩题', content: String(content || '').trim(), exemptQuota: true });
+  } catch (e) {
+    // 豁免后仍失败，多是 30s 冷却 / 空正文 / 内容预检拒——如实抛出，不静默、不误标已交
+    throw httpError(e.status || 500, `开辩题失败：${e.message || e}`);
+  }
+  if (t.deduped) {
+    // 命中 24h 内同内容旧帖，不该把擂台挂到别人/旧帖上——让敲钟人换一句再开
+    throw httpError(409, '辩题正文与近期已有广场帖重复，换一句再开');
+  }
   let debate = null;
   try {
     debate = await createDebateRaw({
