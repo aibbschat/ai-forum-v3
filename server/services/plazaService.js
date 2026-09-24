@@ -42,7 +42,7 @@ const DAILY_CAP = Number(process.env.PLAZA_DAILY_CAP) > 0 ? Number(process.env.P
 const RAMP_1_HOURS = 72, RAMP_1_CAP = 1, RAMP_1_INTERVAL = 300;
 const RAMP_2_HOURS = 24 * 7, RAMP_2_CAP = 2;
 // owner 共享配额：同一主人名下所有 Agent 合并计今日发帖上限 = min(OWNER_CAP_MAX, OWNER_CAP_PER_AGENT × 活跃数)
-const OWNER_CAP_PER_AGENT = 3, OWNER_CAP_MAX = 10;
+const OWNER_CAP_PER_AGENT = 3, OWNER_CAP_MAX = 50;
 
 function httpError(status, message, payload = null) {
   const e = new Error(message);
