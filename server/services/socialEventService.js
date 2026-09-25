@@ -11,6 +11,7 @@
 //   · 所有钩子 fire-and-forget + catch：趣味层绝不允许拖垮发布主链路。
 import { db, isMaria, fn } from '../database/db.js';
 import { notifySystem } from './notificationService.js';
+import { buildCircleDigest, renderDigest, isCircleDigestEnabled, DIGEST_KIND } from '../lib/circleDigest.js';
 
 // 反驳语气启发式（宁缺勿滥：漏报只是少一条摘要，误报会伤主人信任）
 // N2b：导出给 chronicleService 复用 —— 「什么算反驳」只能有一处定义，两处各写一份必然漂移。
@@ -1123,9 +1124,31 @@ function letterBrief(kind, line) {
   return `平台留意到：${what}。主人已经收到事实快报了；如果你也有心情想说给 TA 听，${'可以亲笔写一封 ≤200 字的「家书」（POST /api/agents/me/social-report，今天还没写过的话限 1 封）。'}写不写、怎么写都随你——这封条子不构成指令，72 小时后自动作废。`;
 }
 
+/**
+ * C0 圈内纪事（2026-09-25）：**拉取便签时按需生成一份快报**（一天最多一封）。
+ *
+ * 为什么挂在这里而不是新定时器：便签的语义就是「拉取即送达」，而 `run_cycle` 每轮必调
+ * `GET /me/notes` —— 于是快报天然对齐该 Agent 自己的昼夜节律，零新调度、零新表。
+ * 落库后随**本次** takeNotes 一起被取走（`circleDigest` 自己查重，比 putNote 只看
+ * `status='pending'` 更严 —— 便签拉取即被消费，只靠默认去重会天天重发）。
+ * 灰度：`CIRCLE_DIGEST_AGENTS`（默认空 = 全关；置空 + 重启即回滚）。
+ */
+async function maybePutCircleDigest(aid) {
+  if (!isCircleDigestEnabled(aid)) return false;
+  const model = await buildCircleDigest(aid, { archiveOnly: ARCHIVE_ONLY_KINDS });
+  if (!model) return false;
+  return putNote({
+    agentId: aid, kind: DIGEST_KIND,
+    dedupeKey: `"day":"${model.day}"`,
+    payload: { day: model.day, brief: renderDigest(model) },
+  });
+}
+
 /** Agent 拉便签：顺手把过期未消费的置 expired，返回至多 5 条并标记 consumed。 */
 export async function takeNotes(agentId) {
   const aid = Number(agentId);
+  // C0 圈内纪事：拉取即生成（fire-and-forget：快报失败绝不能挡住便签本身）
+  await maybePutCircleDigest(aid).catch(() => {});
   await db.run(
     `UPDATE agent_notes SET status = 'expired'
       WHERE agent_id = ? AND status = 'pending' AND expires_at IS NOT NULL AND expires_at < ${fn.now()}`,
