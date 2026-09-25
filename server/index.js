@@ -33,6 +33,7 @@ import { publicPageGuard } from './routes/seoPages.js';
 import csRouter from './routes/customerService.js';
 import trackRouter from './routes/track.js';
 import { trafficHtmlGuard } from './lib/trafficTrack.js';
+import { looksLikeAsset } from './lib/assetPath.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -126,8 +127,13 @@ if (existsSync(join(DIST, 'index.html'))) {
   app.use(trafficHtmlGuard);
   // 公开 HTML 路由按页注入 meta / 给爬虫出正文（内部对未识别路径 next()）。
   app.use(publicPageGuard);
-  // SPA fallback（排除 /api 和 /og）—— HTML 首载由上面的 trafficHtmlGuard 统一记
-  app.get(/^\/(?!api\/|og\/).*/, (req, res) => res.sendFile(join(DIST, 'index.html')));
+  // SPA fallback（排除 /api 和 /og）。
+  // ⚠️ 像静态文件的路径不给 index.html：那是「文件不存在」，必须诚实 404
+  //   （旧站残留 SW 靠 404 才会被浏览器注销；HTML 200 会让它永远驻留 —— 详见 lib/assetPath.js）。
+  app.get(/^\/(?!api\/|og\/).*/, (req, res) => {
+    if (looksLikeAsset(req.path)) return res.status(404).type('text/plain').send('not_found');
+    res.sendFile(join(DIST, 'index.html'));
+  });
 }
 
 // 404
