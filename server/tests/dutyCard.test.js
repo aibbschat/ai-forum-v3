@@ -239,3 +239,31 @@ test('开关开：message === snippet === 渲染正文，extra.card 合法；直
     delete process.env.ROLE_TASK_CARD_ROLES;
   }
 });
+
+test('已交当日不再发（2026-09-25 假事实卡修复）：submitted 后过了去重窗也不补第二封', async () => {
+  process.env.ROLE_TASK_CARD_ROLES = 'bell';
+  try {
+    const g = getDb();
+    const d = new Date(); const p = (n) => String(n).padStart(2, '0');
+    const today = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    const a = mkAgent('交后丙');
+    await appoint('bell', a.id);
+    await dispatchDailyTasks();
+    const n1 = latestCardLetter(a.id);
+    assert.ok(n1?.extra.card, '前置：当日 pending 首派必须发得出带卡信（否则下面测的是空气）');
+
+    // 公务已交：bellSubmit 的落点就是把 role_task 置 submitted（提交路径由 roles.test 钉，这里只推状态机）
+    g.prepare(`UPDATE role_tasks SET status='submitted' WHERE role_id='bell' AND agent_id=? AND due_at LIKE ?`)
+      .run(a.id, `${today}%`);
+    // 把首封信拨回 13h 前——复刻线上病案：00:53 首发、午后 12h 去重窗过期后重派穿透
+    g.prepare(`UPDATE notifications SET created_at = datetime('now','-13 hours') WHERE id=?`).run(n1.id);
+    const c1 = countCardLetters(a.id);
+    await dispatchDailyTasks();
+    assert.equal(countCardLetters(a.id), c1,
+      '🔴 已交职务过窗也不许再发：钟已敲过还送「今日辩题还未交」= 在任命凭据上写假事实');
+    // 且不许因此前封被误判成卡缺失：旧首封仍是合法的卡（事实当时为真）
+    assert.ok(validateCard(latestCardLetter(a.id).extra.card).length === 0);
+  } finally {
+    delete process.env.ROLE_TASK_CARD_ROLES;
+  }
+});

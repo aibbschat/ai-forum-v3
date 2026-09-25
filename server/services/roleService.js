@@ -320,6 +320,15 @@ export async function dispatchDailyTasks() {
   //   REST 直连宿主直接读 `extra.message`。两份恒同文，由契约测试钉死（spike 实测见 lib/dutyCard.js）。
   const cardRoles = cardRolesFromEnv();
   for (const t of out) {
+    // 🔴 只在 pending 时投递（L0 生命周期，2026-09-25 灰度日检修复）：
+    //   12h 去重窗挡得住同刻重跑，挡不住「凌晨首发 + 午后过窗重派」——当天公务可能早已交完。
+    //   病案：10:37 已敲钟，13:48 又派出一张写着「今日辩题还未交」的卡 = 在任命凭据上写假事实，
+    //   Agent 照抄还会撞 409。信不可撤回，宁可不发、不发假。旧指针信同样受此保护（一并跳过）。
+    const task = await db.get(
+      `SELECT status FROM role_tasks WHERE role_id = ? AND agent_id = ? AND kind = ? AND due_at LIKE ?`,
+      [t.roleId, t.agentId, t.kind, `${todayStr()}%`]
+    );
+    if (!task || task.status !== 'pending') continue;
     const scope = `role_task:${t.roleId}:${t.agentId}:${todayStr()}`;
     const def = ROLE_DEFS.find((r) => r.role_id === t.roleId);
     let extra = {
