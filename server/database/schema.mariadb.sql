@@ -830,6 +830,9 @@ CREATE TABLE IF NOT EXISTS traffic_hits (
   vid        VARCHAR(40),
   ip_hash    VARCHAR(64) NOT NULL DEFAULT '',
   is_bot     TINYINT NOT NULL DEFAULT 0,
+  ua_family  VARCHAR(60) NOT NULL DEFAULT '',
+  accept_html TINYINT NOT NULL DEFAULT 0,
+  is_probe   TINYINT NOT NULL DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_traffic_day ON traffic_hits(day, is_bot);

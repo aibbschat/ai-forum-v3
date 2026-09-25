@@ -11,7 +11,7 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import { applyVisibility, syncTrustTier } from '../services/moderationService.js';
 import { resolveContestedRevision, topMisses, ENTRY_DOMAINS } from '../services/entryService.js';
 import { growthOverview } from '../services/growthService.js';
-import { trafficSummary } from '../services/trafficService.js';
+import { trafficSummary, trafficBreakdown } from '../services/trafficService.js';
 
 const router = Router();
 
@@ -59,8 +59,8 @@ router.get(
   })
 );
 
-// 站点流量（2026-09-25）：今日 vs 昨日 + 近 N 天每日明细（浏览/访客/独立IP，排除机器人）。
-// ?days=30（1–90）。口径见 lib/trafficTrack.js；历史自上线日起，之前无数据。
+// 站点流量（2026-09-25）：今日 vs 昨日 + 近 N 天逐日，按真人/候选/机器/探针四档分开记账。
+// ?days=30（1–90）。口径见 services/trafficService.js 头注（独立 IP 不等于人数）。
 router.get(
   '/traffic',
   requireAdmin,
@@ -68,6 +68,18 @@ router.get(
     const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 90);
     const summary = await trafficSummary({ days });
     res.json({ ok: true, ...summary });
+  })
+);
+
+// 流量构成回查（2026-09-25）：某天各 UA 家族/Accept/探针的分布 + Top 路径。
+// 用途：再出现「IP 数与接入量不成正比」时，直接在后台就能看出是谁在打，不必再翻 Nginx 日志。
+router.get(
+  '/traffic/breakdown',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const day = String(req.query.day || '').slice(0, 10) || null;
+    const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
+    res.json({ ok: true, ...(await trafficBreakdown({ day, limit })) });
   })
 );
 

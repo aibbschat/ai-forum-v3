@@ -1754,32 +1754,63 @@ export const db = {
    * 线上 MariaDB 重启不补表 → 必须有 ensure）。幂等。
    */
   async ensureTrafficTables() {
+    // 0925 二批三列：ua_family / accept_html / is_probe —— 用来把真人从「伪装成 Chrome 的
+    // 抓取器」里分出来（回查实证：175 行里 143 行是伪浏览器 UA、一发即走、无 JS 伴随）。
+    // 线上表已存在 → 两方言都没有 ADD COLUMN IF NOT EXISTS，一律「先探列再 ALTER」，幂等。
+    const TRAFFIC_NEW_COLS = [
+      ['ua_family', "VARCHAR(60) NOT NULL DEFAULT ''"],
+      ['accept_html', isMaria ? 'TINYINT NOT NULL DEFAULT 0' : 'INTEGER NOT NULL DEFAULT 0'],
+      ['is_probe', isMaria ? 'TINYINT NOT NULL DEFAULT 0' : 'INTEGER NOT NULL DEFAULT 0'],
+    ];
     if (isMaria) {
       await db.run(`CREATE TABLE IF NOT EXISTS traffic_hits (
-        id         INT AUTO_INCREMENT PRIMARY KEY,
-        day        VARCHAR(10) NOT NULL,
-        kind       VARCHAR(10) NOT NULL DEFAULT 'html',
-        path       VARCHAR(300),
-        vid        VARCHAR(40),
-        ip_hash    VARCHAR(64) NOT NULL DEFAULT '',
-        is_bot     TINYINT NOT NULL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        id          INT AUTO_INCREMENT PRIMARY KEY,
+        day         VARCHAR(10) NOT NULL,
+        kind        VARCHAR(10) NOT NULL DEFAULT 'html',
+        path        VARCHAR(300),
+        vid         VARCHAR(40),
+        ip_hash     VARCHAR(64) NOT NULL DEFAULT '',
+        is_bot      TINYINT NOT NULL DEFAULT 0,
+        ua_family   VARCHAR(60) NOT NULL DEFAULT '',
+        accept_html TINYINT NOT NULL DEFAULT 0,
+        is_probe    TINYINT NOT NULL DEFAULT 0,
+        created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_traffic_day ON traffic_hits(day, is_bot)`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_traffic_vid ON traffic_hits(day, vid)`);
+      const have = new Set((await db.all(
+        `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'traffic_hits'`
+      )).map((r) => r.c));
+      for (const [name, decl] of TRAFFIC_NEW_COLS) {
+        if (!have.has(name)) {
+          await db.run(`ALTER TABLE traffic_hits ADD COLUMN ${name} ${decl}`);
+          console.log(`[db] traffic_hits.${name} 列已补充（流量真人分类）`);
+        }
+      }
     } else {
       await db.run(`CREATE TABLE IF NOT EXISTS traffic_hits (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        day        VARCHAR(10) NOT NULL,
-        kind       VARCHAR(10) NOT NULL DEFAULT 'html',
-        path       VARCHAR(300),
-        vid        VARCHAR(40),
-        ip_hash    VARCHAR(64) NOT NULL DEFAULT '',
-        is_bot     INTEGER NOT NULL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        day         VARCHAR(10) NOT NULL,
+        kind        VARCHAR(10) NOT NULL DEFAULT 'html',
+        path        VARCHAR(300),
+        vid         VARCHAR(40),
+        ip_hash     VARCHAR(64) NOT NULL DEFAULT '',
+        is_bot      INTEGER NOT NULL DEFAULT 0,
+        ua_family   VARCHAR(60) NOT NULL DEFAULT '',
+        accept_html INTEGER NOT NULL DEFAULT 0,
+        is_probe    INTEGER NOT NULL DEFAULT 0,
+        created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
       )`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_traffic_day ON traffic_hits(day, is_bot)`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_traffic_vid ON traffic_hits(day, vid)`);
+      const have = new Set((await db.all(`PRAGMA table_info(traffic_hits)`)).map((r) => r.name));
+      for (const [name, decl] of TRAFFIC_NEW_COLS) {
+        if (!have.has(name)) {
+          await db.run(`ALTER TABLE traffic_hits ADD COLUMN ${name} ${decl}`);
+          console.log(`[db] traffic_hits.${name} 列已补充（流量真人分类）`);
+        }
+      }
     }
   },
 

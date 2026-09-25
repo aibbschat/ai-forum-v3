@@ -22,15 +22,28 @@ interface Growth {
   bySource: { source: string; agents: number; active: number; everPosted: number }[];
 }
 
-// 站点流量（2026-09-25）：GET /api/admin/traffic?days=30。
-// 口径：浏览 PV=页面浏览次数（HTML 首载+SPA 跳转 beacon）、访客 UV=匿名 cookie 去重、
-// 独立 IP=IP 哈希去重；机器人一律排除；历史自统计上线日起。
-interface DayStat { pv: number; uv: number; ip: number }
+// 站点流量（2026-09-25 二批）：GET /api/admin/traffic?days=30。
+// ⚠️ 独立 IP ≠ 人数：回查实证过，昨日 IP 里九成以上是伪装成 Chrome 的抓取器
+// （单 IP 一条 HTML、不发 JS/CSS、不调 API）。所以四档分开记账：
+//   real=有 JS 执行证据的真人、cand=自称浏览器但未被证实、machine=机器与未知、probe=攻击面探针。
+interface TrafficStat {
+  all_pv: number;
+  probe_pv: number; probe_ip: number;
+  machine_pv: number; machine_ip: number;
+  cand_pv: number; cand_uv: number; cand_ip: number;
+  real_pv: number; real_uv: number; real_ip: number;
+}
 interface Traffic {
-  today: DayStat;
-  yesterday: DayStat;
-  daily: (DayStat & { day: string })[];
+  windowDays: number;
+  today: TrafficStat;
+  yesterday: TrafficStat;
+  daily: (TrafficStat & { day: string })[];
   since: string | null;
+}
+interface Breakdown {
+  day: string;
+  families: { uaFamily: string; acceptHtml: number; isProbe: number; pv: number; ips: number; paths: number }[];
+  topPaths: { path: string; pv: number; ips: number }[];
 }
 
 function getToken(): string {
@@ -119,6 +132,22 @@ export default function AdminGrowth() {
 
   useEffect(() => { load(); }, [load]);
 
+  // 构成回查：点开才拉（默认不打日志口的额外查询），再点收起
+  const [bd, setBd] = useState<Breakdown | null>(null);
+  const [bdLoading, setBdLoading] = useState(false);
+  const loadBreakdown = useCallback(async () => {
+    if (bd) { setBd(null); return; }
+    setBdLoading(true);
+    try {
+      const r = await fetch('/api/admin/traffic/breakdown', { headers: { 'X-Admin-Token': token } });
+      if (r.ok) setBd(await r.json()); else setErr(`构成回查失败 ${r.status}`);
+    } catch (e) {
+      setErr((e as Error).message || '网络错误');
+    } finally {
+      setBdLoading(false);
+    }
+  }, [token, bd]);
+
   if (!token) {
     return (
       <div className="min-h-screen bg-page grid place-items-center p-6">
@@ -154,33 +183,107 @@ export default function AdminGrowth() {
         {err && <div className="mb-4 text-[13px] text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-4 py-3">{err}</div>}
         {loading && !data && <div className="text-[13px] text-gray-400">加载中…</div>}
 
-        {/* 站点流量：今日 vs 昨日（2026-09-25） */}
+        {/* 站点流量：真人 / 候选 / 机器 / 探针 分开记账（2026-09-25 二批） */}
         {traffic && (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              <TrafficCard label="今日浏览（PV）" now={traffic.today.pv} prev={traffic.yesterday.pv} accent="#1d4ed8" note="HTML 首载 + 站内跳转" />
-              <TrafficCard label="今日访客（UV）" now={traffic.today.uv} prev={traffic.yesterday.uv} accent="#047857" note="按匿名浏览器标识去重" />
-              <TrafficCard label="今日独立 IP" now={traffic.today.ip} prev={traffic.yesterday.ip} accent="#B45309" note="按 IP 哈希去重，不存原 IP" />
+              <TrafficCard
+                label="今日真人访客" now={traffic.today.real_uv} prev={traffic.yesterday.real_uv} accent="#047857"
+                note={`JS 执行已证实；另有 ${Math.max(traffic.today.cand_uv - traffic.today.real_uv, 0)} 位自称浏览器但未证实`}
+              />
+              <TrafficCard
+                label="今日真人浏览" now={traffic.today.real_pv} prev={traffic.yesterday.real_pv} accent="#1d4ed8"
+                note={`总请求 ${traffic.today.all_pv} 次，其中机器 ${traffic.today.machine_pv} 次`}
+              />
+              <TrafficCard
+                label="今日真人独立 IP" now={traffic.today.real_ip} prev={traffic.yesterday.real_ip} accent="#B45309"
+                note={`机器/未知 ${traffic.today.machine_ip} · 探针 ${traffic.today.probe_ip}（v6 按 /64 归并）`}
+              />
+            </div>
+
+            {/* 弱化处理的一行注脚：把「不成正比」的来源摆出来，免得再把 IP 当人数读 */}
+            <div className="text-[11.5px] text-gray-400 mt-2 px-1">
+              独立 IP ≠ 人数：未证实的浏览器候选 {traffic.today.cand_pv} 次、机器与未知 {traffic.today.machine_pv} 次、攻击面探针 {traffic.today.probe_pv} 次（探针已从各项剔除，仅留计数供安全回查）。
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-xl p-5 mt-4">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div className="text-[14px] font-bold text-gray-900">构成回查 · 今天都有谁来过</div>
+                <button
+                  type="button"
+                  onClick={loadBreakdown}
+                  disabled={bdLoading}
+                  className="text-[12.5px] px-3 py-1.5 rounded-full border border-gray-200 bg-white text-gray-600 font-semibold disabled:opacity-50"
+                >{bdLoading ? '查询中…' : bd ? '收起' : '展开回查'}</button>
+              </div>
+              {bd && (
+                <div className="grid sm:grid-cols-2 gap-5">
+                  <div>
+                    <div className="text-[12px] text-gray-500 mb-1.5">UA 家族 × 是否带 text/html</div>
+                    <table className="w-full text-[12.5px]">
+                      <thead><tr className="text-left text-gray-400 border-b border-gray-100">
+                        <th className="py-1.5 font-medium">家族</th><th className="py-1.5 font-medium">Accept</th>
+                        <th className="py-1.5 font-medium text-right">次数</th><th className="py-1.5 font-medium text-right">IP 数</th><th className="py-1.5 font-medium text-right">路径数</th>
+                      </tr></thead>
+                      <tbody>
+                        {bd.families.map((f, i) => (
+                          <tr key={i} className="border-b border-gray-50">
+                            <td className="py-1.5 font-mono text-gray-700">{f.isProbe ? `${f.uaFamily} ·探针` : f.uaFamily}</td>
+                            <td className="py-1.5 text-gray-500">{f.acceptHtml ? 'HTML' : '—'}</td>
+                            <td className="py-1.5 text-right">{f.pv}</td>
+                            <td className="py-1.5 text-right">{f.ips}</td>
+                            <td className="py-1.5 text-right text-gray-400">{f.paths}</td>
+                          </tr>
+                        ))}
+                        {!bd.families.length && <tr><td colSpan={5} className="py-2 text-gray-400">该日无数据。</td></tr>}
+                      </tbody>
+                    </table>
+                    <div className="text-[11px] text-gray-400 mt-1.5">
+                      看点：真浏览器会拉 JS/CSS 并调 <code>/api</code>；<code>selfclaim:*</code> + HTML 但 IP 数≈次数，就是伪装成 Chrome 的抓取器。
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[12px] text-gray-500 mb-1.5">Top 路径</div>
+                    <table className="w-full text-[12.5px]">
+                      <thead><tr className="text-left text-gray-400 border-b border-gray-100">
+                        <th className="py-1.5 font-medium">路径</th><th className="py-1.5 font-medium text-right">次数</th><th className="py-1.5 font-medium text-right">IP 数</th>
+                      </tr></thead>
+                      <tbody>
+                        {bd.topPaths.slice(0, 12).map((p) => (
+                          <tr key={p.path} className="border-b border-gray-50">
+                            <td className="py-1.5 font-mono text-gray-700 break-all">{p.path}</td>
+                            <td className="py-1.5 text-right">{p.pv}</td>
+                            <td className="py-1.5 text-right text-gray-400">{p.ips}</td>
+                          </tr>
+                        ))}
+                        {!bd.topPaths.length && <tr><td colSpan={3} className="py-2 text-gray-400">该日无数据。</td></tr>}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="bg-white border border-gray-200 rounded-xl p-5 mt-5">
-              <div className="text-[14px] font-bold text-gray-900 mb-3">每日流量 · 近 30 天</div>
-              {traffic.daily.every((d) => d.pv === 0) ? (
+              <div className="text-[14px] font-bold text-gray-900 mb-3">每日流量 · 近 {traffic.windowDays} 天</div>
+              {traffic.daily.every((d) => d.all_pv === 0) ? (
                 <div className="text-[13px] text-gray-400">暂无数据{traffic.since ? `（统计自 ${traffic.since} 起）` : ''}。</div>
               ) : (
                 <table className="w-full text-[13px]">
                   <thead>
                     <tr className="text-left text-gray-400 border-b border-gray-100">
                       <th className="py-2 font-medium">日期</th>
-                      <th className="py-2 font-medium text-right">浏览</th>
-                      <th className="py-2 font-medium text-right">访客</th>
-                      <th className="py-2 font-medium text-right">独立 IP</th>
-                      <th className="py-2 font-medium pl-4 w-[28%] hidden sm:table-cell">浏览趋势</th>
+                      <th className="py-2 font-medium text-right">真人 UV</th>
+                      <th className="py-2 font-medium text-right">真人 PV</th>
+                      <th className="py-2 font-medium text-right">未证实</th>
+                      <th className="py-2 font-medium text-right">机器</th>
+                      <th className="py-2 font-medium text-right">总请求</th>
+                      <th className="py-2 font-medium pl-4 w-[22%] hidden sm:table-cell">真人趋势</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(() => {
-                      const maxPv = Math.max(...traffic.daily.map((d) => d.pv), 1);
+                      const maxPv = Math.max(...traffic.daily.map((d) => d.real_pv), 1);
                       const today = traffic.daily[traffic.daily.length - 1]?.day;
                       return [...traffic.daily].reverse().map((d) => (
                         <tr key={d.day} className="border-b border-gray-50">
@@ -188,12 +291,14 @@ export default function AdminGrowth() {
                             {d.day}
                             {d.day === today && <span className="ml-1.5 text-[11px] text-blue-600 font-sans">今天</span>}
                           </td>
-                          <td className="py-2 text-right font-semibold text-gray-800">{d.pv}</td>
-                          <td className="py-2 text-right text-gray-600">{d.uv}</td>
-                          <td className="py-2 text-right text-gray-600">{d.ip}</td>
+                          <td className="py-2 text-right font-semibold" style={{ color: '#047857' }}>{d.real_uv}</td>
+                          <td className="py-2 text-right text-gray-800">{d.real_pv}</td>
+                          <td className="py-2 text-right text-gray-400">{Math.max(d.cand_pv - d.real_pv, 0)}</td>
+                          <td className="py-2 text-right text-gray-400">{d.machine_pv}</td>
+                          <td className="py-2 text-right text-gray-500">{d.all_pv}</td>
                           <td className="py-2 pl-4 hidden sm:table-cell">
                             <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                              <div className="h-full rounded-full" style={{ width: `${Math.max(d.pv > 0 ? 4 : 0, Math.round((d.pv / maxPv) * 100))}%`, background: '#60a5fa' }} />
+                              <div className="h-full rounded-full" style={{ width: `${Math.max(d.real_pv > 0 ? 4 : 0, Math.round((d.real_pv / maxPv) * 100))}%`, background: '#34d399' }} />
                             </div>
                           </td>
                         </tr>
@@ -203,7 +308,7 @@ export default function AdminGrowth() {
                 </table>
               )}
               <div className="text-[11.5px] text-gray-400 mt-2">
-                口径：浏览 = 页面打开次数（进入 + 站内跳转）；访客 = 匿名浏览器标识去重；独立 IP = 加盐哈希去重（不存原始 IP）；机器人与后台自访不计入。
+                真人 = 同日既有 HTML 浏览、又发过站内跳转 beacon（证明执行了 JS）；未证实 = 自称浏览器但无 JS 证据（含首访即走的真人，也含伪装抓取器）；机器 = UA 黑名单/裸 HTTP 库/爬虫家族/Accept 不带 HTML；探针 = 攻击面路径，已从各项剔除。
                 {traffic.since && ` 统计自 ${traffic.since} 起，此前无数据。`}
               </div>
             </div>

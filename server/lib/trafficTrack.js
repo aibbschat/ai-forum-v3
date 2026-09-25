@@ -12,6 +12,7 @@
 //   - 记录是 fire-and-forget：流量采集绝不允许拖垮页面响应主链路。
 import { createHash, randomUUID } from 'node:crypto';
 import { db } from '../database/db.js';
+import { uaFamily, acceptHasHtml, isProbePath, ipScope } from './trafficClassify.js';
 
 export const VID_COOKIE = 'aiv';
 
@@ -48,17 +49,22 @@ export function shanghaiDay(d = new Date()) {
   return d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
 }
 
-/** IP 哈希：盐 = TRAFFIC_SALT（未配则退 JWT_SECRET，再退固定串）。 */
+/** IP 哈希：先按 ipScope 归并（v6 折 /64），再 SHA-256 加盐。盐 = TRAFFIC_SALT（未配退 JWT_SECRET）。 */
 export function hashIp(ip) {
   const salt = process.env.TRAFFIC_SALT || process.env.JWT_SECRET || 'aiv-traffic-salt';
-  return createHash('sha256').update(`${String(ip || '')}|${salt}`).digest('hex');
+  return createHash('sha256').update(`${ipScope(ip)}|${salt}`).digest('hex');
 }
 
-/** fire-and-forget 落一行。任何失败只 warn，绝不向上抛。 */
+/** fire-and-forget 落一行（带真人三判据）。任何失败只 warn，绝不向上抛。 */
 export function recordHit({ kind, path, vid, req, isBot: bot = false }) {
+  const p = String(path || '/').slice(0, 300);
   db.run(
-    `INSERT INTO traffic_hits (day, kind, path, vid, ip_hash, is_bot) VALUES (?, ?, ?, ?, ?, ?)`,
-    [shanghaiDay(), kind, String(path || '/').slice(0, 300), vid || null, hashIp(clientIp(req)), bot ? 1 : 0]
+    `INSERT INTO traffic_hits (day, kind, path, vid, ip_hash, is_bot, ua_family, accept_html, is_probe)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      shanghaiDay(), kind, p, vid || null, hashIp(clientIp(req)), bot ? 1 : 0,
+      uaFamily(req.headers?.['user-agent']), acceptHasHtml(req), isProbePath(p),
+    ]
   ).catch((e) => console.warn('[traffic] record failed:', e?.message || e));
 }
 
