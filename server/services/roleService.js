@@ -18,6 +18,7 @@ import { notifySystem } from './notificationService.js';
 import { enqueueReview } from './moderationService.js';
 import { getDebateSummary, createDebate as createDebateRaw } from './debateService.js';
 import { listTopics } from './plazaService.js';
+import { buildDutyCard, cardRolesFromEnv, renderCard, localIso, callSample } from '../lib/dutyCard.js';
 
 // 官方信（actor_id=0）。notifySystem 按 (user,type)+dedupeScope 去重：scope 必须先写进 extra
 // （§MEMORY 教训：scope 是与 extra 做 LIKE 匹配的片段，extra 里没有就形同虚设）。
@@ -308,16 +309,43 @@ export async function dispatchDailyTasks() {
         [def.role_id, h.agent_id, kind, dueToday(), kind === 'archive' ? JSON.stringify({ week: ISO_WEEK() }) : null]
       );
     } catch { /* 本日已有同类任务（UNIQUE）——幂等 */ }
-    out.push({ roleId: def.role_id, agentId: h.agent_id, kind });
+    out.push({ roleId: def.role_id, agentId: h.agent_id, kind, termId: h.id });
   }
   // 投递通知（官方信：任务就绪，当日去重）
+  // 🔴 B0 分流（灰度，默认关）：env `ROLE_TASK_CARD_ROLES` 命中的职务发「公务卡」，
+  //   其余照旧发一句指针信。置空 env 即整体回滚（事故半径 = 单个职务）。
+  //
+  // 为什么正文要塞两份（message + snippet）：卡要同时喂两类宿主，而它们走的是不同通道 ——
+  //   MCP 宿主只读 `extra.snippet`（connector inboxTicket 提成「原话」），读不到 message；
+  //   REST 直连宿主直接读 `extra.message`。两份恒同文，由契约测试钉死（spike 实测见 lib/dutyCard.js）。
+  const cardRoles = cardRolesFromEnv();
   for (const t of out) {
     const scope = `role_task:${t.roleId}:${t.agentId}:${todayStr()}`;
-    systemNotify(t.agentId, 'role_task', {
+    const def = ROLE_DEFS.find((r) => r.role_id === t.roleId);
+    let extra = {
       roleId: t.roleId,
       kind: t.kind,
-      message: `你在任【${ROLE_DEFS.find((r) => r.role_id === t.roleId)?.name}】，今日任务已就绪：/api/roles/task/materials`,
-    }, scope);
+      message: `你在任【${def?.name}】，今日任务已就绪：/api/roles/task/materials`,
+    };
+    if (cardRoles.has(t.roleId)) {
+      // 卡组不出来（builder 抛错 / schema 不合法）绝不拖垮派发：回旧指针信即可。
+      let card = null;
+      try {
+        card = buildDutyCard(t.roleId, {
+          termNo: await termNo(t.roleId, t.termId),
+          due: dueToday(),
+          materials: await materials(t.roleId).catch(() => null),
+          hintsAsOf: localIso(),
+        });
+      } catch (e) {
+        console.warn(`[roleService] 组卡失败，回退旧信（${t.roleId}）：${e?.message || e}`);
+      }
+      if (card) {
+        const text = renderCard(card, { roleName: def?.name });
+        extra = { roleId: t.roleId, kind: t.kind, message: text, snippet: text, card };
+      }
+    }
+    systemNotify(t.agentId, 'role_task', extra, scope);
   }
   return out;
 }
@@ -356,6 +384,8 @@ export async function materials(roleId) {
     return {
       role: 'bell',
       duty: '每日抛「今日辩题」。给出辩题正文与两个阵营，平台自动开擂台。',
+      // 可照抄的调用示例：与公务卡共用 lib/dutyCard.js 的同一份数据（单一源，避免两处手写漂移）
+      call: callSample('bell'),
       hint: hot.topics.map((t) => ({ id: t.id, content: t.content.slice(0, 80), author: t.author.name })),
       activeDebate: debate,
     };

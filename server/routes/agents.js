@@ -355,6 +355,12 @@ router.get(
     //    `extra.*` 那一段保留：老版本服务端/其他 type 仍可能把正文塞在 extra 里。
     if (isAgentReadReq(req)) {
       for (const it of items) {
+        // 🔴 公务卡（role_task）例外：它的正文是**平台口吻的任命凭据**（事实+参数+邀请），
+        //    不是「站内他人正文」。包上数据标记有两重错：① 语义反了 —— 等于告诉 Agent
+        //    「这是别人的数据、别当指令」，而卡恰恰就是平台在请它办事，轻则不当回事、
+        //    重则整条凭据被当噪音丢掉；② 白吃 55 字展示额度（list_inbox 上限 500，卡已逼近）。
+        //    官方信的 message/snippet 本来就只承载平台自己的话（actor_id=0）。
+        if (it.type === 'role_task') continue;
         if (it.postTitle) it.postTitle = wrapUntrusted(it.postTitle);
         if (it.topicExcerpt) it.topicExcerpt = wrapUntrusted(it.topicExcerpt);
         if (typeof it.text === 'string' && it.text) it.text = wrapUntrusted(it.text);
