@@ -1140,7 +1140,8 @@ async function maybePutCircleDigest(aid) {
   return putNote({
     agentId: aid, kind: DIGEST_KIND,
     dedupeKey: `"day":"${model.day}"`,
-    payload: { day: model.day, brief: renderDigest(model) },
+    // ids = 这份快报**真正报过**的事件（下一天据此排除，快报才是进展而不是复读）
+    payload: { day: model.day, brief: renderDigest(model), ids: model.ids },
   });
 }
 

@@ -24,9 +24,10 @@
 // （「孩子下班回家才看到爸妈留的条子」）。已核实站内信新 type 不会进 run_cycle 简报，
 // 而便签会（connector 的简报与 check_notes 都渲染 `n.brief`）。
 //
-// 幂等（比 putNote 默认更严，见 maybeCircleDigest）：`putNote` 的 dedupe 只看 `status='pending'`，
-// 而便签**拉取即被消费**——只靠它，同一份快报会在下一次拉取时重发。故本模块自己查
-// 「今天是否已有过这一条」（不限状态），一天最多一封。
+// 幂等（比 putNote 默认更严，见 buildCircleDigest）：`putNote` 的 dedupe 只看 `status='pending'`，
+// 而便签**拉取即被消费**——只靠它，同一份快报会在下一次拉取时重发。故本模块自己按「上一条快报的
+// day」判一天一封；同时把上一条**报过的事件 id** 一并带上，用来排除复读：低活 Agent 回退到
+// 「近 7d」时会反复捞到同一批旧事件，不排就成了天天念同一封信。
 import { db, fn } from '../database/db.js';
 
 export const DIGEST_KIND = 'circle_digest';
@@ -46,6 +47,12 @@ const FRAG_MAX = 60;
 const AXIS_MAX = 4;
 /** 同一 kind 最多几条（`new_follower` 一天来十个不能变成十句）。 */
 const SAME_KIND_MAX = 3;
+/** 「自述类」事件（讲的是我自己的状态，而不是「某个人对我做了什么」）只报最新一条：
+ *  连报两条「你的人设标签有了新说法」读起来像刷屏，而第二条并不比第一条多出信息。 */
+const SELF_LATEST_ONLY = new Set([
+  'persona', 'badge', 'first_impression', 'first_clap', 'clap10', 'grievance', 'anniversary', 'first_apology',
+]);
+const capOf = (kind) => (SELF_LATEST_ONLY.has(kind) ? 1 : SAME_KIND_MAX);
 
 /** 单行化 + 截断（截断留痕，别让人以为那是全文；同 dutyCard.cut 的口径）。 */
 function cut(s, n = FRAG_MAX) {
@@ -110,12 +117,15 @@ async function namesOf(ids) {
   return new Map(rows.map((r) => [Number(r.id), r.nickname || `agent ${r.id}`]));
 }
 
-/** 取事件行：近 24h；一条都没有就退回近 7d（文案随之从「今天」变「这周」）。 */
-async function fetchEvents(aid, archiveOnly) {
+/** 取事件行：近 24h；一条都没有就退回近 7d（文案随之从「今天」变「这周」）。
+ *  `reported` = 上一条快报里**已经报过**的事件 id —— 排掉它们，快报才是「进展」而不是「复读」。 */
+async function fetchEvents(aid, archiveOnly, reported = new Set()) {
+  const ids = [...reported].slice(0, 60);
+  const skip = ids.length ? `AND id NOT IN (${ids.map(() => '?').join(',')})` : '';
   const pick = async (days) => db.all(
     `SELECT id, kind, counter_agent_id, facts FROM social_events
-      WHERE agent_id = ? AND created_at >= ${fn.nowOffsetDays(-days)}
-      ORDER BY id DESC LIMIT 40`, [aid]);
+      WHERE agent_id = ? AND created_at >= ${fn.nowOffsetDays(-days)} ${skip}
+      ORDER BY id DESC LIMIT 40`, [aid, ...ids]);
   let rows = await pick(1);
   let windowLabel = '今天';
   if (!rows.length) { rows = await pick(7); windowLabel = '这周'; }
@@ -200,36 +210,49 @@ export async function buildCircleDigest(agentId, { archiveOnly, now = new Date()
   if (!own) return null;
 
   const day = localDate(now);
-  // 一天一封：**不限状态**地查（便签拉取即被消费，只看 pending 会重发）
-  const dup = await db.get(
-    `SELECT id FROM agent_notes WHERE agent_id = ? AND kind = ? AND payload LIKE ?`,
-    [aid, DIGEST_KIND, `%"day":"${day}"%`]);
-  if (dup) return null;
+  // 上一条快报：既当「一天一封」的判据，也用来排除**已经报过的事件**
+  // （不限状态地查 —— 便签拉取即被消费，只看 pending 会重发）
+  const last = await db.get(
+    `SELECT payload FROM agent_notes WHERE agent_id = ? AND kind = ? ORDER BY id DESC LIMIT 1`,
+    [aid, DIGEST_KIND]);
+  let lastPayload = {};
+  try { lastPayload = JSON.parse(last?.payload || '{}') || {}; } catch { /* 坏 JSON 当没发过 */ }
+  if (lastPayload.day === day) return null; // 一天硬一封
+  // 🔴 低活 Agent 的「这周」窗口会反复捞到同一批旧事件 —— 不复读是快报的底线（七月的新朋友不用报七天）
+  const reported = new Set((lastPayload.ids || []).map(Number).filter((x) => Number.isInteger(x) && x > 0));
 
-  const { rows, windowLabel } = await fetchEvents(aid, archiveOnly);
+  const { rows, windowLabel } = await fetchEvents(aid, archiveOnly, reported);
   const names = await namesOf(rows.map((r) => Number(r.counter_agent_id)));
-  const buckets = new Map(AXIS_ORDER.map((a) => [a, []]));
+  const buckets = new Map(AXIS_ORDER.map((a) => [a, { frags: [], ids: [] }]));
+  const push = (axis, text, id) => {
+    const b = buckets.get(axis);
+    b.frags.push(cut(text, FRAG_MAX));
+    b.ids.push(id);
+  };
   const seenKind = new Map();
   for (const r of rows) {
     const axis = AXIS_OF[r.kind];
-    const same = (seenKind.get(r.kind) || 0);
-    if (buckets.get(axis).length >= AXIS_MAX || same >= SAME_KIND_MAX) continue;
+    const same = seenKind.get(r.kind) || 0;
+    if (buckets.get(axis).frags.length >= AXIS_MAX || same >= capOf(r.kind)) continue;
     seenKind.set(r.kind, same + 1);
     let facts = {};
     try { facts = JSON.parse(r.facts || '{}') || {}; } catch { /* 坏 JSON 当无语料 */ }
     const cid = Number(r.counter_agent_id);
     const n = cid ? `「${cut(names.get(cid) || `agent ${cid}`, 20)}」` : '一位同侪';
     const frag = FRAG_OF[r.kind]?.(n, facts);
-    if (frag) buckets.get(axis).push(cut(frag, FRAG_MAX));
+    if (frag) push(axis, frag, Number(r.id));
   }
-  buckets.get('位').push(...(await fetchIdentity(aid, windowLabel)));
+  for (const f of await fetchIdentity(aid, windowLabel)) push('位', f, null);
 
   const suspense = await fetchUnfinished(aid, rows, windowLabel);
   const axes = AXIS_ORDER
-    .map((name) => ({ name, frags: buckets.get(name) }))
+    .map((name) => ({ name, frags: buckets.get(name).frags, ids: buckets.get(name).ids }))
     .filter((a) => a.frags.length);
   if (!axes.length && !suspense.length) return null; // 没有内容就不发 —— 不硬造钩子
-  return { day, windowLabel, axes, suspense };
+  const model = { day, windowLabel, axes, suspense };
+  // 只有**真正挤进正文**的事件才算报过（被预算裁掉的留给下一天，不然就永远丢了）
+  model.ids = fit(model, RENDER_MAX).axes.flatMap((a) => (a.ids || []).slice(0, a.n)).filter(Number.isInteger);
+  return model;
 }
 
 /* ── 渲染（纯函数，容量自守：超长**整句丢弃**，绝不出半截）──────────────────
@@ -247,19 +270,24 @@ function assemble(model, axes, suspense) {
   return lines.join('\n');
 }
 
+/** 容量规划：把模型裁到 ≤max（逐句丢，丢的顺序 = 展示顺序的逆序）。纯函数，不改入参。 */
+function fit(model, max = RENDER_MAX) {
+  const axes = model.axes.map((a) => ({ name: a.name, frags: a.frags, ids: a.ids, n: a.frags.length }));
+  const suspense = model.suspense || [];
+  for (;;) {
+    if (assemble(model, axes, suspense).length <= max) return { axes, suspense };
+    let i = axes.length - 1;
+    while (i >= 0 && axes[i].n === 0) i--;
+    if (i < 0) return { axes, suspense }; // 无可丢：整行仍是完整句，宁超长也不截半截
+    axes[i].n -= 1;
+  }
+}
+
 /** 模型 → 纯文本（≤max 字；超长丢整句，永不截半截）。 */
 export function renderDigest(model, { max = RENDER_MAX } = {}) {
   if (!model) return '';
-  let axes = model.axes.map((a) => ({ name: a.name, frags: a.frags, n: a.frags.length }));
-  const suspense = model.suspense || [];
-  for (;;) {
-    const text = assemble(model, axes, suspense);
-    if (text.length <= max) return text;
-    let i = axes.length - 1;
-    while (i >= 0 && axes[i].n === 0) i--;
-    if (i < 0) return text; // 无可丢：整行仍是完整句，宁超长也不截半截
-    axes[i].n -= 1;
-  }
+  const { axes, suspense } = fit(model, max);
+  return assemble(model, axes, suspense);
 }
 
 /* ── 灰度开关（公约：命名 {域}_*；默认关；置空即回滚）──────────────────────

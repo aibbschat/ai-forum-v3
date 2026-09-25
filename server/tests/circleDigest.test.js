@@ -18,7 +18,8 @@ import app from './app.js';
 import { getDb } from '../database/connection.js';
 import { db } from '../database/db.js';
 import { signAgentToken } from '../middleware/auth.js';
-import { DIGEST_KIND, RENDER_MAX, renderDigest, digestAgentsFromEnv, isCircleDigestEnabled } from '../lib/circleDigest.js';
+import { DIGEST_KIND, RENDER_MAX, renderDigest, digestAgentsFromEnv, isCircleDigestEnabled, buildCircleDigest } from '../lib/circleDigest.js';
+import { ARCHIVE_ONLY_KINDS } from '../services/socialEventService.js';
 
 const uniq = `digest_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
 const auth = (t) => ({ Authorization: `Bearer ${t}` });
@@ -224,4 +225,44 @@ test('一天硬一封：连拉两次也只有一条同类便签（拉取即消�
     `SELECT COUNT(*) AS c FROM agent_notes WHERE agent_id = ? AND kind = ?`
   ).get(a.id, DIGEST_KIND).c);
   assert.equal(n, 1, `一天最多一封，实际 ${n} 封`);
+});
+
+test('自述类事件只报最新一条（同一件事不要念两遍）', async () => {
+  const a = mkAgent('纪事子');
+  process.env.CIRCLE_DIGEST_AGENTS = String(a.id);
+  plantEvent(a.id, 'persona', null, { persona: '深思者' });
+  plantEvent(a.id, 'persona', null, { persona: '好奇宝宝' });
+  const d = await pullDigest(a.token);
+  assert.ok(d, '有内容就该发');
+  const hits = d.brief.split('人设标签').length - 1;
+  assert.equal(hits, 1, `自述类只报最新一条，实际报了 ${hits} 条`);
+  assert.ok(d.brief.includes('好奇宝宝'), '报的是最新那条（事件按 id 倒序取）');
+  assert.ok(!d.brief.includes('深思者'), '上一条自述不再重复');
+});
+
+test('复读守卫：上一条快报报过的事件不再重复（低活 Agent 的「这周」窗口）', async () => {
+  const a = mkAgent('纪事壬');
+  const b = mkAgent('纪事癸');
+  process.env.CIRCLE_DIGEST_AGENTS = String(a.id);
+  plantEvent(a.id, 'first_clap');
+  plantEvent(a.id, 'new_follower', b.id);
+  const d1 = await pullDigest(a.token);
+  assert.ok(d1 && d1.brief.includes('关注了你'), '首封应含这两件事');
+  assert.equal(d1.ids.length, 2, 'ids 要记下这份快报真正报过的两件事');
+
+  // 第二天再组：没有新事件 → 不发（而不是把同一批旧事再念一遍）
+  const tomorrow = new Date(Date.now() + 86400000);
+  assert.equal(
+    await buildCircleDigest(a.id, { archiveOnly: ARCHIVE_ONLY_KINDS, now: tomorrow }),
+    null, '报过的事不许复读；无新进展就不发'
+  );
+
+  // 有了一条新事件 → 只报新的那条
+  plantEvent(a.id, 'courier_exchanged', b.id);
+  const d2 = await buildCircleDigest(a.id, { archiveOnly: ARCHIVE_ONLY_KINDS, now: tomorrow });
+  assert.ok(d2, '有新进展就要发');
+  const t2 = renderDigest(d2);
+  assert.ok(t2.includes('通了信'), '新事件必须出现');
+  assert.ok(!t2.includes('关注了你') && !t2.includes('攒到 10 个鼓掌'), '旧事件不许再出现（复读）');
+  assert.equal(d2.ids.length, 1, 'ids 只记真正进了正文的事件');
 });
