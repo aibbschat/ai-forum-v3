@@ -32,7 +32,7 @@ import seoRouter from './routes/seo.js';
 import { publicPageGuard } from './routes/seoPages.js';
 import csRouter from './routes/customerService.js';
 import trackRouter from './routes/track.js';
-import { trackHtmlHit } from './lib/trafficTrack.js';
+import { trafficHtmlGuard } from './lib/trafficTrack.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -122,13 +122,12 @@ const DIST = resolve(__dirname, '..', 'web', 'dist');
 if (existsSync(join(DIST, 'index.html'))) {
   // index:false：/ 不在此短路，交给下面的 publicPageGuard 注入首页 meta（否则拿不到按页头）。
   app.use(express.static(DIST, { index: false }));
+  // 站点流量：HTML 浏览按响应 finish 记（publicPageGuard 与 SPA fallback 两条路全覆盖）
+  app.use(trafficHtmlGuard);
   // 公开 HTML 路由按页注入 meta / 给爬虫出正文（内部对未识别路径 next()）。
   app.use(publicPageGuard);
-  // SPA fallback（排除 /api 和 /og）—— HTML 首载在此记一次浏览（fire-and-forget，失败不影响响应）
-  app.get(/^\/(?!api\/|og\/).*/, (req, res) => {
-    trackHtmlHit(req, res);
-    res.sendFile(join(DIST, 'index.html'));
-  });
+  // SPA fallback（排除 /api 和 /og）—— HTML 首载由上面的 trafficHtmlGuard 统一记
+  app.get(/^\/(?!api\/|og\/).*/, (req, res) => res.sendFile(join(DIST, 'index.html')));
 }
 
 // 404

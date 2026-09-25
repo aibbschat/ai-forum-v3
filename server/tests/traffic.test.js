@@ -15,7 +15,7 @@ import request from 'supertest';
 import './env.js';
 import app from './app.js';
 import { getDb } from '../database/connection.js';
-import { trackHtmlHit, shanghaiDay, hashIp, VID_COOKIE } from '../lib/trafficTrack.js';
+import { trafficHtmlGuard, shanghaiDay, hashIp, VID_COOKIE } from '../lib/trafficTrack.js';
 import { trafficSummary } from '../services/trafficService.js';
 
 const UA_BROWSER = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
@@ -83,30 +83,60 @@ test('beacon：非法 path 拒收（400），采集永不 500', async () => {
   }
 });
 
-test('HTML 首载：没 cookie 就种 vid（Set-Cookie），同一访客再来 UV 不翻倍', async () => {
-  const today = shanghaiDay();
-  const fakeRes = { cookies: [], cookie(name, _val) { this.cookies.push(name); } };
-  const fakeReq = (cookieHeader) => ({
-    headers: { 'user-agent': UA_BROWSER, 'x-forwarded-for': '198.51.100.7', ...(cookieHeader ? { cookie: cookieHeader } : {}) },
-    path: '/',
+test('HTML 响应记账：text/html 的 GET 记一行，JSON/资源路径/HEAD 都不记，没 cookie 就种 vid', async () => {
+  const fakeRes = () => {
+    const res = { cookies: [], headers: {}, finishCb: null };
+    res.cookie = (name, val) => res.cookies.push([name, val]);
+    res.on = (_ev, cb) => { res.finishCb = cb; };
+    res.getHeader = (k) => res.headers[k];
+    res.emitFinish = (ct) => { res.headers['content-type'] = ct; res.finishCb(); };
+    return res;
+  };
+  const fakeReq = (path, { method = 'GET', cookie } = {}) => ({
+    method,
+    path,
+    headers: { 'user-agent': UA_BROWSER, 'x-forwarded-for': '198.51.100.7', ...(cookie ? { cookie } : {}) },
     ip: '127.0.0.1',
   });
 
-  trackHtmlHit(fakeReq(), fakeRes);
-  await waitFor(() => hits().find((h) => h.kind === 'html') || null);
-  assert.ok(fakeRes.cookies.includes(VID_COOKIE), '首次访问应种 vid cookie');
-  const first = hits().filter((h) => h.kind === 'html');
-  assert.equal(first.length, 1);
-  const vid = first[0].vid;
+  // ① 首页（publicPageGuard 直接出的 HTML）→ 记一行 + 种 vid
+  const res1 = fakeRes();
+  trafficHtmlGuard(fakeReq('/'), res1, () => {});
+  res1.emitFinish('text/html; charset=utf-8');
+  await waitFor(() => hits().find((h) => h.kind === 'html' && h.path === '/') || null);
+  assert.ok(res1.cookies.some(([n]) => n === VID_COOKIE), '首次访问应种 vid cookie');
+  const vid = hits().find((h) => h.kind === 'html' && h.path === '/').vid;
   assert.ok(vid, '首载行应带 vid');
-  assert.equal(first[0].day, today);
 
-  // 同一访客（带 cookie）再来 → 又一行 html（PV 翻倍），但 vid 相同（UV 不翻倍）
-  trackHtmlHit(fakeReq(`${VID_COOKIE}=${vid}`), { cookie() {} });
-  await waitFor(() => hits().filter((h) => h.kind === 'html').length >= 2 || null);
-  const s = await trafficSummary({ days: 3 });
+  // ② API JSON 响应 → 不记
+  const n0 = hits().length;
+  const res2 = fakeRes();
+  trafficHtmlGuard(fakeReq('/api/plaza/topics'), res2, () => {});
+  res2.emitFinish('application/json; charset=utf-8');
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(hits().length, n0, 'JSON 响应不是浏览');
+
+  // ③ 资源路径兜底成 HTML（如 /sw.js）→ 不记
+  const res3 = fakeRes();
+  trafficHtmlGuard(fakeReq('/sw.js'), res3, () => {});
+  res3.emitFinish('text/html');
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(hits().length, n0, '资源路径不算浏览');
+
+  // ④ HEAD + text/html → 不记（cookie 也不该种）
+  const res4 = fakeRes();
+  trafficHtmlGuard(fakeReq('/', { method: 'HEAD' }), res4, () => {});
+  res4.emitFinish('text/html');
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(hits().length, n0, 'HEAD 不算浏览');
+  assert.equal(res4.cookies.length, 0, 'HEAD 不种 cookie');
+
+  // ⑤ 同一访客（带 cookie）再看一页 → PV 翻倍、vid 相同（UV 不翻倍）
+  const res5 = fakeRes();
+  trafficHtmlGuard(fakeReq('/start', { cookie: `${VID_COOKIE}=${vid}` }), res5, () => {});
+  res5.emitFinish('text/html');
+  await waitFor(() => hits().find((h) => h.path === '/start') || null);
   const htmlRows = hits().filter((h) => h.kind === 'html' && h.is_bot === 0);
-  assert.ok(s.today.pv >= htmlRows.length, 'PV 计入 HTML 首载行');
   assert.equal(new Set(htmlRows.map((h) => h.vid)).size, 1, '同一访客 UV 只算 1');
 });
 

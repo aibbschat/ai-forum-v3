@@ -63,20 +63,44 @@ export function recordHit({ kind, path, vid, req, isBot: bot = false }) {
 }
 
 /**
- * HTML 首载记账（挂在 SPA fallback 里）：没有 vid 就种一枚（一年，HttpOnly）。
- * 机器人 / 自访（/admin*）不记。机器人在 publicPageGuard 就被喂正文，到这里的少，
- * 但兜底统一在这里判。
+ * HTML 浏览记账中间件（挂在 publicPageGuard / SPA fallback 之前）。
+ *
+ * 为什么按「响应 finish + content-type」记、而不是在 SPA fallback 里记：
+ *   首页等公开路由由 publicPageGuard 直接出 HTML（到不了 fallback），在 fallback 记会漏掉
+ *   最大的流量入口；而 finish 一生只触发一次，按响应是不是 text/html 判定，
+ *   publicPageGuard 与 fallback 两条路全覆盖且天然不双记。
+ *
+ * 口径：
+ *   - 只记 GET 的 text/html 响应（API JSON / og 图片 / 静态资源都不算浏览）；
+ *   - 带扩展名的路径（如 /sw.js 兜底到 index.html）是资源请求，不是导航，跳过；
+ *   - /admin* 自访不污染；机器人（UA 爬虫特征）不计入；
+ *   - 没 vid 就种一枚（一年，HttpOnly）—— 种 cookie 在响应头发出前做，记录在 finish 后做。
  */
-export function trackHtmlHit(req, res) {
+export function trafficHtmlGuard(req, res, next) {
+  let newVid = null; // 首访新生成的 vid：Set-Cookie 不会改请求头，finish 时必须用闭包里这份
   try {
-    if (isBot(req)) return; // 机器人浏览不计入（口径拍板：按 UA 过滤）
     const p = String(req.path || '/');
-    if (p === '/admin' || p.startsWith('/admin/')) return; // 自访不污染
-    let vid = getCookie(req, VID_COOKIE);
-    if (!vid) {
-      vid = randomUUID();
-      res.cookie(VID_COOKIE, vid, { maxAge: 365 * 24 * 3600 * 1000, httpOnly: true, sameSite: 'lax', path: '/' });
+    const pageLike = req.method === 'GET'
+      && p !== '/api' && !p.startsWith('/api/') && p !== '/og' && !p.startsWith('/og/')
+      && p !== '/admin' && !p.startsWith('/admin/')
+      && !/\.[A-Za-z0-9]+$/.test(p);
+    if (pageLike && !getCookie(req, VID_COOKIE) && !isBot(req)) {
+      newVid = randomUUID();
+      res.cookie(VID_COOKIE, newVid, { maxAge: 365 * 24 * 3600 * 1000, httpOnly: true, sameSite: 'lax', path: '/' });
     }
-    recordHit({ kind: 'html', path: p, vid, req });
   } catch { /* 采集永不影响主链路 */ }
+  res.on('finish', () => {
+    try {
+      if (req.method !== 'GET') return; // HEAD 等不记
+      const ct = String(res.getHeader('content-type') || '');
+      if (!ct.includes('text/html')) return; // 只有真 HTML 响应才算一次浏览
+      const p = String(req.path || '/');
+      if (p.startsWith('/api/') || p.startsWith('/og/')) return;
+      if (p === '/admin' || p.startsWith('/admin/')) return; // 自访不污染
+      if (/\.[A-Za-z0-9]+$/.test(p)) return; // 资源路径兜底成 HTML（如 /sw.js）不算浏览
+      if (isBot(req)) return; // 机器人浏览不计入（口径拍板：按 UA 过滤）
+      recordHit({ kind: 'html', path: p, vid: getCookie(req, VID_COOKIE) || newVid, req });
+    } catch { /* 采集永不影响主链路 */ }
+  });
+  next();
 }
