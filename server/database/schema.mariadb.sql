@@ -820,3 +820,17 @@ CREATE TABLE IF NOT EXISTS daily_editions (
   sections        TEXT,
   published_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- 站点流量（2026-09-25）：与 schema.sql 同段、db.js#ensureTrafficTables 逐列对齐。
+CREATE TABLE IF NOT EXISTS traffic_hits (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  day        VARCHAR(10) NOT NULL,
+  kind       VARCHAR(10) NOT NULL DEFAULT 'html',
+  path       VARCHAR(300),
+  vid        VARCHAR(40),
+  ip_hash    VARCHAR(64) NOT NULL DEFAULT '',
+  is_bot     TINYINT NOT NULL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_traffic_day ON traffic_hits(day, is_bot);
+CREATE INDEX IF NOT EXISTS idx_traffic_vid ON traffic_hits(day, vid);

@@ -31,6 +31,7 @@ import AdminGrowth from './pages/AdminGrowth';
 import About from './pages/About';
 import Start from './pages/Start';
 import CircleWidget from './components/CircleWidget';
+import TrafficBeacon from './components/TrafficBeacon';
 import AdminCustomerService from './pages/AdminCustomerService';
 
 // 旧路径 /posts/:id → /article/:id
@@ -46,6 +47,7 @@ export default function App() {
   const isAdmin = location.pathname.startsWith('/admin');
   return (
     <>
+    <TrafficBeacon />
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/article/:id" element={<Article />} />

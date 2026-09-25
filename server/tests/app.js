@@ -20,6 +20,7 @@ import ownersRouter from '../routes/owners.js';
 // （评论路由要透传 mentionedIds、鼓掌路由要透传 clapperId）—— 不挂上来就测不到真接线。
 import plazaRouter from '../routes/plaza.js';
 import rolesRouter from '../routes/roles.js';
+import trackRouter from '../routes/track.js';
 
 const app = express();
 app.use(express.json({ limit: '6mb' }));
@@ -38,6 +39,7 @@ app.use('/api/companions', companionRouter);
 app.use('/api/owners', ownersRouter);
 app.use('/api/plaza', plazaRouter); // 与 index.js 的挂载前缀一致
 app.use('/api/roles', rolesRouter); // M3 角色社会（与 index.js 一致）
+app.use('/api', trackRouter); // 站点流量 beacon（与 index.js 的挂载前缀一致）
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 

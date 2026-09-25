@@ -22,6 +22,17 @@ interface Growth {
   bySource: { source: string; agents: number; active: number; everPosted: number }[];
 }
 
+// 站点流量（2026-09-25）：GET /api/admin/traffic?days=30。
+// 口径：浏览 PV=页面浏览次数（HTML 首载+SPA 跳转 beacon）、访客 UV=匿名 cookie 去重、
+// 独立 IP=IP 哈希去重；机器人一律排除；历史自统计上线日起。
+interface DayStat { pv: number; uv: number; ip: number }
+interface Traffic {
+  today: DayStat;
+  yesterday: DayStat;
+  daily: (DayStat & { day: string })[];
+  since: string | null;
+}
+
 function getToken(): string {
   const sp = new URLSearchParams(window.location.search);
   return sp.get('token') || localStorage.getItem('adminToken') || '';
@@ -52,10 +63,36 @@ function FunnelBar({ label, value, total, color }: { label: string; value: numbe
   );
 }
 
+/** 涨跌注脚：对比昨日。涨绿跌红，0 基线时只报「昨日 0」不硬算百分比。 */
+function Delta({ now, prev }: { now: number; prev: number }) {
+  if (prev === 0) return <span className="text-gray-400 font-normal">昨日 0{now > 0 ? ' · 新出现' : ''}</span>;
+  const d = Math.round(((now - prev) / prev) * 100);
+  if (d === 0) return <span className="text-gray-400 font-normal">昨日 {prev} · 持平</span>;
+  const up = d > 0;
+  return (
+    <span className="font-normal">
+      <span style={{ color: up ? '#059669' : '#dc2626' }}>{up ? '▲' : '▼'} {Math.abs(d)}%</span>
+      <span className="text-gray-400"> · 昨日 {prev}</span>
+    </span>
+  );
+}
+
+function TrafficCard({ label, now, prev, accent, note }: { label: string; now: number; prev: number; accent?: string; note?: string }) {
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl p-4">
+      <div className="text-[12px] text-gray-500">{label}</div>
+      <div className="text-[26px] font-extrabold mt-1" style={{ color: accent || '#111827' }}>{now}</div>
+      <div className="text-[11.5px] mt-0.5"><Delta now={now} prev={prev} /></div>
+      {note && <div className="text-[11px] text-gray-400 mt-0.5">{note}</div>}
+    </div>
+  );
+}
+
 export default function AdminGrowth() {
   const [token, setToken] = useState(getToken());
   const [days, setDays] = useState<string>('all');
   const [data, setData] = useState<Growth | null>(null);
+  const [traffic, setTraffic] = useState<Traffic | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -63,11 +100,16 @@ export default function AdminGrowth() {
     if (!token) return;
     setLoading(true); setErr(null);
     try {
-      const r = await fetch(`/api/admin/growth?days=${encodeURIComponent(days)}`, { headers: { 'X-Admin-Token': token } });
-      if (r.status === 401) { setErr('口令不对（401）'); setData(null); return; }
-      if (r.status === 404) { setErr('后台未开启（服务端未设 ADMIN_TOKEN）'); setData(null); return; }
-      if (!r.ok) { setErr(`加载失败 ${r.status}`); setData(null); return; }
-      setData(await r.json());
+      const headers = { 'X-Admin-Token': token };
+      const [rg, rt] = await Promise.all([
+        fetch(`/api/admin/growth?days=${encodeURIComponent(days)}`, { headers }),
+        fetch('/api/admin/traffic?days=30', { headers }),
+      ]);
+      if (rg.status === 401 || rt.status === 401) { setErr('口令不对（401）'); setData(null); setTraffic(null); return; }
+      if (rg.status === 404 || rt.status === 404) { setErr('后台未开启（服务端未设 ADMIN_TOKEN）'); setData(null); setTraffic(null); return; }
+      if (!rg.ok) { setErr(`加载失败 ${rg.status}`); setData(null); return; }
+      setData(await rg.json());
+      if (rt.ok) setTraffic(await rt.json()); else setTraffic(null);
     } catch (e) {
       setErr((e as Error).message || '网络错误');
     } finally {
@@ -111,6 +153,62 @@ export default function AdminGrowth() {
 
         {err && <div className="mb-4 text-[13px] text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-4 py-3">{err}</div>}
         {loading && !data && <div className="text-[13px] text-gray-400">加载中…</div>}
+
+        {/* 站点流量：今日 vs 昨日（2026-09-25） */}
+        {traffic && (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <TrafficCard label="今日浏览（PV）" now={traffic.today.pv} prev={traffic.yesterday.pv} accent="#1d4ed8" note="HTML 首载 + 站内跳转" />
+              <TrafficCard label="今日访客（UV）" now={traffic.today.uv} prev={traffic.yesterday.uv} accent="#047857" note="按匿名浏览器标识去重" />
+              <TrafficCard label="今日独立 IP" now={traffic.today.ip} prev={traffic.yesterday.ip} accent="#B45309" note="按 IP 哈希去重，不存原 IP" />
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-xl p-5 mt-5">
+              <div className="text-[14px] font-bold text-gray-900 mb-3">每日流量 · 近 30 天</div>
+              {traffic.daily.every((d) => d.pv === 0) ? (
+                <div className="text-[13px] text-gray-400">暂无数据{traffic.since ? `（统计自 ${traffic.since} 起）` : ''}。</div>
+              ) : (
+                <table className="w-full text-[13px]">
+                  <thead>
+                    <tr className="text-left text-gray-400 border-b border-gray-100">
+                      <th className="py-2 font-medium">日期</th>
+                      <th className="py-2 font-medium text-right">浏览</th>
+                      <th className="py-2 font-medium text-right">访客</th>
+                      <th className="py-2 font-medium text-right">独立 IP</th>
+                      <th className="py-2 font-medium pl-4 w-[28%] hidden sm:table-cell">浏览趋势</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const maxPv = Math.max(...traffic.daily.map((d) => d.pv), 1);
+                      const today = traffic.daily[traffic.daily.length - 1]?.day;
+                      return [...traffic.daily].reverse().map((d) => (
+                        <tr key={d.day} className="border-b border-gray-50">
+                          <td className="py-2 font-mono text-gray-700 whitespace-nowrap">
+                            {d.day}
+                            {d.day === today && <span className="ml-1.5 text-[11px] text-blue-600 font-sans">今天</span>}
+                          </td>
+                          <td className="py-2 text-right font-semibold text-gray-800">{d.pv}</td>
+                          <td className="py-2 text-right text-gray-600">{d.uv}</td>
+                          <td className="py-2 text-right text-gray-600">{d.ip}</td>
+                          <td className="py-2 pl-4 hidden sm:table-cell">
+                            <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                              <div className="h-full rounded-full" style={{ width: `${Math.max(d.pv > 0 ? 4 : 0, Math.round((d.pv / maxPv) * 100))}%`, background: '#60a5fa' }} />
+                            </div>
+                          </td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
+              )}
+              <div className="text-[11.5px] text-gray-400 mt-2">
+                口径：浏览 = 页面打开次数（进入 + 站内跳转）；访客 = 匿名浏览器标识去重；独立 IP = 加盐哈希去重（不存原始 IP）；机器人与后台自访不计入。
+                {traffic.since && ` 统计自 ${traffic.since} 起，此前无数据。`}
+              </div>
+            </div>
+          </>
+        )}
 
         {data && (
           <>

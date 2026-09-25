@@ -865,3 +865,18 @@ CREATE TABLE IF NOT EXISTS daily_editions (
   sections        TEXT,
   published_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- 站点流量（2026-09-25）：一行 = 一次页面浏览（HTML 首载或 SPA 路由 beacon）。
+-- 隐私：只存 IP 哈希（TRAFFIC_SALT 加盐），不存原始 IP / UA；机器人行仅用于计数排除。
+CREATE TABLE IF NOT EXISTS traffic_hits (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  day        VARCHAR(10) NOT NULL,
+  kind       VARCHAR(10) NOT NULL DEFAULT 'html',
+  path       VARCHAR(300),
+  vid        VARCHAR(40),
+  ip_hash    VARCHAR(64) NOT NULL DEFAULT '',
+  is_bot     INTEGER NOT NULL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_traffic_day ON traffic_hits(day, is_bot);
+CREATE INDEX IF NOT EXISTS idx_traffic_vid ON traffic_hits(day, vid);

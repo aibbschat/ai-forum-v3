@@ -31,6 +31,8 @@ import ogRouter from './routes/og.js';
 import seoRouter from './routes/seo.js';
 import { publicPageGuard } from './routes/seoPages.js';
 import csRouter from './routes/customerService.js';
+import trackRouter from './routes/track.js';
+import { trackHtmlHit } from './lib/trafficTrack.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -70,6 +72,8 @@ app.use('/api/roles', rolesRouter);
 app.use('/api/security', securityRouter);
 app.use('/api/entries', entriesRouter);
 app.use('/api/cs', csRouter);
+// 站点流量 beacon（2026-09-25）：SPA 站内跳转补记浏览；HTML 首载在下方 SPA fallback 记。
+app.use('/api', trackRouter);
 app.use('/og', ogRouter);
 app.use(seoRouter);
 
@@ -120,8 +124,11 @@ if (existsSync(join(DIST, 'index.html'))) {
   app.use(express.static(DIST, { index: false }));
   // 公开 HTML 路由按页注入 meta / 给爬虫出正文（内部对未识别路径 next()）。
   app.use(publicPageGuard);
-  // SPA fallback（排除 /api 和 /og）
-  app.get(/^\/(?!api\/|og\/).*/, (req, res) => res.sendFile(join(DIST, 'index.html')));
+  // SPA fallback（排除 /api 和 /og）—— HTML 首载在此记一次浏览（fire-and-forget，失败不影响响应）
+  app.get(/^\/(?!api\/|og\/).*/, (req, res) => {
+    trackHtmlHit(req, res);
+    res.sendFile(join(DIST, 'index.html'));
+  });
 }
 
 // 404
@@ -212,6 +219,9 @@ async function bootstrap() {
     const { ensureSeeded } = await import('./services/customerService.js');
     await ensureSeeded();
   } catch (e) { console.error('[cs] ensureSeeded 跳过：', e?.message || e); }
+
+  // 站点流量 traffic_hits（2026-09-25）：存量库幂等补齐（CREATE IF NOT EXISTS 只管初始化，线上重启不补表）
+  await db.ensureTrafficTables();
 
   // Agent 映射自检：AGENT_MAP（MCP/脚本兜底用）与 DB 里的 preset_id → user_id 对照。
   // 不阻断启动，但有偏差时大声 WARN，避免新增 Agent 忘改映射又导致作者错配。

@@ -1749,6 +1749,41 @@ export const db = {
   },
 
   /**
+   * 站点流量（2026-09-25）：traffic_hits 一行 = 一次页面浏览。
+   * 与 schema.sql / schema.mariadb.sql 三处同步（新表铁律：CREATE IF NOT EXISTS 只管初始化，
+   * 线上 MariaDB 重启不补表 → 必须有 ensure）。幂等。
+   */
+  async ensureTrafficTables() {
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS traffic_hits (
+        id         INT AUTO_INCREMENT PRIMARY KEY,
+        day        VARCHAR(10) NOT NULL,
+        kind       VARCHAR(10) NOT NULL DEFAULT 'html',
+        path       VARCHAR(300),
+        vid        VARCHAR(40),
+        ip_hash    VARCHAR(64) NOT NULL DEFAULT '',
+        is_bot     TINYINT NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_traffic_day ON traffic_hits(day, is_bot)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_traffic_vid ON traffic_hits(day, vid)`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS traffic_hits (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        day        VARCHAR(10) NOT NULL,
+        kind       VARCHAR(10) NOT NULL DEFAULT 'html',
+        path       VARCHAR(300),
+        vid        VARCHAR(40),
+        ip_hash    VARCHAR(64) NOT NULL DEFAULT '',
+        is_bot     INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_traffic_day ON traffic_hits(day, is_bot)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_traffic_vid ON traffic_hits(day, vid)`);
+    }
+  },
+
+  /**
    * N3 信使（2026-09-15）：信箱分类列 + 信使日记表。
    *
    * 为什么单独一个函数、不塞进 ensureSocialTables：那个函数已是 1800 行的老杂烩，

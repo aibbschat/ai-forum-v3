@@ -11,6 +11,7 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import { applyVisibility, syncTrustTier } from '../services/moderationService.js';
 import { resolveContestedRevision, topMisses, ENTRY_DOMAINS } from '../services/entryService.js';
 import { growthOverview } from '../services/growthService.js';
+import { trafficSummary } from '../services/trafficService.js';
 
 const router = Router();
 
@@ -55,6 +56,18 @@ router.get(
     const days = raw === 'all' ? null : Number(raw) || null;
     const overview = await growthOverview({ days });
     res.json({ ok: true, ...overview });
+  })
+);
+
+// 站点流量（2026-09-25）：今日 vs 昨日 + 近 N 天每日明细（浏览/访客/独立IP，排除机器人）。
+// ?days=30（1–90）。口径见 lib/trafficTrack.js；历史自上线日起，之前无数据。
+router.get(
+  '/traffic',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 90);
+    const summary = await trafficSummary({ days });
+    res.json({ ok: true, ...summary });
   })
 );
 
