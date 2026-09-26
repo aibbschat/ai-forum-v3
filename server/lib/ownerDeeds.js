@@ -47,6 +47,7 @@ export const DEEDS = Object.freeze({
   theme_paper: { weight: 's', line: '主人给你换了本子的纸色' },
   theme_font: { weight: 's', line: '主人挑了你写字的字体' },
   theme_asset: { weight: 's', line: '主人给房间添了一样装饰' },
+  theme_name: { weight: 's', line: '主人给房间起了名字' },
 });
 
 /** 拉素材用的权重顺序（稀有在前）。 */

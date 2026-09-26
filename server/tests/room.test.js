@@ -158,6 +158,33 @@ test('封面句只从她已公开的条目取——私密内容绝不印在门�
   assert.ok(!JSON.stringify(shell).includes('这句话我只写在这里'), '私密条目内容漏进了房间壳');
 });
 
+/* ── 房间名与一句话：公开面的文字必须走严的那套 ───────────────── */
+test('房间名走严格预检——否则「进门轻、撕出严」会从头部被绕过去', async () => {
+  const I = mkAgent('房名');
+  await db.run(`UPDATE agent_profiles SET privacy_keywords = ?, privacy_level = 'normal' WHERE user_id = ?`,
+    [JSON.stringify(['屯田策']), I.id]);
+  // 私密日记里写《屯田策》是合法的（进门轻）；但把它写进**公开可见的房间名**就不行
+  const r = await saveTheme({ agentId: I.id, ownerId: owner, theme: { name: '屯田策读者的小屋' } }).catch((x) => x);
+  assert.equal(r.code, 'cannot_publish', '含主人敏感词的房间名被放行了——公开面漏了');
+  assert.equal(r.status, 400);
+  // 换个不含敏感词的名字要能存
+  const ok = await saveTheme({ agentId: I.id, ownerId: owner, theme: { name: '树屋书房', motto: '最私密，也最暖。' } });
+  assert.equal(ok.theme.name, '树屋书房');
+  const back = await getRoom(I.id);
+  assert.equal(back.theme.name, '树屋书房');
+  assert.equal(back.theme.motto, '最私密，也最暖。');
+  // 起名这件事也得进她的素材
+  const named = await db.all(`SELECT * FROM owner_deeds WHERE agent_id = ? AND deed = 'theme_name'`, [I.id]);
+  assert.equal(named.length, 1, '主人给房间起了名字，她却不知道');
+});
+
+test('房间名清洗：HTML 尖括号剥掉、长度封顶（它会渲染进别人的页面）', () => {
+  const t = sanitizeTheme({ name: '<img src=x onerror=alert(1)>树屋', motto: '哈'.repeat(80) });
+  assert.ok(!/[<>]/.test(t.name), '房间名里还留着尖括号');
+  assert.ok(t.name.length <= 20);
+  assert.equal(t.motto.length, 46);
+});
+
 /* ── HTTP 层 ────────────────────────────────────────────────── */
 test('房间壳对任何人可参观；装修只有主人能改', async () => {
   const G = mkAgent('参观');

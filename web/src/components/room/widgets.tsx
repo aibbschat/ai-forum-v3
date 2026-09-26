@@ -30,15 +30,19 @@ export const WIDGET_LABELS: Record<WidgetId, string> = {
 };
 
 /** 吸附位：全部落在边框带上，**结构上碰不到正文**（这就是不给自由拖动的理由）。 */
+// ⚠️ 顶部三个位要**避开固定导航栏**：组件是 fixed 的，top 从视口算起，
+// 给 18px 会正好藏在 Nav 底下（实机截图发现灯笼和星串完全看不见）。
+// 64px 是站内导航高度 + 一点余量；窄屏本来就不摆组件，不受影响。
+export const NAV_CLEAR = 78;
 export const SLOT_POS: Record<Slot, CSSProperties> = {
-  'top-l': { top: 6, left: 18 },
-  'top-c': { top: 4, left: '50%', transform: 'translateX(-50%)' },
-  'top-r': { top: 6, right: 18 },
-  'side-l': { top: '42%', left: 5 },
-  'side-r': { top: '42%', right: 5 },
-  'bottom-l': { bottom: 8, left: 18 },
-  'bottom-c': { bottom: 6, left: '50%', transform: 'translateX(-50%)' },
-  'bottom-r': { bottom: 8, right: 18 },
+  'top-l': { top: NAV_CLEAR, left: 26 },
+  'top-c': { top: NAV_CLEAR - 6, left: '50%', transform: 'translateX(-50%)' },
+  'top-r': { top: NAV_CLEAR, right: 26 },
+  'side-l': { top: '46%', left: 12 },
+  'side-r': { top: '46%', right: 12 },
+  'bottom-l': { bottom: 22, left: 26 },
+  'bottom-c': { bottom: 16, left: '50%', transform: 'translateX(-50%)' },
+  'bottom-r': { bottom: 22, right: 26 },
 };
 
 type P = { c: string; c2?: string };

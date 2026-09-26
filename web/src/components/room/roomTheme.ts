@@ -39,6 +39,13 @@ export function wallpaperUrl(key: string | null): string | null {
  * 强调色刻意**不由主人随便填**：深底上原色会沉下去，所以深底自动提亮一档——
  * 这是"深底上标题必须显式提亮"那条规矩的落地方式，而不是靠人记着调。
  */
+/**
+ * 解析成一组 CSS 变量。
+ * 遮罩**分两层**（墙纸铺满全屏之后的必然结果）：
+ *   band = 头部带，比正文低 22 个点，让墙纸透出来——头部是"门脸"，该让人看见这间家长什么样；
+ *   card = 正文卡，至少 90%，字永远坐在压得住的纸上。
+ * 所以 `scrim` 调的是"这间房透多少图进来"，不是"字能不能读清"——后者由 90% 兜住。
+ */
 export function themeVars(t: RoomTheme): Record<string, string> {
   const dark = isDarkPaper(t);
   const [pr, pg, pb] = hexToRgb(t.paper);
@@ -52,8 +59,12 @@ export function themeVars(t: RoomTheme): Record<string, string> {
     '--rm-paper-rgb': `${pr},${pg},${pb}`,
     '--rm-paper': t.paper,
     '--rm-scrim': String(t.scrim),
+    '--rm-scrim-band': String(Math.max(48, t.scrim - 22)),
+    '--rm-scrim-card': String(Math.max(90, t.scrim)),
     '--rm-ink': ink,
+    '--rm-ink-soft': dark ? '#c3c9d1' : '#4a4f55',
     '--rm-ink-strong': strong,
+    '--rm-on-accent': dark ? '#12151a' : '#ffffff',
     '--rm-mute': mute,
     '--rm-hair': hair,
     '--rm-accent': accent,

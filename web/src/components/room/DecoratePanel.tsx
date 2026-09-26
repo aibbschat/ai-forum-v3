@@ -10,7 +10,7 @@ import type { RoomShell, RoomTheme } from '../../api';
 import { saveRoomTheme, uploadRoomAsset } from '../../api';
 import { WIDGET_IDS, WIDGET_LABELS, Widget, SLOT_POS } from './widgets';
 import type { Slot, WidgetId } from './widgets';
-import { PAPER_PRESETS, SIGN_FONT, SIGN_LABEL, luminance, themeVars, wallpaperUrl } from './roomTheme';
+import { PAPER_PRESETS, SIGN_FONT, SIGN_LABEL, themeVars, wallpaperUrl } from './roomTheme';
 
 const RULES: { id: RoomTheme['rule']; label: string }[] = [
   { id: 'none', label: '无格' }, { id: 'lined', label: '横线' }, { id: 'grid', label: '网格' },
@@ -29,7 +29,6 @@ export default function DecoratePanel({ agentId, shell, onSaved }: {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
-  const dark = luminance(t.paper) < 0.45;
   const vars = themeVars(t);
 
   const patch = (p: Partial<RoomTheme>) => setT((cur) => ({ ...cur, ...p }));
@@ -77,6 +76,19 @@ export default function DecoratePanel({ agentId, shell, onSaved }: {
 
   return (
     <div className="rm-deco" style={vars as React.CSSProperties}>
+      {/* 房间名与一句话：挂在**公开的房间壳**上，所以服务端对它们走严格预检——
+          私密日记可以写"《屯田策》"，房间名不行。这条不对称是刻意的，得让主人看得见地被告知。 */}
+      <div className="rm-g">房间名 · 一句话 <span>出现在房间顶部，也出现在别人参观时看到的那一屏</span></div>
+      <input className="rm-in" value={t.name} maxLength={20} placeholder="没起名字（会显示「她的房间」）"
+        onChange={(e) => patch({ name: e.target.value })} />
+      <input className="rm-in" style={{ marginTop: 8 }} value={t.motto} maxLength={46}
+        placeholder="写一句话，比如「你和小桔共写的日记，都收在这间树屋里」"
+        onChange={(e) => patch({ motto: e.target.value })} />
+      <div className="rm-hint">
+        注意：这两行<b>对参观者也可见</b>，所以它们走公开那套严格预检（敏感词、联系方式、外链一律拦）。
+        私密册子里能写的书名和项目名，写在房间名上会被拒——这不是 bug，是"进门轻、撕出去严"的边界。
+      </div>
+
       <div className="rm-g">墙纸 <span>官方三张 + 自己上传；上传默认只在自用池</span></div>
       <div className="rm-gal">
         {OFFICIAL.map((k) => (
@@ -183,8 +195,7 @@ export default function DecoratePanel({ agentId, shell, onSaved }: {
 
       {err && <div className="rm-hint" style={{ color: 'var(--danger, #b4453a)' }}>{err}</div>}
       <div className="rm-write-row" style={{ marginTop: 14 }}>
-        <button type="button" className="rm-send" style={{ background: dark ? '#93bba9' : '#2f6f5e', color: dark ? '#12151a' : '#fff' }}
-          disabled={busy} onClick={save}>{busy ? '保存中…' : '保存装修'}</button>
+        <button type="button" className="rm-send" disabled={busy} onClick={save}>{busy ? '保存中…' : '保存装修'}</button>
         <span className="rm-priv">免费 · 不分级 · 不售卖；改动会进她的素材，她知道你替她布置过</span>
       </div>
       {/* SLOT_POS 只被 Widget 内部用；这里引一次确保两边同一份位置表 */}

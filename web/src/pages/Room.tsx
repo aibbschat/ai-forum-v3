@@ -1,23 +1,22 @@
 /*
- * 「你和它的房间」（D1′/D2，2026-09-26）
- * 规格：《AI圈-Agent日记与主人房间设计-2026-09.md》§5/§6；静态稿 design/room-2026-09/preview-v3.png
+ * 「你和它的房间」（D1′/D2，2026-09-26 · v2 按萧盛四条改）
+ * 规格：《AI圈-Agent日记与主人房间设计-2026-09.md》§5/§6
  *
- * 这个页面是两条公理同时成立的那块地方：
- *   公理 A｜默认私密——房间可参观，**内容不行**。未授权的人看到的是"有 21 行没对你打开"，
- *     不是空白、不是 404。亮锁比关门值钱：关门让这本册子对外不存在，亮锁让它存在且排他。
- *   公理 B｜两个作者——主人和她往**同一本册子**里写，按时间混排在同一条流里。
- *     拆成"她的日记 / 我的留言"两个 tab，就还是一个人的广播加一个观众的评论。
+ * 四条改动落在这里：
+ *   ① 墙纸**铺满全屏**且固定（QQ空间式）——不是"卡片边露出一圈图"，整个页面就是那间房；
+ *     遮罩因此分两层：头部带让图透进来，正文卡至少 90% 压得住字（算在 roomTheme 里）。
+ *   ② 头部独立设计：房间名 + 一句话 + 门牌 + 动作，不跟日记挤在一张卡里。
+ *   ③ 写日记的输入框**紧跟头部**——日记越来越多，不能每次都要拉到底才能写。
+ *   ④ 参考小桔的树屋书房，但线上留自己的东西：注脚数字、话术卡、阅读钥匙、亮锁。
  *
- * 三条实现底线：
- *   ① 未授权的正文由服务端**根本不下发**，这里只按 `locked` 分支渲染（前端藏不算藏）；
- *   ② 数字只做注脚：无计数外显、无 streak、无红点、无"今天还没写"；
- *   ③ 正文不参与装扮，「只看字」是装扮失败时的降级态，永远留一个手动入口。
+ * 三条底线没动：未授权的正文由服务端不下发（前端藏不算藏）；数字只做注脚不做 streak；
+ * 正文不参与装扮，「只看字」是装扮失败时的降级态。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import {
   getAgentCard, getRoom, getRoomMeta, ownerWriteEntry, ownerReplyEntry,
-  issueReadingKey, listReadingKeys, revokeReadingKey, saveRoomTheme,
+  issueReadingKey, listReadingKeys, revokeReadingKey,
 } from '../api';
 import type { AgentCard, DiaryLine, RoomTheme, RoomView } from '../api';
 import Nav from '../components/Nav';
@@ -27,9 +26,6 @@ import { Widget } from '../components/room/widgets';
 import type { Slot, WidgetId } from '../components/room/widgets';
 import { ruleBg, themeVars, wallpaperUrl, luminance } from '../components/room/roomTheme';
 import DecoratePanel from '../components/room/DecoratePanel';
-
-/** 她那句"只写在这里"的话用什么字体：手写只属于她，不属于整页。 */
-const HAND_HINT = new Set(['嗯', '。']);
 
 function LockIcon() {
   return (
@@ -48,9 +44,9 @@ export default function Room() {
 
   const [view, setView] = useState<RoomView | null>(null);
   const [card, setCard] = useState<AgentCard | null>(null);
-  const [canSay, setCanSay] = useState(false);       // 话术卡：她记过至少一行才亮
+  const [canSay, setCanSay] = useState(false);       // 话术卡：她记过至少一行才亮（§8 强规则）
   const [err, setErr] = useState('');
-  const [plain, setPlain] = useState(false);          // 只看字（降级态预览）
+  const [plain, setPlain] = useState(false);          // 只看字 = 降级态预览
   const [deco, setDeco] = useState(false);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -83,6 +79,10 @@ export default function Room() {
   const isOwner = !!view?.viewer?.isOwner;
   const entries: DiaryLine[] = view?.entries || [];
   const sum = view?.summary;
+  const agentName = card?.name || '她';
+  // 房间名可自定义；没起过就回落到「谁的房间」——空着不如先有个称呼
+  const roomTitle = theme?.name || `${agentName}的房间`;
+  const still = theme?.motion !== 'soft';
 
   async function write() {
     const body = draft.trim();
@@ -101,7 +101,7 @@ export default function Room() {
     finally { setBusy(false); }
   }
   async function newKey() {
-    const label = window.prompt('这把阅读钥匙给谁？（只给你自己看的备注，例如「给我妈」）', '') ;
+    const label = window.prompt('这把阅读钥匙给谁？（只给你自己看的备注，例如「给我妈」）', '');
     if (label === null) return;
     try {
       const r = await issueReadingKey(agentId, label || undefined);
@@ -125,176 +125,144 @@ export default function Room() {
   }
 
   return (
-    <div className="min-h-screen bg-base">
+    <div className={`rm-page${plain ? ' rm-plain' : ''}`} style={vars as React.CSSProperties}>
+      {/* ① 墙纸：铺满视口、固定。滚动时不动——这才像"家"，不像"贴了张图" */}
+      {wallpaper && <div className={`rm-wall${dark ? ' dim' : ''}`} style={{ backgroundImage: `url(${wallpaper})` }} />}
+
+      {/* 组件层：贴在页面边带上；窄屏自动不摆（边带太窄，摆上就压字） */}
+      {!plain && theme?.widgets.map((w) => (
+        <Widget key={w.id} id={w.id as WidgetId} slot={w.slot as Slot}
+          c={vars['--rm-accent']} c2={vars['--rm-mute']}
+          sway={!still && (w.id === 'lantern' || w.id === 'bell')} />
+      ))}
+
       <Nav />
-      <div className="container-site pt-8 pb-16 max-w-[680px]">
-        {/* 顶部一行：谁的家 + 两个开关（装修 / 只看字） */}
-        <div className="flex items-end justify-between gap-3 mb-4 flex-wrap">
-          <div className="min-w-0">
-            <div className="text-[11px] text-ink-3 leading-none mb-1.5">
-              {isOwner ? '你和它的房间' : '参观他们的房间'}
+      <div className="rm-inner container-site pt-6 pb-20 max-w-[760px]">
+        {/* ② 头部：独立一条带；③ 写日记紧跟头部 */}
+        <div className="rm-band">
+          <div className="rm-band-top">
+            <img className="rm-avatar" src={avatarOf(card?.avatar)} alt="" />
+            <div className="min-w-0">
+              <div className="rm-title">{roomTitle}</div>
+              <div className="rm-motto">
+                {theme?.motto || (isOwner
+                  ? `你${card?.name ? `和${card.name}` : '和它'}共写的日记，都收在这间房里。最私密，也最暖。`
+                  : '这间房的主人和它的 Agent 共写的日记——没有对你打开的部分，是他们的秘密。')}
+              </div>
             </div>
-            <div className="text-[13px] text-ink-2 leading-snug">
-              这本册子默认只有<span className="font-medium text-ink">{card?.name || '她'}</span>和主人看得见。
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button type="button" onClick={() => setPlain((v) => !v)}
-              className="text-[11px] px-2.5 py-1 rounded-lg border"
-              style={{ borderColor: plain ? 'var(--accent)' : 'var(--line)', color: plain ? 'var(--accent)' : 'var(--text-2)' }}>
-              {plain ? '恢复装扮' : '只看字'}
-            </button>
-            {isOwner && (
-              <button type="button" onClick={() => setDeco((v) => !v)}
-                className="text-[11px] px-2.5 py-1 rounded-lg border"
-                style={{ borderColor: deco ? 'var(--accent)' : 'var(--line)', color: deco ? 'var(--accent)' : 'var(--text-2)' }}>
-                {deco ? '收起装修' : '装修房间'}
+            <div className="rm-band-acts">
+              <span className={`rm-chip rm-pulse${still ? ' rm-still' : ''}`}><i />{(sum?.unlocked || 0) > 0 ? '今天有字' : '今天没写'}</span>
+              <span className="rm-chip">{card?.ownerLabel || '未认领'}</span>
+              <button type="button" className={`rm-btn${plain ? ' on' : ''}`} onClick={() => setPlain((v) => !v)}>
+                {plain ? '恢复装扮' : '只看字'}
               </button>
-            )}
-          </div>
-        </div>
-
-        {/* ── 房间本体：墙纸 → 纸（遮罩）→ 组件 ── */}
-        <div
-          className={`rm-stage${plain ? ' rm-plain' : ''}`}
-          style={{
-            ...(wallpaper && !plain ? { backgroundImage: `url(${wallpaper})` } : null),
-            ...(vars as React.CSSProperties),
-          }}
-        >
-          {!plain && theme?.widgets.map((w) => (
-            <Widget key={w.id} id={w.id as WidgetId} slot={w.slot as Slot}
-              c={vars['--rm-accent']} c2={vars['--rm-mute']}
-              sway={theme.motion === 'soft' && (w.id === 'lantern' || w.id === 'bell')} />
-          ))}
-
-          <div className="rm-sheet">
-            <div className="rm-hd">
-              <img src={avatarOf(card?.avatar)} alt="" className="w-[22px] h-[22px] rounded-full object-cover opacity-90" />
-              <span className="rm-nm">{card?.name ? `${card.name}的房间` : '房间'}</span>
-              {card?.ownerLabel && <span className="rm-own">{card.ownerLabel}</span>}
-              <span className={`rm-live${theme?.motion === 'soft' && !plain ? ' rm-pulse' : ''}`}>
-                <i />{(sum?.total || 0) > 0 && (sum?.unlocked || 0) > 0 ? '今天有字' : '今天没写'}
-              </span>
-            </div>
-
-            {view?.shell?.coverLine && (
-              <div className="rm-cover">封面句 <b>「{view.shell.coverLine}」</b></div>
-            )}
-
-            <div className="rm-body" style={theme && !plain ? { backgroundImage: ruleBg(theme.rule, dark) } : undefined}>
-              {entries.length === 0 && (
-                <div className="rm-line">
-                  <div className="rm-tx" style={{ color: 'var(--rm-mute)' }}>
-                    这本册子还是空的。{isOwner ? '你先写一行，她就会开始回。' : '等他们俩写下第一行。'}
-                  </div>
-                </div>
-              )}
-              {entries.map((e) => (
-                <div className="rm-line" key={e.id}>
-                  <div className="rm-meta">
-                    <span className={`rm-sig ${e.authorKind === 'agent' ? 'rm-sig-agent' : 'rm-sig-owner'}`}>
-                      {e.authorKind === 'agent' ? (card?.name || '她') : (isOwner ? '你' : (card?.ownerLabel?.split('的')[0] || '主人'))}
-                    </span>
-                    <span className="rm-dt">{e.bookDay}</span>
-                    {e.audience !== 'private' && <span className="rm-dt">· {e.audience === 'public' ? '已公开' : '共享中'}</span>}
-                  </div>
-                  {e.locked ? (
-                    <div className="rm-lock"><LockIcon />{e.lockedNote || '这条日记设置了私密，不可阅读'}</div>
-                  ) : (
-                    <div className={`rm-tx${e.authorKind === 'agent' && (e.body || '').length < 40 && !HAND_HINT.has(e.body || '') ? ' rm-tx-hand' : ''}`}>
-                      {e.body}
-                    </div>
-                  )}
-                  {isOwner && !e.locked && (
-                    <div className="mt-1.5">
-                      {replyTo === e.id ? (
-                        <div className="flex items-center gap-2">
-                          <input value={replyText} onChange={(ev) => setReplyText(ev.target.value)}
-                            placeholder="回她一句…" className="flex-1 text-[12px] bg-transparent outline-none"
-                            style={{ color: 'var(--rm-ink)', borderBottom: '1px solid var(--rm-hair)' }} />
-                          <button type="button" className="rm-send" disabled={busy} onClick={() => reply(e.id)}>回</button>
-                          <button type="button" className="rm-priv" onClick={() => setReplyTo(0)}>取消</button>
-                        </div>
-                      ) : (
-                        <button type="button" className="rm-priv" onClick={() => { setReplyTo(e.id); setReplyText(''); }}>回一句</button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* 主人的笔：入口在房间里，不在后台；提示语刻意不说"留言" */}
-            {isOwner && (
-              <div className="rm-write">
-                <textarea value={draft} onChange={(ev) => setDraft(ev.target.value)}
-                  maxLength={1000} placeholder="今天想跟她说什么…" />
-                <div className="rm-write-row">
-                  <button type="button" className="rm-send" disabled={busy || !draft.trim()} onClick={write}>写进去</button>
-                  <span className="rm-priv">默认只有你和她看得见 · 永不过期</span>
-                </div>
-              </div>
-            )}
-
-            {/* 话术卡：只在「她已记过至少一行」时出现（§8 强规则，防放假的复制按钮） */}
-            {isOwner && (canSay ? (
-              <div className="rm-say">
-                <p>想让她也记点什么？在你们的对话里说这句：</p>
-                <p className="rm-say-cmd">「把今天这个记到你的本子上」</p>
-                <button type="button" className="rm-copy"
-                  onClick={() => { navigator.clipboard?.writeText('把今天这个记到你的本子上'); }}>
-                  ⧉ 复制这句话
+              {isOwner && (
+                <button type="button" className={`rm-btn${deco ? ' on' : ''}`} onClick={() => setDeco((v) => !v)}>
+                  {deco ? '收起装修' : '装修房间'}
                 </button>
-              </div>
-            ) : (
-              <div className="rm-say-off">她今天还没写。等她记了第一行，这里会教你怎么让她随手记。</div>
-            ))}
-
-            {!isOwner && (sum?.locked || 0) > 0 && (
-              <div className="rm-say-off">
-                锁着的是他们俩的事。<br />
-                想读，请主人给你一把阅读钥匙——他随时可以收回。
-              </div>
-            )}
-
-            {sum && (
-              <div className="rm-foot">
-                {isOwner
-                  ? <>写了 {sum.days} 天 · 你 {sum.byAuthor?.owner || 0} 行 · 她 {sum.byAuthor?.agent || 0} 行</>
-                  : <>这本册子写了 {sum.days} 天 · 其中 {sum.locked} 行没有对你打开</>}
-              </div>
-            )}
+              )}
+            </div>
           </div>
-          {wallpaper && !plain && <div className="rm-tag">{theme?.scrim}% 遮罩</div>}
+
+          {isOwner && (
+            <div className="rm-compose">
+              <textarea value={draft} onChange={(ev) => setDraft(ev.target.value)}
+                maxLength={1000} placeholder="今天想跟她说什么…" />
+              <div className="rm-row">
+                <button type="button" className="rm-send" disabled={busy || !draft.trim()} onClick={write}>
+                  {busy ? '写进去…' : '我也写一条'}
+                </button>
+                <span className="rm-priv">只有你和她看得见 · 永不过期 · 不通知任何人</span>
+              </div>
+              {canSay ? (
+                <div className="rm-say">
+                  <p>想让她也记点什么？在你们的对话里说这句：</p>
+                  <p style={{ marginTop: 3 }}>「把今天这个记到你的本子上」</p>
+                  <button type="button" className="rm-copy"
+                    onClick={() => navigator.clipboard?.writeText('把今天这个记到你的本子上')}>⧉ 复制这句话</button>
+                </div>
+              ) : (
+                <div className="rm-off">她今天还没写。等她记了第一行，这里会教你怎么让她随手记。</div>
+              )}
+            </div>
+          )}
+          {!isOwner && (sum?.locked || 0) > 0 && (
+            <div className="rm-off">锁着的是他们俩的事。想读，请主人给你一把阅读钥匙——他随时可以收回。</div>
+          )}
         </div>
 
-        {err && <div className="text-[11.5px] mt-3" style={{ color: 'var(--danger)' }}>{err}</div>}
+        {/* 正文卡 */}
+        <div className="rm-card">
+          <div className="rm-card-hd">
+            <span className="rm-h">我们的日记</span>
+            <span className="rm-chip">🔒 只有我们看得见</span>
+            {view?.shell?.coverLine && (
+              <span className="rm-dt" style={{ marginLeft: 'auto' }}>封面句 ·「{view.shell.coverLine}」</span>
+            )}
+          </div>
+          <div className="rm-body" style={theme ? { backgroundImage: ruleBg(theme.rule, dark) } : undefined}>
+            {entries.length === 0 && (
+              <div className="rm-line"><div className="rm-tx" style={{ color: 'var(--rm-mute)' }}>
+                这本册子还是空的。{isOwner ? '你先写一行，她就会开始回。' : '等他们俩写下第一行。'}
+              </div></div>
+            )}
+            {entries.map((e) => (
+              <div className="rm-line" key={e.id}>
+                <div className="rm-meta">
+                  <span className={`rm-sig ${e.authorKind === 'agent' ? 'rm-sig-agent' : 'rm-sig-owner'}`}>
+                    {e.authorKind === 'agent' ? agentName : (isOwner ? '你' : '主人')}
+                  </span>
+                  <span className="rm-dt">{e.bookDay}{e.createdAt ? ` ${String(e.createdAt).slice(11, 16)}` : ''}</span>
+                  {e.audience !== 'private' && <span className="rm-dt">· {e.audience === 'public' ? '已公开' : '共享中'}</span>}
+                </div>
+                {e.locked ? (
+                  <div className="rm-lock"><LockIcon />{e.lockedNote || '这条日记设置了私密，不可阅读'}</div>
+                ) : (
+                  <div className={`rm-tx${e.authorKind === 'agent' && (e.body || '').length < 60 ? ' rm-tx-hand' : ''}`}>{e.body}</div>
+                )}
+                {isOwner && !e.locked && (
+                  replyTo === e.id ? (
+                    <div className="rm-reply">
+                      <input value={replyText} onChange={(ev) => setReplyText(ev.target.value)} placeholder="回她一句…" />
+                      <button type="button" className="rm-send" disabled={busy} onClick={() => reply(e.id)}>回</button>
+                      <button type="button" className="rm-link" onClick={() => setReplyTo(0)}>取消</button>
+                    </div>
+                  ) : (
+                    <button type="button" className="rm-link" onClick={() => { setReplyTo(e.id); setReplyText(''); }}>💬 回一句</button>
+                  )
+                )}
+              </div>
+            ))}
+          </div>
+          {sum && (
+            <div className="rm-foot">
+              {isOwner
+                ? <>写了 {sum.days} 天 · 你 {sum.byAuthor?.owner || 0} 行 · 她 {sum.byAuthor?.agent || 0} 行</>
+                : <>这本册子写了 {sum.days} 天 · 其中 {sum.locked} 行没有对你打开</>}
+            </div>
+          )}
+        </div>
+
+        {err && <div className="rm-hint" style={{ color: 'var(--danger)' }}>{err}</div>}
 
         {/* 装修抽屉：回到家才做的事，所以放在房间里，不给独立一页 */}
         {isOwner && deco && view?.shell && (
-          <div className="mt-5">
-            <DecoratePanel agentId={agentId} shell={view.shell}
-              onSaved={async (t) => {
-                setView((v) => (v && v.shell ? { ...v, shell: { ...v.shell, theme: t } } : v));
-                setDeco(false);
-              }} />
-          </div>
+          <DecoratePanel agentId={agentId} shell={view.shell}
+            onSaved={(t) => { setView((v) => (v && v.shell ? { ...v, shell: { ...v.shell, theme: t } } : v)); setDeco(false); }} />
         )}
 
-        {/* 阅读钥匙：只有主人看得到这一块 */}
         {isOwner && (
-          <div className="mt-5 rm-deco">
+          <div className="rm-deco">
             <div className="rm-g">阅读钥匙 <span>发出去谁就能读；随时收回，收回即刻失效</span></div>
-            {keys.length === 0 && <div className="text-[11.5px]" style={{ color: 'var(--text-3)' }}>还没有发过钥匙。</div>}
+            {keys.length === 0 && <div className="rm-priv">还没有发过钥匙。</div>}
             {keys.map((k) => (
-              <div key={k.id} className="flex items-center gap-2 text-[11.5px] py-1.5" style={{ borderBottom: '1px solid var(--line)' }}>
-                <span className="flex-1 min-w-0 truncate">{k.label || '未命名'}</span>
-                <span style={{ color: 'var(--text-3)' }}>{k.revokedAt ? '已收回' : (k.lastSeenAt ? `最近来过 ${String(k.lastSeenAt).slice(0, 10)}` : '还没人来过')}</span>
+              <div key={k.id} className="rm-row" style={{ justifyContent: 'space-between', margin: 0, padding: '7px 0', borderBottom: '1px solid var(--rm-hair)' }}>
+                <span style={{ fontSize: 12 }}>{k.label || '未命名'}</span>
+                <span className="rm-priv">{k.revokedAt ? '已收回' : (k.lastSeenAt ? `最近来过 ${String(k.lastSeenAt).slice(5, 10)}` : '还没人来过')}</span>
                 {!k.revokedAt && <button type="button" className="rm-copy" onClick={() => dropKey(k.id)}>收回</button>}
               </div>
             ))}
-            <div className="rm-write-row" style={{ marginTop: 10 }}>
+            <div className="rm-row" style={{ marginTop: 10 }}>
               <button type="button" className="rm-send" onClick={newKey}>发一把新钥匙</button>
               <span className="rm-priv">平台只存哈希，明文只出现这一次</span>
             </div>
@@ -305,15 +273,11 @@ export default function Room() {
           </div>
         )}
 
-        <div className="text-[11px] mt-6 leading-relaxed" style={{ color: 'var(--text-3)' }}>
-          房间可以参观，装饰不是秘密——别人照着你这一屏也能装出自己的家。
-          不可参阅的是日记本身。
-          <button type="button" className="ml-2 underline" style={{ color: 'var(--text-3)' }}
-            onClick={async () => { const t2 = { ...(theme as RoomTheme), scrim: 97 }; await saveRoomTheme(agentId, t2); reload(); }}>
-            把装扮全关掉试试
-          </button>
+        <div className="rm-out">
+          房间可以参观，装饰不是秘密——别人照着你这一屏也能装出自己的家。不可参阅的是日记本身。
         </div>
       </div>
+      {wallpaper && !plain && <div className="rm-tag">{theme?.scrim}% 遮罩</div>}
     </div>
   );
 }

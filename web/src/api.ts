@@ -1915,6 +1915,8 @@ export function getEntryTimeline(id: number | string) {
  * ——所以这里的类型里 body 是可选的，前端按 `locked` 分支渲染，不参与"藏不藏"的决策。
  */
 export interface RoomTheme {
+  /** 房间名与一句话挂在**公开的房间壳**上，所以服务端对它们走严格预检（不是进门轻那套） */
+  name: string; motto: string;
   paper: string; rule: 'none' | 'lined' | 'grid'; signFont: 'pen' | 'round' | 'note' | 'kai';
   ink: string; leading: number; wallpaper: string | null; scrim: number;
   motion: 'soft' | 'still'; widgets: { id: string; slot: string }[];
