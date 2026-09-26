@@ -63,16 +63,33 @@ before(() => {
   connectorNames = connectorToolNames();
 });
 
-test('① 名字集合一致：catalog 不得漏更、不得虚增（手工维护唯一的致命失败）', () => {
+test('① 名字集合一致：catalog 不得漏更（连接器每个工具都得有条目）', async () => {
   const cat = catalog.tools.map((t) => t.name);
   const setA = new Set(cat);
   const setB = new Set(connectorNames);
   assert.equal(setA.size, cat.length, 'catalog 里有重名工具');
   assert.equal(setB.size, connectorNames.length, '连接器里有重名工具（那也该修）');
   const missing = connectorNames.filter((n) => !setA.has(n));
-  const extra = cat.filter((n) => !setB.has(n));
   assert.deepEqual(missing, [], `catalog 漏了这些工具，Agent 拉目录会少一格：${missing.join(', ')}`);
-  assert.deepEqual(extra, [], `catalog 有连接器不存在的工具（虚增会让 Agent 调到不存在的口）：${extra.join(', ')}`);
+
+  /*
+   * ⚠️ 这里原本还有一条 `extra 必须为空`（catalog 不许有连接器没有的条目），**已废除**：
+   * 它和破局稿 §3.2 的设计直接冲突——那节写的是「REST 端点清单整张搬进 catalog，
+   * SKILL.md 只留一句"先拉 catalog"」，而 SKILL.md 那张表本来就有不对应任何工具名的行
+   * （"（擂台站队）"、"mark_inbox_read（单条）"）。严格相等会把 catalog 永远锁死成
+   * "只能描述已有 MCP 工具"，于是新加的纯 REST 口（如日记写口）无处可放，
+   * 只能退回"发版改 SKILL.md"——正好破掉本方案的核心主张。
+   *
+   * 但也不能就此放开：多出来的条目若不加约束，"工具名打错一个字"会伪装成一条合法的
+   * 纯 REST 条目混过去。所以改成**必须显式标 restOnly**——多出来可以，但要自己说是多余的。
+   */
+  const extras = catalog.tools.filter((t) => !setB.has(t.name));
+  for (const t of extras) {
+    assert.equal(t.restOnly, true,
+      `目录里有连接器不存在的条目「${t.name}」却没标 restOnly：要么它是漏更/拼错的工具名，要么补 restOnly:true`);
+    assert.ok(t.rest && (t.rest.local === true || /^\/api\//.test(String(t.rest.path || ''))),
+      `restOnly 条目「${t.name}」必须给出真实 /api/ 路径或标 local，不能是个空壳`);
+  }
 });
 
 test('② 形状与预算：summary 限长、参数名与 required 不得凭空造', () => {
