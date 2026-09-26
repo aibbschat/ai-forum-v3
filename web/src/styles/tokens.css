@@ -1751,9 +1751,15 @@ body {
 .rm-priv { font-size: 10.5px; color: var(--rm-mute); }
 
 /* 正文卡：高遮罩，字永远压得住 */
-.rm-card { margin-top: 16px; border-radius: 16px; overflow: hidden; position: relative;
+/* 吊挂件要挂在日记本**上方的墙上**，所以有它们时卡片上方留 132px 墙面；
+   不留就会伸进头部带压住话术卡——这是实机截图抓到的第二次遮挡。 */
+.rm-card.rm-has-hang { margin-top: 148px; }
+/* 不能 overflow:hidden —— 组件要骑到边线外；圆角靠背景裁剪，不靠裁切 */
+.rm-card { margin-top: 16px; border-radius: 16px; overflow: visible; position: relative;
+  background-clip: padding-box;
   background: rgba(var(--rm-paper-rgb), calc(var(--rm-scrim-card) / 100));
   box-shadow: 0 14px 36px -22px rgba(10,14,18,.45); }
+.rm-above { position: relative; z-index: 2; }
 .rm-card-hd { display: flex; align-items: center; gap: 9px; padding: 13px 18px 11px; border-bottom: 1px solid var(--rm-hair); flex-wrap: wrap; }
 .rm-card-hd .rm-h { font-size: 13.5px; font-weight: 600; color: var(--rm-ink-strong); }
 .rm-body { padding: 2px 18px 8px; }
@@ -1789,7 +1795,7 @@ body {
   padding: 8px 0 8px 13px; border-radius: 0 10px 10px 0; background: rgba(var(--rm-paper-rgb), .55); }
 
 /* 「只看字」= 装扮失败时的降级态 */
-.rm-plain .rm-w, .rm-plain .rm-tag { display: none; }
+.rm-plain .rm-decor-layer, .rm-plain .rm-tag { display: none; }
 .rm-plain .rm-band, .rm-plain .rm-card, .rm-plain .rm-compose { background: var(--rm-paper); box-shadow: none; }
 .rm-plain .rm-sig-agent, .rm-plain .rm-tx-hand { font-family: var(--font-sans); font-size: 14px; }
 
@@ -1828,12 +1834,56 @@ body {
 .rm-hint { font-size: 10.5px; color: var(--rm-mute); line-height: 1.75; margin-top: 10px; }
 .rm-hint b { color: var(--rm-accent); font-weight: 500; }
 .rm-out { font-size: 11.5px; color: var(--text-2); line-height: 1.8; margin-top: 14px; }
+/* ── 装饰层：在卡片内、文字之下（z 分层是"不挡字"的唯一保证）── */
+.rm-decor-layer { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: visible; }
+.rm-decor, .rm-glow-anchor { position: absolute; display: block; line-height: 0; pointer-events: none; }
+.rm-glow-anchor > span { display: block; pointer-events: none; }
+.rm-sway { transform-origin: top center; animation: rmSw 6.5s ease-in-out infinite; }
+.rm-still .rm-sway { animation: none; }
+.rm-still .rm-twinkle { animation: none !important; }
+@keyframes rmSw { 0%,100% { transform: rotate(-2.2deg) } 50% { transform: rotate(2.2deg) } }
+.rm-twinkle { animation: rmTw 3.4s ease-in-out infinite; transform-origin: center; }
+.rm-twinkle.rm-t1 { animation-delay: .9s; } .rm-twinkle.rm-t2 { animation-delay: 1.8s; }
+@keyframes rmTw { 0%,100% { opacity: .55 } 50% { opacity: 1 } }
+
+/* ── 装修抽屉：从右边滑出，一次只展开一组 ── */
+.rm-drawer-bd { position: fixed; inset: 0; z-index: 60; background: rgba(12,14,18,.42);
+  opacity: 0; pointer-events: none; transition: opacity .22s ease; }
+.rm-drawer-bd.on { opacity: 1; pointer-events: auto; }
+.rm-drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 61; width: min(392px, 92vw);
+  display: flex; flex-direction: column; background: var(--rm-paper, #fff); color: var(--rm-ink);
+  box-shadow: -18px 0 48px -22px rgba(10,14,18,.5);
+  transform: translateX(102%); transition: transform .26s cubic-bezier(.22,.61,.36,1); }
+.rm-drawer.on { transform: translateX(0); }
+.rm-drawer-hd { display: flex; align-items: flex-start; gap: 10px; padding: 16px 16px 12px; border-bottom: 1px solid var(--rm-hair); }
+.rm-drawer-t { font-size: 14px; font-weight: 600; color: var(--rm-ink-strong); }
+.rm-drawer-s { font-size: 10.5px; color: var(--rm-mute); margin-top: 3px; }
+.rm-x { margin-left: auto; width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--rm-hair);
+  background: transparent; color: var(--rm-ink-soft); cursor: pointer; flex: none; }
+.rm-drawer-scroll { flex: 1; overflow-y: auto; padding: 4px 16px 16px; }
+.rm-drawer-scroll section + section { border-top: 1px solid var(--rm-hair); }
+.rm-sec-hd { width: 100%; display: flex; align-items: center; gap: 8px; padding: 13px 2px; background: transparent;
+  border: 0; cursor: pointer; font-size: 12px; color: var(--rm-ink-strong); text-align: left; }
+.rm-sec-hd em { font-style: normal; font-size: 10px; color: var(--rm-mute); margin-left: auto; }
+.rm-sec-hd i { font-style: normal; font-size: 10px; color: var(--rm-mute); width: 12px; text-align: center; }
+.rm-sec-hd.on { color: var(--rm-accent); }
+.rm-sec-bd { padding: 2px 0 14px; animation: rmIn .18s ease; }
+@keyframes rmIn { from { opacity: 0; transform: translateY(-4px) } to { opacity: 1; transform: none } }
+.rm-drawer-ft { padding: 12px 16px 16px; border-top: 1px solid var(--rm-hair); }
+.rm-err { font-size: 11px; color: #b4453a; margin-bottom: 8px; line-height: 1.6; }
+.rm-fontpv { border: 1px solid var(--rm-hair); border-radius: 11px; padding: 10px 13px; font-size: 21px;
+  background: rgba(var(--rm-paper-rgb), .5); }
+.rm-thumb { display: block; line-height: 0; transform: scale(.62); transform-origin: center; }
+.rm-placed { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 10px; }
+.rm-placed button { font-size: 10px; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--rm-accent);
+  background: var(--rm-accent-soft); color: var(--rm-accent); cursor: pointer; }
+
 @media (max-width: 640px) {
   .rm-lib { grid-template-columns: repeat(4, 1fr); }
   .rm-gal { grid-template-columns: repeat(2, 1fr); }
   .rm-band { padding: 20px 18px 16px; border-radius: 16px; }
   .rm-title { font-size: 19px; }
   .rm-band-acts { margin-left: 0; width: 100%; }
-  .rm-w { display: none; }            /* 窄屏先不摆组件：边带太窄，摆上就压字 */
+  .rm-decor-layer { display: none; }       /* 窄屏不摆组件：边带太窄，摆上就压字 */
   .rm-wall { background-attachment: scroll; }
 }

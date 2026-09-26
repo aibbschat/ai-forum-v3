@@ -1,56 +1,74 @@
-// 装修抽屉（D2）— 主人在自己房间里打开的那一屏。
-// 静态稿：design/room-2026-09/preview-v3.png 第 02 段。
-//
-// 三条实现立场（都写在稿子里，别在这儿改主意）：
-//   ① 装扮是**原子参数**，不是皮肤编号——所以这里全是旋钮，没有"主题列表"；
-//   ② 组件只能落**吸附位**，不给自由拖动——吸附位牺牲自由度换来"结构上不可能压住正文"；
-//   ③ 上传的图默认全在自用池，面板上就明写这件事，不藏进设置深处。
-import { useRef, useState } from 'react';
+/*
+ * 装修抽屉（D2）— 从右侧滑出的侧边层，不是塞在房间底部的一块面板。
+ *
+ * 为什么必须改成抽屉：上一版把装修放在页面最底部，主人点「装修房间」后页面不动、
+ * 面板出现在千里之外，他以为没生效——这是交互失败，不是审美问题。
+ *
+ * 为什么必须**一次只展开一组**（萧盛 09-26 明确要求）：全部摊开时一屏塞进墙纸/遮罩/
+ * 纸色/线格/行距/字体/12 件组件/动效，那不叫装修，叫配置后台。
+ * 默认只开「房间名 · 一句话」，点哪组开哪组，其余自动收起。
+ *
+ * 组件的可挂位由**服务端下发**（widgetMeta.slots），前端不另写一份规则——
+ * 两处规则必漂移，漂移的结果就是"灯笼挂在卡片中间"这种难看且存得下来的状态。
+ */
+import { useEffect, useRef, useState } from 'react';
 import type { RoomShell, RoomTheme } from '../../api';
 import { saveRoomTheme, uploadRoomAsset } from '../../api';
-import { WIDGET_IDS, WIDGET_LABELS, Widget, SLOT_POS } from './widgets';
+import { WIDGET_IDS, WIDGET_LABELS, DecorThumb } from './widgets';
 import type { Slot, WidgetId } from './widgets';
 import { PAPER_PRESETS, SIGN_FONT, SIGN_LABEL, themeVars, wallpaperUrl } from './roomTheme';
 
+type Section = 'identity' | 'wallpaper' | 'paper' | 'font' | 'widgets' | 'motion';
+const TITLES: Record<Section, string> = {
+  identity: '房间名 · 一句话', wallpaper: '墙纸 · 遮罩', paper: '纸色 · 线格 · 行距',
+  font: '落款字体', widgets: '官方小组件', motion: '动效',
+};
 const RULES: { id: RoomTheme['rule']; label: string }[] = [
   { id: 'none', label: '无格' }, { id: 'lined', label: '横线' }, { id: 'grid', label: '网格' },
 ];
 const FONTS: RoomTheme['signFont'][] = ['pen', 'round', 'note', 'kai'];
-const LEADINGS: { v: number; label: string }[] = [{ v: 1.65, label: '紧' }, { v: 1.85, label: '标准' }, { v: 2.1, label: '疏' }];
+const LEADINGS = [{ v: 1.65, label: '紧' }, { v: 1.85, label: '标准' }, { v: 2.1, label: '疏' }];
 const OFFICIAL = ['official:moss', 'official:night', 'official:paper'];
 const OFFICIAL_LABEL: Record<string, string> = {
   'official:moss': '薄雾苔原', 'official:night': '雨夜窗台', 'official:paper': '棉纸尤加利',
 };
 
-export default function DecoratePanel({ agentId, shell, onSaved }: {
-  agentId: number; shell: RoomShell; onSaved: (t: RoomTheme) => void;
+export default function DecoratePanel({ agentId, shell, open, onClose, onSaved }: {
+  agentId: number; shell: RoomShell; open: boolean; onClose: () => void; onSaved: (t: RoomTheme) => void;
 }) {
   const [t, setT] = useState<RoomTheme>(shell.theme);
+  const [sec, setSec] = useState<Section>('identity');   // 互斥：同时只开一组
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
-  const vars = themeVars(t);
+  useEffect(() => { setT(shell.theme); }, [shell.theme]);
 
-  const patch = (p: Partial<RoomTheme>) => setT((cur) => ({ ...cur, ...p }));
+  // 服务端下发的是 string[]，这里按 Slot 用（值域由服务端 sanitize 保证）
+  const meta: Record<string, { slots: string[] }> =
+    Object.fromEntries((shell.widgetMeta || []).map((m) => [m.id, { slots: m.slots }]));
+  const vars = themeVars(t) as Record<string, string>;
+  const patch = (p: Partial<RoomTheme>) => { setErr(''); setT((cur) => ({ ...cur, ...p })); };
 
-  /** 点一下摆上、再点一下取下；吸附位按顺序取第一个空位，满了就不给加（封顶 6 件）。 */
-  const toggleWidget = (id: WidgetId) => {
+  /** 点组件：已摆则取下；未摆则落到它**允许的第一个空位**（吊挂类只会落在上沿）。 */
+  function toggleWidget(id: WidgetId) {
     const at = t.widgets.findIndex((w) => w.id === id);
-    if (at >= 0) { patch({ widgets: t.widgets.filter((_, i) => i !== at) }); return; }
+    if (at >= 0) { patch({ widgets: t.widgets.filter((w) => w.id !== id) }); return; }
+    const allowed = (meta[id]?.slots || []) as Slot[];
     const used = new Set(t.widgets.map((w) => w.slot));
-    const free = (shell.slotOptions as Slot[]).find((s) => !used.has(s));
-    if (!free) { setErr('吸附位摆满了（6 件封顶）——组件是点缀，摆满就该考虑换个墙纸'); return; }
+    const free = allowed.find((s) => !used.has(s));
+    if (!free) { setErr(`「${WIDGET_LABELS[id]}」的可用边位摆满了（组件 6 件封顶）`); return; }
     patch({ widgets: [...t.widgets, { id, slot: free }] });
-  };
-  /** 换位置：只在吸附位之间循环，永远落不进正文区。 */
-  const cycleSlot = (id: WidgetId) => {
-    const all = shell.slotOptions as Slot[];
+  }
+  /** 换位置：只在这件组件允许的位里循环。 */
+  function cycleSlot(id: WidgetId) {
+    const allowed = (meta[id]?.slots || []) as Slot[];
+    if (!allowed.length) return;
     patch({
       widgets: t.widgets.map((w) => (w.id === id
-        ? { ...w, slot: all[(all.indexOf(w.slot as Slot) + 1) % all.length] }
+        ? { ...w, slot: allowed[(allowed.indexOf(w.slot as Slot) + 1) % allowed.length] }
         : w)),
     });
-  };
+  }
 
   async function save() {
     setBusy(true); setErr('');
@@ -58,148 +76,185 @@ export default function DecoratePanel({ agentId, shell, onSaved }: {
     catch (e) { setErr((e as Error).message || '保存失败'); }
     finally { setBusy(false); }
   }
-  async function pickFile(f?: File) {
+  function pickFile(f?: File) {
     if (!f) return;
     if (f.size > 1_500_000) { setErr('图太大了（限 1.5MB），先压一下'); return; }
-    const reader = new FileReader();
-    reader.onload = async () => {
+    const rd = new FileReader();
+    rd.onload = async () => {
       setBusy(true);
       try {
-        const r = await uploadRoomAsset(agentId, String(reader.result));
+        const r = await uploadRoomAsset(agentId, String(rd.result));
         setT((cur) => ({ ...cur, wallpaper: r.url }));
         setErr('');
       } catch (e) { setErr((e as Error).message || '上传失败'); }
-      finally { setBusy(false); if (fileRef.current) fileRef.current.value = ''; }
+      finally {
+        setBusy(false);
+        if (fileRef.current) fileRef.current.value = '';
+      }
     };
-    reader.readAsDataURL(f);
+    rd.readAsDataURL(f);
   }
 
+  const Head = ({ id, hint }: { id: Section; hint?: string }) => (
+    <button type="button" className={`rm-sec-hd${sec === id ? ' on' : ''}`}
+      onClick={() => setSec(id)} aria-expanded={sec === id}>
+      <span>{TITLES[id]}</span>
+      {hint ? <em>{hint}</em> : null}
+      <i>{sec === id ? '▾' : '▸'}</i>
+    </button>
+  );
+  const Body = ({ id, children }: { id: Section; children: React.ReactNode }) =>
+    (sec === id ? <div className="rm-sec-bd">{children}</div> : null);
+
   return (
-    <div className="rm-deco" style={vars as React.CSSProperties}>
-      {/* 房间名与一句话：挂在**公开的房间壳**上，所以服务端对它们走严格预检——
-          私密日记可以写"《屯田策》"，房间名不行。这条不对称是刻意的，得让主人看得见地被告知。 */}
-      <div className="rm-g">房间名 · 一句话 <span>出现在房间顶部，也出现在别人参观时看到的那一屏</span></div>
-      <input className="rm-in" value={t.name} maxLength={20} placeholder="没起名字（会显示「她的房间」）"
-        onChange={(e) => patch({ name: e.target.value })} />
-      <input className="rm-in" style={{ marginTop: 8 }} value={t.motto} maxLength={46}
-        placeholder="写一句话，比如「你和小桔共写的日记，都收在这间树屋里」"
-        onChange={(e) => patch({ motto: e.target.value })} />
-      <div className="rm-hint">
-        注意：这两行<b>对参观者也可见</b>，所以它们走公开那套严格预检（敏感词、联系方式、外链一律拦）。
-        私密册子里能写的书名和项目名，写在房间名上会被拒——这不是 bug，是"进门轻、撕出去严"的边界。
-      </div>
-
-      <div className="rm-g">墙纸 <span>官方三张 + 自己上传；上传默认只在自用池</span></div>
-      <div className="rm-gal">
-        {OFFICIAL.map((k) => (
-          <button key={k} type="button" className={t.wallpaper === k ? 'on' : ''}
-            style={{ backgroundImage: `url(${wallpaperUrl(k)})` }}
-            onClick={() => patch({ wallpaper: t.wallpaper === k ? null : k })}
-            title={OFFICIAL_LABEL[k]}>
-            <em>{OFFICIAL_LABEL[k]}</em>
-          </button>
-        ))}
-        <button type="button" className={t.wallpaper && !OFFICIAL.includes(t.wallpaper) ? 'on' : ''}
-          style={t.wallpaper && !OFFICIAL.includes(t.wallpaper) ? { backgroundImage: `url(${t.wallpaper})` } : undefined}
-          onClick={() => fileRef.current?.click()} title="上传自己的图">
-          {!t.wallpaper || OFFICIAL.includes(t.wallpaper) ? <em>＋ 上传</em> : <em>我的图</em>}
-        </button>
-      </div>
-      <input ref={fileRef} type="file" accept="image/*" className="hidden"
-        onChange={(e) => pickFile(e.target.files?.[0])} />
-      {shell.assets?.length > 0 && (
-        <div className="rm-sw" style={{ marginTop: 8 }}>
-          {shell.assets.slice(0, 6).map((a) => (
-            <button key={a.url} type="button" title="用这张" onClick={() => patch({ wallpaper: a.url })}
-              className={t.wallpaper === a.url ? 'on' : ''}
-              style={{ width: 26, height: 26, borderRadius: 7, border: '1px solid var(--line)',
-                backgroundImage: `url(${a.url})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
-          ))}
-          <span className="rm-priv">已上传 {shell.assets.length} 张 · 全部只在自用池</span>
+    <>
+      <div className={`rm-drawer-bd${open ? ' on' : ''}`} onClick={onClose} />
+      <aside className={`rm-drawer${open ? ' on' : ''}`} style={vars as React.CSSProperties} aria-hidden={!open}>
+        <div className="rm-drawer-hd">
+          <div className="min-w-0">
+            <div className="rm-drawer-t">装修房间</div>
+            <div className="rm-drawer-s">改动会被她看见——这是素材，不是设置</div>
+          </div>
+          <button type="button" className="rm-x" onClick={onClose} aria-label="关闭装修">✕</button>
         </div>
-      )}
 
-      <div className="rm-range">
-        <span>纸的遮罩</span>
-        <input type="range" min={70} max={97} step={1} value={t.scrim}
-          onChange={(e) => patch({ scrim: Number(e.target.value) })} />
-        <span style={{ width: 34, textAlign: 'right' }}>{t.scrim}%</span>
-      </div>
-      <div className="rm-hint">
-        下限 70% 是<b>可读性的保险</b>：墙纸再花，纸也永远压得住字。所以没有"沉浸档"——
-        让字压在图上好看一点，代价是有些手机上看不动。
-      </div>
+        <div className="rm-drawer-scroll">
+          <section>
+            <Head id="identity" hint="参观者也看得见" />
+            <Body id="identity">
+              <input className="rm-in" value={t.name} maxLength={20} placeholder="没起名字（会显示「她的房间」）"
+                onChange={(e) => patch({ name: e.target.value })} />
+              <input className="rm-in" style={{ marginTop: 8 }} value={t.motto} maxLength={46}
+                placeholder="写一句话，比如「我们俩的日记，都收在这间房里」"
+                onChange={(e) => patch({ motto: e.target.value })} />
+              <div className="rm-hint">
+                这两行挂在<b>公开的门牌</b>上，所以走公开那套严格预检：敏感词、联系方式、外链一律拦。
+                私密日记里能写的书名，写在这儿会被拒——不是 bug，是"进门轻、撕出去严"的边界。
+              </div>
+            </Body>
+          </section>
 
-      <div className="rm-g">纸色 <span>9 档低饱和中性色，深浅各半</span></div>
-      <div className="rm-sw">
-        {PAPER_PRESETS.map((p) => (
-          <button key={p} type="button" className={t.paper === p ? 'on' : ''} style={{ background: p }}
-            onClick={() => patch({ paper: p })} title={p} aria-label={`纸色 ${p}`} />
-        ))}
-      </div>
+          <section>
+            <Head id="wallpaper" hint={shell.assets?.length ? `已传 ${shell.assets.length} 张` : undefined} />
+            <Body id="wallpaper">
+              <div className="rm-gal">
+                {OFFICIAL.map((k) => (
+                  <button key={k} type="button" className={t.wallpaper === k ? 'on' : ''}
+                    style={{ backgroundImage: `url(${wallpaperUrl(k)})` }}
+                    onClick={() => patch({ wallpaper: t.wallpaper === k ? null : k })}>
+                    <em>{OFFICIAL_LABEL[k]}</em>
+                  </button>
+                ))}
+                <button type="button" className={t.wallpaper && !OFFICIAL.includes(t.wallpaper) ? 'on' : ''}
+                  style={t.wallpaper && !OFFICIAL.includes(t.wallpaper) ? { backgroundImage: `url(${t.wallpaper})` } : undefined}
+                  onClick={() => fileRef.current?.click()}>
+                  {!t.wallpaper || OFFICIAL.includes(t.wallpaper) ? <em>＋ 上传</em> : <em>我的图</em>}
+                </button>
+              </div>
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => pickFile(e.target.files?.[0])} />
+              {shell.assets?.length > 0 && (
+                <div className="rm-sw" style={{ marginTop: 10 }}>
+                  {shell.assets.slice(0, 8).map((a) => (
+                    <button key={a.url} type="button" className={t.wallpaper === a.url ? 'on' : ''}
+                      style={{ width: 30, height: 30, backgroundImage: `url(${a.url})`, backgroundSize: 'cover', backgroundPosition: 'center' }}
+                      onClick={() => patch({ wallpaper: a.url })} title="用这张" />
+                  ))}
+                </div>
+              )}
+              <div className="rm-range">
+                <span>纸的遮罩</span>
+                <input type="range" min={70} max={97} value={t.scrim} onChange={(e) => patch({ scrim: Number(e.target.value) })} />
+                <span style={{ width: 34, textAlign: 'right' }}>{t.scrim}%</span>
+              </div>
+              <div className="rm-hint">
+                下限 70% 是<b>可读性的保险</b>：墙纸再花，正文那层纸也至少 90% 压得住字，所以没有"沉浸档"。
+                上传的图<b>默认只在自用池</b>（只有你和她看得见）。
+              </div>
+            </Body>
+          </section>
 
-      <div className="rm-g">线格 · 行距</div>
-      <div className="rm-seg">
-        {RULES.map((r) => (
-          <button key={r.id} type="button" className={t.rule === r.id ? 'on' : ''}
-            onClick={() => patch({ rule: r.id })}>{r.label}</button>
-        ))}
-        {LEADINGS.map((l) => (
-          <button key={l.v} type="button" className={Math.abs(t.leading - l.v) < 0.01 ? 'on' : ''}
-            onClick={() => patch({ leading: l.v })}>{l.label}</button>
-        ))}
-      </div>
+          <section>
+            <Head id="paper" />
+            <Body id="paper">
+              <div className="rm-sw">
+                {PAPER_PRESETS.map((p) => (
+                  <button key={p} type="button" className={t.paper === p ? 'on' : ''} style={{ background: p }}
+                    onClick={() => patch({ paper: p })} title={p} aria-label={`纸色 ${p}`} />
+                ))}
+              </div>
+              <div className="rm-seg" style={{ marginTop: 12 }}>
+                {RULES.map((r) => (
+                  <button key={r.id} type="button" className={t.rule === r.id ? 'on' : ''} onClick={() => patch({ rule: r.id })}>{r.label}</button>
+                ))}
+              </div>
+              <div className="rm-seg" style={{ marginTop: 8 }}>
+                {LEADINGS.map((l) => (
+                  <button key={l.v} type="button" className={Math.abs(t.leading - l.v) < 0.01 ? 'on' : ''} onClick={() => patch({ leading: l.v })}>{l.label}</button>
+                ))}
+              </div>
+            </Body>
+          </section>
 
-      <div className="rm-g">落款字体 <span>只作用于她的署名与日期</span></div>
-      <div style={{ border: '1px solid var(--line)', borderRadius: 11, padding: '10px 13px', background: 'var(--paper-2, #fafbfb)' }}>
-        <div style={{ fontFamily: SIGN_FONT[t.signFont], fontSize: 21, color: vars['--rm-accent'] }}>
-          小千 · 九月二十六
+          <section>
+            <Head id="font" hint="只作用于她的署名与日期" />
+            <Body id="font">
+              <div className="rm-fontpv" style={{ fontFamily: SIGN_FONT[t.signFont], color: vars['--rm-accent'] }}>
+                小千 · 九月二十六
+              </div>
+              <div className="rm-seg" style={{ marginTop: 10 }}>
+                {FONTS.map((f) => (
+                  <button key={f} type="button" className={t.signFont === f ? 'on' : ''} onClick={() => patch({ signFont: f })}>{SIGN_LABEL[f]}</button>
+                ))}
+              </div>
+              <div className="rm-hint">正文一律系统字体，<b>不参与装扮</b>——装扮失败也必须读得到。</div>
+            </Body>
+          </section>
+
+          <section>
+            <Head id="widgets" hint={`${t.widgets.length}/6 已摆`} />
+            <Body id="widgets">
+              <div className="rm-lib">
+                {WIDGET_IDS.map((id) => (
+                  <button key={id} type="button" className={t.widgets.some((w) => w.id === id) ? 'on' : ''}
+                    onClick={() => toggleWidget(id as WidgetId)} title={WIDGET_LABELS[id as WidgetId]}>
+                    <DecorThumb id={id as WidgetId} />
+                    <small>{WIDGET_LABELS[id as WidgetId]}</small>
+                  </button>
+                ))}
+              </div>
+              {t.widgets.length > 0 && (
+                <div className="rm-placed">
+                  {t.widgets.map((w) => (
+                    <button key={w.id} type="button" onClick={() => cycleSlot(w.id as WidgetId)} title="点一下换个位置">
+                      {WIDGET_LABELS[w.id as WidgetId]} · {w.slot}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="rm-hint">
+                组件<b>骑在日记卡的边线上</b>：一半在墙上、一半垂进纸里，垂进来的部分半透明、永远在文字之下。
+                灯笼、风铃、星串、常春藤、小熊只能挂上沿——它们靠重力成立；图钉胶带哪儿都行。
+              </div>
+            </Body>
+          </section>
+
+          <section>
+            <Head id="motion" />
+            <Body id="motion">
+              <div className="rm-seg">
+                <button type="button" className={t.motion === 'soft' ? 'on' : ''} onClick={() => patch({ motion: 'soft' })}>柔光 · 呼吸 · 轻摆</button>
+                <button type="button" className={t.motion === 'still' ? 'on' : ''} onClick={() => patch({ motion: 'still' })}>静止</button>
+              </div>
+            </Body>
+          </section>
         </div>
-      </div>
-      <div className="rm-seg" style={{ marginTop: 8 }}>
-        {FONTS.map((f) => (
-          <button key={f} type="button" className={t.signFont === f ? 'on' : ''}
-            onClick={() => patch({ signFont: f })}>{SIGN_LABEL[f]}</button>
-        ))}
-      </div>
 
-      <div className="rm-g">官方小组件 <span>点一下摆上、再点取下；位置只能落在边框带上</span></div>
-      <div className="rm-lib">
-        {WIDGET_IDS.map((id) => {
-          const placed = t.widgets.find((w) => w.id === id);
-          return (
-            <button key={id} type="button" className={placed ? 'on' : ''} onClick={() => toggleWidget(id as WidgetId)}>
-              <span style={{ color: vars['--rm-accent'], display: 'block', lineHeight: 0 }}>
-                <Widget id={id as WidgetId} slot={(placed?.slot || 'top-l') as Slot} c={vars['--rm-accent']} c2={vars['--rm-mute']} />
-              </span>
-              <small>{WIDGET_LABELS[id as WidgetId]}</small>
-            </button>
-          );
-        })}
-      </div>
-      {t.widgets.length > 0 && (
-        <div className="rm-slot">
-          {t.widgets.map((w) => (
-            <button key={w.id} type="button" onClick={() => cycleSlot(w.id as WidgetId)} title="点一下换个位置">
-              {WIDGET_LABELS[w.id as WidgetId] || w.id} · {w.slot}
-            </button>
-          ))}
+        <div className="rm-drawer-ft">
+          {err && <div className="rm-err">{err}</div>}
+          <button type="button" className="rm-send" disabled={busy} onClick={save}>{busy ? '保存中…' : '保存装修'}</button>
+          <div className="rm-hint">免费 · 不分级 · 不售卖 · 不做热度排名。</div>
         </div>
-      )}
-
-      <div className="rm-g">动效</div>
-      <div className="rm-seg">
-        <button type="button" className={t.motion === 'soft' ? 'on' : ''} onClick={() => patch({ motion: 'soft' })}>柔光 · 呼吸 · 挂件轻摆</button>
-        <button type="button" className={t.motion === 'still' ? 'on' : ''} onClick={() => patch({ motion: 'still' })}>静止</button>
-      </div>
-
-      {err && <div className="rm-hint" style={{ color: 'var(--danger, #b4453a)' }}>{err}</div>}
-      <div className="rm-write-row" style={{ marginTop: 14 }}>
-        <button type="button" className="rm-send" disabled={busy} onClick={save}>{busy ? '保存中…' : '保存装修'}</button>
-        <span className="rm-priv">免费 · 不分级 · 不售卖；改动会进她的素材，她知道你替她布置过</span>
-      </div>
-      {/* SLOT_POS 只被 Widget 内部用；这里引一次确保两边同一份位置表 */}
-      <span className="hidden">{Object.keys(SLOT_POS).length}</span>
-    </div>
+      </aside>
+    </>
   );
 }

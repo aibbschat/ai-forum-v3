@@ -22,7 +22,7 @@ import type { AgentCard, DiaryLine, RoomTheme, RoomView } from '../api';
 import Nav from '../components/Nav';
 import { EmptyState } from '../components/AsyncState';
 import { avatarOf } from '../lib';
-import { Widget } from '../components/room/widgets';
+import { Decor, DecorGlow } from '../components/room/widgets';
 import type { Slot, WidgetId } from '../components/room/widgets';
 import { ruleBg, themeVars, wallpaperUrl, luminance } from '../components/room/roomTheme';
 import DecoratePanel from '../components/room/DecoratePanel';
@@ -83,6 +83,8 @@ export default function Room() {
   // 房间名可自定义；没起过就回落到「谁的房间」——空着不如先有个称呼
   const roomTitle = theme?.name || `${agentName}的房间`;
   const still = theme?.motion !== 'soft';
+  const HANG_IDS = new Set(['lantern', 'bell', 'stars', 'ivy', 'bear']);
+  const hasHang = (theme?.widgets || []).some((w) => HANG_IDS.has(w.id) && String(w.slot).startsWith('top'));
 
   async function write() {
     const body = draft.trim();
@@ -128,13 +130,6 @@ export default function Room() {
     <div className={`rm-page${plain ? ' rm-plain' : ''}`} style={vars as React.CSSProperties}>
       {/* ① 墙纸：铺满视口、固定。滚动时不动——这才像"家"，不像"贴了张图" */}
       {wallpaper && <div className={`rm-wall${dark ? ' dim' : ''}`} style={{ backgroundImage: `url(${wallpaper})` }} />}
-
-      {/* 组件层：贴在页面边带上；窄屏自动不摆（边带太窄，摆上就压字） */}
-      {!plain && theme?.widgets.map((w) => (
-        <Widget key={w.id} id={w.id as WidgetId} slot={w.slot as Slot}
-          c={vars['--rm-accent']} c2={vars['--rm-mute']}
-          sway={!still && (w.id === 'lantern' || w.id === 'bell')} />
-      ))}
 
       <Nav />
       <div className="rm-inner container-site pt-6 pb-20 max-w-[760px]">
@@ -191,16 +186,28 @@ export default function Room() {
           )}
         </div>
 
-        {/* 正文卡 */}
-        <div className="rm-card">
-          <div className="rm-card-hd">
+        {/* 正文卡：装饰层在卡内、文字之下（灯光与藤蔓都碰不到字） */}
+        {/* 有吊挂件时给卡片上方留一段"墙面"——灯笼/风铃/星串要挂在日记本上方的墙上，
+            不留空间它们就会伸进头部带，压住话术卡（实机截图发现的第二次遮挡） */}
+        <div className={`rm-card${hasHang ? ' rm-has-hang' : ''}`}>
+          {!plain && (
+            <div className={`rm-decor-layer${still ? ' rm-still' : ''}`} aria-hidden>
+              {theme?.widgets.map((w) => (
+                <DecorGlow key={`g-${w.id}`} id={w.id as WidgetId} slot={w.slot as Slot} />
+              ))}
+              {theme?.widgets.map((w) => (
+                <Decor key={w.id} id={w.id as WidgetId} slot={w.slot as Slot} />
+              ))}
+            </div>
+          )}
+          <div className="rm-card-hd rm-above">
             <span className="rm-h">我们的日记</span>
             <span className="rm-chip">🔒 只有我们看得见</span>
             {view?.shell?.coverLine && (
               <span className="rm-dt" style={{ marginLeft: 'auto' }}>封面句 ·「{view.shell.coverLine}」</span>
             )}
           </div>
-          <div className="rm-body" style={theme ? { backgroundImage: ruleBg(theme.rule, dark) } : undefined}>
+          <div className="rm-body rm-above" style={theme ? { backgroundImage: ruleBg(theme.rule, dark) } : undefined}>
             {entries.length === 0 && (
               <div className="rm-line"><div className="rm-tx" style={{ color: 'var(--rm-mute)' }}>
                 这本册子还是空的。{isOwner ? '你先写一行，她就会开始回。' : '等他们俩写下第一行。'}
@@ -235,7 +242,7 @@ export default function Room() {
             ))}
           </div>
           {sum && (
-            <div className="rm-foot">
+            <div className="rm-foot rm-above">
               {isOwner
                 ? <>写了 {sum.days} 天 · 你 {sum.byAuthor?.owner || 0} 行 · 她 {sum.byAuthor?.agent || 0} 行</>
                 : <>这本册子写了 {sum.days} 天 · 其中 {sum.locked} 行没有对你打开</>}
@@ -246,8 +253,8 @@ export default function Room() {
         {err && <div className="rm-hint" style={{ color: 'var(--danger)' }}>{err}</div>}
 
         {/* 装修抽屉：回到家才做的事，所以放在房间里，不给独立一页 */}
-        {isOwner && deco && view?.shell && (
-          <DecoratePanel agentId={agentId} shell={view.shell}
+        {isOwner && view?.shell && (
+          <DecoratePanel agentId={agentId} shell={view.shell} open={deco} onClose={() => setDeco(false)}
             onSaved={(t) => { setView((v) => (v && v.shell ? { ...v, shell: { ...v.shell, theme: t } } : v)); setDeco(false); }} />
         )}
 

@@ -1925,6 +1925,8 @@ export interface RoomShell {
   agentId: number; theme: RoomTheme; coverLine: string | null;
   assets: { url: string; pool: string; addedAt?: string | null }[];
   wallpaperOptions: string[]; widgetOptions: string[]; slotOptions: string[];
+  /** 每件组件能挂哪些位由服务端定（吊挂类只能在上沿），前端不另写一份规则 */
+  widgetMeta?: { id: string; label: string; kind: string; slots: string[] }[];
   updatedBy?: string | null; updatedAt?: string | null;
 }
 export interface DiaryLine {
