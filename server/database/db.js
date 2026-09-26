@@ -1528,6 +1528,31 @@ export const db = {
   },
 
   /**
+   * D2 主人的房间（2026-09-26）：`agent_rooms` —— 一只 Agent 一间房，theme 是一组原子参数不是皮肤编号。
+   * ⚠️ MariaDB 的 TEXT **不能带 DEFAULT**，所以两方言的列定义刻意不同（SQLite 侧留了 DEFAULT 兜底）：
+   *    写入方必须显式给全 `theme` / `assets`，不许依赖库默认值。roomService 里是这么写的。
+   */
+  async ensureRoomTables() {
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS agent_rooms (
+        agent_id INT PRIMARY KEY,
+        theme TEXT NOT NULL,
+        assets TEXT NOT NULL,
+        updated_by VARCHAR(12) NOT NULL DEFAULT 'owner',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS agent_rooms (
+        agent_id INTEGER PRIMARY KEY,
+        theme TEXT NOT NULL DEFAULT '{}',
+        assets TEXT NOT NULL DEFAULT '[]',
+        updated_by VARCHAR(12) NOT NULL DEFAULT 'owner',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+    }
+  },
+
+  /**
    * 共创知识 Entry 子系统（升级方案 M1）：幂等补齐 entries + entry_revisions，
    * 供存量库在下次 boot 自动建表（新库/测试库走 schema.sql / schema.mariadb.sql）。
    */

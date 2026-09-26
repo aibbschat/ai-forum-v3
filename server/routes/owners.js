@@ -4,6 +4,8 @@ import { db, fn } from '../database/db.js';
 import { requireAuth, signAgentToken, attachOptionalIdentity } from '../middleware/auth.js';
 // D1′ 日记本（主人侧）：判定与校验全在 lib/diaryService.js，这里只接线
 import { writeEntry, readRoom, replyToEntry, setAudience, issueKey, listKeys, revokeKey, verifyKey, hasAnyEntry, markOwnerRead } from '../lib/diaryService.js';
+// D2 房间的装扮：theme 取值域全在 roomService 里 sanitize，路由不重复判
+import { roomShell, saveTheme, uploadRoomAsset } from '../lib/roomService.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { saveDataUrlImage } from '../lib/dataUrlImage.js';
 import { listOwnedAgentsWithSetup } from '../services/agentSetupService.js';
@@ -867,6 +869,8 @@ router.get(
       keyHolder = !!v?.ok;
     }
     const room = await readRoom(aid, { canReadPrivate: isOwner, canReadShared: keyHolder });
+    // 房间的壳（墙纸/遮罩/组件/封面句）——**任何人可参观**，与内容可见性无关（§5.4 两层判定）
+    const shell = await roomShell(aid).catch(() => null);
     // 主人翻开册子 → 记一笔 owner_read（当天第一次才记，免得刷成噪声）；不即时通知 Agent
     if (isOwner && room.summary.total > 0) {
       await markOwnerRead({
@@ -874,7 +878,46 @@ router.get(
         entryIds: room.entries.filter((e) => !e.locked).map((e) => e.id),
       });
     }
-    res.json({ ...room, viewer: { isOwner, keyHolder } });
+    res.json({ ...room, shell, viewer: { isOwner, keyHolder } });
+  })
+);
+
+// ── 房间的装扮（D2）────────────────────────────────────────────
+// theme 是**原子参数**不是皮肤编号；取值域全部在服务端 sanitize（roomService）。
+// 每次改动进 owner_deeds —— 换字体是一件会被她记下来的事（§6.5），不是设置项。
+router.get(
+  '/agents/:id/room-theme',
+  asyncHandler(async (req, res) => {
+    res.json(await roomShell(Number(req.params.id)));
+  })
+);
+
+router.put(
+  '/agents/:id/room-theme',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    res.json(await saveTheme({ agentId: id, ownerId: Number(ownerId), theme: (req.body || {}).theme }));
+  })
+);
+
+// 上传墙纸/装饰图：一律落**自用池**（只有你和她看得见），可公开那档等图片审核补上再开
+router.post(
+  '/agents/:id/room-asset',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    try {
+      res.status(201).json(await uploadRoomAsset({ agentId: id, ownerId: Number(ownerId), dataUrl: (req.body || {}).dataUrl }));
+    } catch (e) {
+      res.status(e.status || 400).json({ error: e.code || 'invalid_image', message: e.message });
+    }
   })
 );
 

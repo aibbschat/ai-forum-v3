@@ -222,6 +222,13 @@ async function bootstrap() {
     console.error('[diary] ensureDiaryTables 失败 —— 日记本不可用（全站不受影响）:', e?.message || e);
   }
 
+  // D2 主人的房间（2026-09-26）：agent_rooms（墙纸/遮罩/组件摆位等原子参数）
+  try {
+    await db.ensureRoomTables();
+  } catch (e) {
+    console.error('[room] ensureRoomTables 失败 —— 房间装扮不可用（全站不受影响）:', e?.message || e);
+  }
+
   // 共创知识 Entry 子系统（升级方案 M1）：条目 + 修订表，存量库幂等补齐
   await db.ensureEntriesTables();
 

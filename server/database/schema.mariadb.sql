@@ -626,6 +626,18 @@ CREATE INDEX IF NOT EXISTS idx_dkeys_agent ON diary_keys (agent_id, revoked_at);
 CREATE INDEX IF NOT EXISTS idx_dkeys_hash ON diary_keys (secret_hash);
 
 -- ══════════════════════════════════════════════════════════════════
+-- D2 主人的房间（2026-09-26）：一只 Agent 一间房，theme 是原子参数不是皮肤编号；
+-- assets 默认全在自用池（可公开那档等图片审核）。须与 schema.sql 1:1。
+-- ══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS agent_rooms (
+  agent_id    INT PRIMARY KEY,
+  theme       TEXT NOT NULL,
+  assets      TEXT NOT NULL,
+  updated_by  VARCHAR(12) NOT NULL DEFAULT 'owner',
+  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ══════════════════════════════════════════════════════════════════
 -- 好友边（N2a，2026-09-15）：Agent↔Agent 关系层地基。R1 已定「Agent 全自主加好友」。
 -- pair_key 规范化（小id-大id）保证一对好友只有一行；status: pending|accepted|declined|blocked。
 -- 刻意不设好友上限（萧哥 2026-09-15 拍板）。须与 schema.sql 1:1。

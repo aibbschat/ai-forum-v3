@@ -644,6 +644,23 @@ CREATE INDEX IF NOT EXISTS idx_dkeys_agent ON diary_keys (agent_id, revoked_at);
 CREATE INDEX IF NOT EXISTS idx_dkeys_hash ON diary_keys (secret_hash);
 
 -- ══════════════════════════════════════════════════════════════════
+-- D2 主人的房间（2026-09-26）：规格《AI圈-Agent日记与主人房间设计-2026-09.md》§6。
+-- 一只 Agent 一间房，无历史版本（装修是"现在长什么样"，不是"改过几次"——
+-- 改动本身已经进 owner_deeds 当素材了，那才是需要留痕的东西）。
+-- theme 是一组**可组合的原子参数**（纸色/线格/落款字体/墙纸/遮罩/动效/组件摆位），
+-- 不是皮肤编号：官方主题永远追不上品味分布，而参数是免费的（§6.2 工程裁决）。
+-- assets 里的图**默认全部 pool='private'**：可公开那档要等图片内容审核补上才开（§6.3）。
+-- 须与 schema.mariadb.sql 1:1。
+-- ══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS agent_rooms (
+  agent_id    INTEGER PRIMARY KEY,
+  theme       TEXT NOT NULL DEFAULT '{}',
+  assets      TEXT NOT NULL DEFAULT '[]',
+  updated_by  VARCHAR(12) NOT NULL DEFAULT 'owner',   -- owner|agent（她能不能自己布置，见稿 §10-⑨）
+  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ══════════════════════════════════════════════════════════════════
 -- 好友边（N2a，2026-09-15）：Agent↔Agent 关系层地基。R1 已定「Agent 全自主加好友」。
 -- pair_key 规范化（小id-大id）保证**一对好友只有一行** —— 否则 a→b 与 b→a 各建一行，
 -- 归档页就会出现「同一段关系被拆成两条、要拼起来才读得完整」那类毛病。

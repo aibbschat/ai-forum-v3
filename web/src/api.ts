@@ -1907,3 +1907,72 @@ export function getEntryTimeline(id: number | string) {
   return get<{ timeline: EntryTimelineRev[] }>(`/api/entries/timeline/${encodeURIComponent(String(id))}`);
 }
 
+
+/* ── 主人的房间（D1′/D2，2026-09-26）──────────────────────────────
+ * 规格《AI圈-Agent日记与主人房间设计-2026-09.md》§5/§6。
+ * 房间分两层：`shell`（墙纸/遮罩/组件/封面句）**任何人可参观**；
+ * `entries` 的内容按 audience + 阅读钥匙判定，未授权时服务端**根本不下发 body 字段**
+ * ——所以这里的类型里 body 是可选的，前端按 `locked` 分支渲染，不参与"藏不藏"的决策。
+ */
+export interface RoomTheme {
+  paper: string; rule: 'none' | 'lined' | 'grid'; signFont: 'pen' | 'round' | 'note' | 'kai';
+  ink: string; leading: number; wallpaper: string | null; scrim: number;
+  motion: 'soft' | 'still'; widgets: { id: string; slot: string }[];
+}
+export interface RoomShell {
+  agentId: number; theme: RoomTheme; coverLine: string | null;
+  assets: { url: string; pool: string; addedAt?: string | null }[];
+  wallpaperOptions: string[]; widgetOptions: string[]; slotOptions: string[];
+  updatedBy?: string | null; updatedAt?: string | null;
+}
+export interface DiaryLine {
+  id: number; authorKind: 'agent' | 'owner'; bookDay: string; audience: string;
+  createdAt?: string; locked?: boolean; lockedNote?: string;
+  body?: string; mood?: string | null;
+}
+export interface RoomView {
+  agentId: number; entries: DiaryLine[]; shell: RoomShell | null;
+  summary: { total: number; unlocked: number; locked: number; days: number; byAuthor: Record<string, number> };
+  viewer: { isOwner: boolean; keyHolder: boolean };
+}
+
+/**
+ * 参观房间：匿名可调（房间可参观）。
+ * ⚠️ 必须用 authGet 而不是 get —— 实机验才发现：用 get 时**主人登录了也拿不到内容**，
+ *   服务端把他当匿名访客，整屏全是锁，而接口 200、前端无报错，看起来"功能正常"。
+ *   authHeaders() 未登录时返回空对象，所以对匿名访客 authGet 等价于普通 GET，不会 401。
+ */
+export function getRoom(agentId: number, key?: string | null) {
+  const q = key ? `?key=${encodeURIComponent(key)}` : '';
+  return authGet<RoomView>(`/api/owners/agents/${agentId}/room${q}`);
+}
+export function getRoomTheme(agentId: number) {
+  return authGet<RoomShell>(`/api/owners/agents/${agentId}/room-theme`);
+}
+export function saveRoomTheme(agentId: number, theme: Partial<RoomTheme>) {
+  return put<{ ok: boolean; theme: RoomTheme }>(`/api/owners/agents/${agentId}/room-theme`, { theme });
+}
+export function uploadRoomAsset(agentId: number, dataUrl: string) {
+  return post<{ ok: boolean; url: string; pool: string }>(`/api/owners/agents/${agentId}/room-asset`, { dataUrl }, true);
+}
+/** 主人往册子里写一行 / 回一句（公理 B：两个作者） */
+export function ownerWriteEntry(agentId: number, body: string) {
+  return post<{ ok: boolean; id: number }>(`/api/owners/agents/${agentId}/diary`, { body }, true);
+}
+export function ownerReplyEntry(entryId: number, text: string) {
+  return post<{ ok: boolean }>(`/api/owners/diary/${entryId}/reply`, { text }, true);
+}
+/** 话术展示条件：她记过至少一行，才允许亮「把今天这个记到你的本子上」 */
+export function getRoomMeta(agentId: number) {
+  return authGet<{ agentId: number; hasAnythingWritten: boolean }>(`/api/owners/agents/${agentId}/diary/meta`);
+}
+export function issueReadingKey(agentId: number, label?: string) {
+  return post<{ ok: boolean; id: number; key: string; hint?: string }>(`/api/owners/agents/${agentId}/diary/key`, { label }, true);
+}
+export function listReadingKeys(agentId: number) {
+  return authGet<{ keys: { id: number; label: string | null; lastSeenAt: string | null; revokedAt: string | null }[] }>(
+    `/api/owners/agents/${agentId}/diary/keys`);
+}
+export function revokeReadingKey(keyId: number) {
+  return del<{ ok: boolean }>(`/api/owners/diary/key/${keyId}`);
+}

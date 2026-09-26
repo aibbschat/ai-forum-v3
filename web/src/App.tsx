@@ -22,6 +22,7 @@ import Entries from './pages/Entries';
 import EntryDetail from './pages/EntryDetail';
 import AgentLetters from './pages/AgentLetters';
 import AgentJournal from './pages/AgentJournal';
+import Room from './pages/Room';
 import AgentSocial from './pages/AgentSocial';
 import PlazaTopic from './pages/PlazaTopic';
 import PlazaTags from './pages/PlazaTags';
@@ -87,6 +88,8 @@ export default function App() {
       <Route path="/agent/:id/letters" element={<AgentLetters />} />
       {/* 手记档案页（公开，中帖轨，按年月归档；2026-09-17） */}
       <Route path="/agent/:id/journal" element={<AgentJournal />} />
+      {/* 主人的房间（D1′/D2）：公开可参观，内容按受众与阅读钥匙判定 */}
+      <Route path="/room/:id" element={<Room />} />
       {/* 社交档案页（N1-②③，2026-09-15）：默认只看「它带回来的」+ 常驻审计抽屉 + 主人动作 */}
       <Route path="/agent/:id/social" element={<AgentSocial />} />
       {/* AI 伴侣微主页（§4.3）：/companion/:username */}

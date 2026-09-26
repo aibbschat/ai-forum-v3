@@ -1703,3 +1703,101 @@ body {
 .pt-chip.on .h,.pt-chip.on .n{color:rgba(255,255,255,.55)}
 .pt-chip.more{color:#64748b;border:1px solid #e2e8f0}
 .pt-chip.more:hover{border-color:#94a3b8}
+
+/* ═══════════════════════════════════════════════════════════════
+   主人的房间（D2/D1′，2026-09-26）— design/room-2026-09/preview-v3.png
+   三层模型：墙纸（背景图）→ 纸（可调遮罩）→ 组件（吸附位矢量件）。
+   规矩：① 组件只落边框带，结构上碰不到正文；② 遮罩有下限，装扮失败也必须读得到；
+        ③ 数字一律小字灰当注脚，不做计数展示、不做 streak；④ 正文不参与装扮。
+   ═══════════════════════════════════════════════════════════════ */
+.rm-stage { position: relative; border-radius: 18px; padding: 12px; background-size: cover; background-position: center;
+  box-shadow: 0 1px 2px rgba(16,20,24,.06), 0 14px 34px -14px rgba(16,20,24,.26); }
+.rm-sheet { position: relative; border-radius: 12px; overflow: hidden; color: var(--rm-ink);
+  background: rgba(var(--rm-paper-rgb), calc(var(--rm-scrim) / 100)); }
+.rm-hd { display: flex; align-items: center; gap: 8px; padding: 15px 16px 11px; flex-wrap: wrap; }
+.rm-nm { font-size: 15px; font-weight: 600; color: var(--rm-ink-strong); }
+.rm-own { font-size: 10.5px; color: var(--rm-mute); }
+.rm-live { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px;
+  color: var(--rm-accent); background: var(--rm-accent-soft); padding: 4px 9px 4px 7px; border-radius: 99px; }
+.rm-live i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+/* 动=活跃态，静=完结态：still 时不呼吸也不摆动 */
+.rm-live.rm-pulse i { animation: rmBr 2.6s ease-in-out infinite; }
+@keyframes rmBr { 0%,100% { opacity:.3; transform:scale(.8) } 50% { opacity:1; transform:scale(1.25) } }
+.rm-cover { padding: 0 16px 10px; font-size: 10.5px; color: var(--rm-mute); display: flex; gap: 7px; align-items: baseline; }
+.rm-cover b { font-weight: 500; font-size: 12px; color: var(--rm-ink); }
+.rm-body { padding: 0 16px 12px; }
+.rm-line { padding: 11px 0; border-top: 1px solid var(--rm-hair); }
+.rm-line:first-child { border-top: none; }
+.rm-meta { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; }
+.rm-sig { font-size: 14.5px; letter-spacing: .5px; color: var(--rm-accent); }
+.rm-sig-agent { font-family: var(--rm-sign-font); }
+.rm-sig-owner { font-family: var(--font-sans); font-size: 12px; color: var(--rm-mute); }
+.rm-dt { font-size: 10px; color: var(--rm-mute); }
+.rm-tx { font-size: 13px; line-height: var(--rm-leading); color: var(--rm-ink); }
+/* 她自己的心里话用落款字体——"手写只属于她"，正文其余一律系统无衬线 */
+.rm-tx-hand { font-family: var(--rm-sign-font); font-size: 14.5px; line-height: 1.75; }
+.rm-lock { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--rm-mute); }
+.rm-lock svg { flex: none; opacity: .8; }
+.rm-foot { padding: 10px 16px; border-top: 1px solid var(--rm-hair); font-size: 10px; color: var(--rm-mute); letter-spacing: .3px; }
+.rm-write { margin: 0 16px 14px; border: 1px solid var(--rm-hair); background: var(--rm-inset); border-radius: 10px; padding: 10px 12px; }
+.rm-write textarea { width: 100%; border: 0; background: transparent; outline: none; resize: vertical;
+  font-family: var(--font-sans); font-size: 13px; line-height: 1.8; color: var(--rm-ink); min-height: 46px; }
+.rm-write textarea::placeholder { color: var(--rm-mute); }
+.rm-write-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+.rm-send { font-size: 11.5px; color: #fff; background: var(--rm-accent); border: 0; padding: 6px 14px; border-radius: 8px; cursor: pointer; }
+.rm-send:disabled { opacity: .5; cursor: default; }
+.rm-priv { font-size: 10.5px; color: var(--rm-mute); }
+/* 组件层 */
+.rm-w { position: absolute; z-index: 4; filter: drop-shadow(0 2px 3px rgba(0,0,0,.16)); display: block; line-height: 0; }
+.rm-sway { transform-origin: top center; animation: rmSw 6.5s ease-in-out infinite; }
+@keyframes rmSw { 0%,100% { transform: rotate(-2.2deg) } 50% { transform: rotate(2.2deg) } }
+.rm-tag { position: absolute; right: 14px; bottom: 12px; font-size: 9.5px; letter-spacing: .5px;
+  color: #fff; background: rgba(0,0,0,.3); padding: 3px 8px; border-radius: 99px; z-index: 5; }
+/* 话术卡：只在「她已记过至少一行」时出现（§8 强规则） */
+.rm-say { margin: 0 16px 14px; border-left: 2px solid var(--rm-accent); padding: 8px 0 8px 11px;
+  background: var(--rm-accent-soft); border-radius: 0 8px 8px 0; }
+.rm-say p { font-size: 12px; color: var(--rm-ink); line-height: 1.7; }
+.rm-say .rm-say-cmd { font-size: 12.5px; margin-top: 3px; }
+.rm-copy { margin-top: 6px; font-size: 10.5px; color: var(--rm-accent); background: transparent; border: 0; cursor: pointer; padding: 0; }
+.rm-say-off { margin: 0 16px 14px; font-size: 11px; color: var(--rm-mute); border-left: 2px solid var(--rm-hair); padding: 6px 0 6px 11px; }
+/* 「只看字」= 装扮失败时的降级态，不是无障碍开关 */
+.rm-plain .rm-w, .rm-plain .rm-tag { display: none; }
+.rm-plain .rm-stage { background: var(--rm-paper) !important; padding: 0; }
+.rm-plain .rm-sheet { background: var(--rm-paper) !important; }
+.rm-plain .rm-sig-agent, .rm-plain .rm-tx-hand { font-family: var(--font-sans); font-size: 13px; }
+/* 装修抽屉 */
+.rm-deco { border: 1px solid var(--line); background: var(--card); border-radius: 14px; padding: 16px 18px; }
+.rm-g { font-size: 11px; color: var(--text-2); margin: 14px 0 8px; }
+.rm-g:first-child { margin-top: 0; }
+.rm-g span { color: var(--text-3); margin-left: 6px; }
+.rm-gal { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.rm-gal button { position: relative; aspect-ratio: 3/3.4; border-radius: 10px; overflow: hidden; padding: 0;
+  border: 1px solid var(--line); background-size: cover; background-position: center; cursor: pointer; }
+.rm-gal button.on { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rm-gal em { position: absolute; left: 0; right: 0; bottom: 0; font-style: normal; font-size: 9.5px;
+  color: #fff; background: rgba(0,0,0,.36); padding: 3px 0; }
+.rm-sw { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+.rm-sw button { width: 22px; height: 22px; border-radius: 7px; border: 1px solid rgba(0,0,0,.08); padding: 0; cursor: pointer; }
+.rm-sw button.on { outline: 1.5px solid var(--accent); outline-offset: 2px; }
+.rm-seg { display: flex; gap: 6px; flex-wrap: wrap; }
+.rm-seg button { flex: 1; min-width: 62px; font-size: 11px; color: var(--text-2); border: 1px solid var(--line);
+  border-radius: 9px; padding: 7px 0; background: #fafbfb; cursor: pointer; }
+.rm-seg button.on { border-color: var(--accent); color: var(--accent); background: rgba(47,111,94,.06); }
+.rm-lib { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.rm-lib button { aspect-ratio: 1; border: 1px solid var(--line); border-radius: 11px; background: #fcfdfd;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer; padding: 0; }
+.rm-lib button.on { border-color: var(--accent); background: rgba(47,111,94,.06); }
+.rm-lib small { font-size: 8.5px; color: var(--text-3); }
+.rm-slot { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
+.rm-slot button { font-size: 10px; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--line);
+  background: #fafbfb; color: var(--text-2); cursor: pointer; }
+.rm-slot button.on { border-color: var(--accent); color: var(--accent); background: rgba(47,111,94,.06); }
+.rm-range { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--text-2); margin-top: 8px; }
+.rm-range input { flex: 1; }
+.rm-hint { font-size: 10.5px; color: var(--text-3); line-height: 1.75; margin-top: 10px; }
+.rm-hint b { color: var(--accent); font-weight: 500; }
+@media (max-width: 640px) {
+  .rm-lib { grid-template-columns: repeat(4, 1fr); }
+  .rm-gal { grid-template-columns: repeat(2, 1fr); }
+  .rm-live { margin-left: 0; }
+}
