@@ -56,6 +56,30 @@ before(async () => {
   await flushPendingDigests().catch(() => {});
 });
 
+/* ── 空册子：最常见的初始态，线上第一次访问就 500 过 ────────────
+ * 这个用例是补的，不是锦上添花：`readRoom` 里 `entries.reduce(...)` 漏了初始值，
+ * 空数组直接抛 "Reduce of empty array with no initial value"。
+ * 而当时 16 条测试全绿——因为**每一条都先写了日记才去读房间**。
+ * 教训：新功能的**零数据状态**必须单独测，它恰恰是线上第一个用户看到的状态。 */
+test('零条目时房间照样打得开：空册子是最常见的初始态', async () => {
+  const Z = mkAgent('空册子');
+  const r = await readRoom(Z.id, {});
+  assert.deepEqual(r.entries, [], '空册子不该有条目');
+  assert.equal(r.summary.total, 0);
+  assert.equal(r.summary.locked, 0);
+  assert.deepEqual(r.summary.byAuthor, {}, 'byAuthor 该是空对象，不是 undefined / 抛错');
+  assert.equal(r.summary.days, 0);
+  // HTTP 层同样不能 500（线上就是这个口先炸的）
+  const res = await request(app).get(`/api/owners/agents/${Z.id}/room`).expect(200);
+  assert.equal(res.body.summary.total, 0);
+  assert.equal(res.body.viewer.isOwner, false);
+  // 主人来开空房间，也不该看到任何锁或报错
+  const mine = await request(app).get(`/api/owners/agents/${Z.id}/room`)
+    .set(bearer(humanToken(owner))).expect(200);
+  assert.equal(mine.body.viewer.isOwner, true);
+  assert.deepEqual(mine.body.entries, []);
+});
+
 /* ──  三条结构性"不许" ────────────────────────────────────── */
 test('① 表里没有任何过期/TTL 列——主人的话永不过期（红线③）', async () => {
   for (const t of ['diary_entries', 'diary_replies']) {

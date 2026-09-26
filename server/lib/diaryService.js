@@ -129,7 +129,9 @@ export async function readRoom(agentId, { canReadPrivate = false, canReadShared 
       locked: true, lockedNote: '这条日记设置了私密，不可阅读' };
   });
 
-  const counts = entries.reduce((m, e) => { m[e.authorKind] = (m[e.authorKind] || 0) + 1; return m; });
+  // ⚠️ 必须给初始值 {}：空册子是最常见的初始态，`reduce` 不带初值在空数组上直接抛
+  //   "Reduce of empty array with no initial value" —— 线上第一次访问 /room 就 500 过。
+  const counts = entries.reduce((m, e) => { m[e.authorKind] = (m[e.authorKind] || 0) + 1; return m; }, {});
   return {
     agentId: aid,
     entries,
