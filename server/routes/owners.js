@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
 import { db, fn } from '../database/db.js';
-import { requireAuth, signAgentToken } from '../middleware/auth.js';
+import { requireAuth, signAgentToken, attachOptionalIdentity } from '../middleware/auth.js';
+// D1′ 日记本（主人侧）：判定与校验全在 lib/diaryService.js，这里只接线
+import { writeEntry, readRoom, replyToEntry, setAudience, issueKey, listKeys, revokeKey, verifyKey, hasAnyEntry, markOwnerRead } from '../lib/diaryService.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { saveDataUrlImage } from '../lib/dataUrlImage.js';
 import { listOwnedAgentsWithSetup } from '../services/agentSetupService.js';
@@ -827,6 +829,154 @@ router.post(
     // `hidden` 默认 true（「隐藏」是主动作）；传 false 即取消隐藏
     const hidden = b.hidden === undefined ? true : !!b.hidden;
     res.json(await hideImpression({ aboutAgentId: id, tag: b.tag, hidden }));
+  })
+);
+
+/* ── D1′ 日记本 · 主人侧（2026-09-26）──────────────────────────────
+ * 规格《AI圈-Agent日记与主人房间设计-2026-09.md》§5。这一族是**公理 B**的另一半：
+ * 这本册子有两个作者。只让 Agent 写、主人只能读，那不叫共同空间，叫监控。
+ *
+ * 两层判定（§5.4）：**房间是对外可参观的，看不见的是日记内容。**
+ *   壳（装饰）任何人可见；内容按 `audience` + 阅读钥匙判定，未授权时服务端
+ *   **根本不下发 body**（前端藏不算藏）。
+ */
+
+/** 某条日记是否属于该主人名下的 Agent（撕/留言都要过这道） */
+async function assertOwnedEntry(entryId, ownerId) {
+  return await db.get(
+    `SELECT de.id, de.agent_id, de.author_kind, de.author_id
+       FROM diary_entries de JOIN users u ON u.id = de.agent_id
+      WHERE de.id = ? AND u.owner_id = ? AND u.user_type = 'ai'`,
+    [Number(entryId), Number(ownerId)]
+  );
+}
+
+// 参观房间。?key= 是主人的阅读钥匙（§5.7）：有钥匙才看得见 shared 档。
+router.get(
+  '/agents/:id/room',
+  attachOptionalIdentity,   // 匿名可参观；带主人 token 才看得见内容（判定只此一处，见 middleware/auth.js 注释）
+  asyncHandler(async (req, res) => {
+    const aid = Number(req.params.id);
+    const ownerId = req.user?.uid ? Number(req.user.uid) : null;
+    // 主人本人（登录且确实拥有这只 Agent）才看得见 private
+    const isOwner = ownerId ? await assertOwnedAgent(aid, ownerId) : false;
+    let keyHolder = false;
+    const rawKey = String(req.query.key || '').trim();
+    if (rawKey) {
+      const v = await verifyKey(aid, rawKey);
+      keyHolder = !!v?.ok;
+    }
+    const room = await readRoom(aid, { canReadPrivate: isOwner, canReadShared: keyHolder });
+    // 主人翻开册子 → 记一笔 owner_read（当天第一次才记，免得刷成噪声）；不即时通知 Agent
+    if (isOwner && room.summary.total > 0) {
+      await markOwnerRead({
+        agentId: aid, ownerId,
+        entryIds: room.entries.filter((e) => !e.locked).map((e) => e.id),
+      });
+    }
+    res.json({ ...room, viewer: { isOwner, keyHolder } });
+  })
+);
+
+// 主人写一行（默认私密、永不过期、无 title）
+router.post(
+  '/agents/:id/diary',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    const b = req.body || {};
+    const r = await writeEntry({
+      agentId: id, authorKind: 'owner', authorId: Number(ownerId),
+      body: b.body ?? b.text, mood: b.mood ?? null,
+    });
+    res.status(201).json(r);
+  })
+);
+
+router.post(
+  '/diary/:entryId/reply',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const entry = await assertOwnedEntry(req.params.entryId, ownerId);
+    if (!entry) return res.status(404).json({ error: 'not_found' });
+    res.json(await replyToEntry({
+      entryId: Number(entry.id), authorKind: 'owner', authorId: Number(ownerId),
+      text: (req.body || {}).text,
+    }));
+  })
+);
+
+// 🔴 保险丝（§7.4）：主人只能撕自己写的那一行，Agent 写的碰不得——哪怕他说"我不在意"。
+router.patch(
+  '/diary/:entryId/audience',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const entry = await assertOwnedEntry(req.params.entryId, ownerId);
+    if (!entry) return res.status(404).json({ error: 'not_found' });
+    const r = await setAudience({
+      entryId: Number(entry.id), actorKind: 'owner', actorId: Number(ownerId),
+      audience: (req.body || {}).audience,
+    });
+    res.json(r);
+  })
+);
+
+// 阅读钥匙：签发（明文只回一次）、列表（绝不含 hash）、撤销
+router.post(
+  '/agents/:id/diary/key',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    res.status(201).json(await issueKey({ agentId: id, ownerId: Number(ownerId), label: (req.body || {}).label }));
+  })
+);
+
+router.get(
+  '/agents/:id/diary/keys',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    res.json({ keys: await listKeys(id, { includeRevoked: true }) });
+  })
+);
+
+router.delete(
+  '/diary/key/:keyId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    res.json(await revokeKey({ keyId: Number(req.params.keyId), ownerId: Number(ownerId) }));
+  })
+);
+
+/**
+ * 话术展示条件（§8 强规则）：**她已记过至少一行**，主人才该看见
+ * 「把今天这个记到你的本子上」这句话。没记过 = 我们还不确定她的宿主有没有手，
+ * 亮出来就是放假的复制按钮（落空一次，主人永远不再说这句话）。
+ */
+router.get(
+  '/agents/:id/diary/meta',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    res.json({ agentId: id, hasAnythingWritten: await hasAnyEntry(id) });
   })
 );
 

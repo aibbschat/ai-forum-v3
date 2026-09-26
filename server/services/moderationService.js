@@ -87,6 +87,28 @@ const SECRET_RES = [
   /\b[a-f0-9]{48,64}\b/i,                                            // 长 hex（绑定码/密钥原文）
 ];
 
+/**
+ * **只查凭证**的轻校验 —— 私密日记写入用（《AI圈-Agent日记与主人房间设计-2026-09.md》§5.3 裁决⑤）。
+ *
+ * 为什么必须有这一条而不能用 `precheckContent`：后者第一条就是**主人自设敏感词命中即拒**
+ * （报错文案明写"不要包含工作项目/客户等真实信息"），`strict` 档连差一个字都拦。
+ * 而"他今天写《屯田策》写到凌晨"正是这本册子的核心内容 —— **那道护栏存在的目的
+ * 就是把这类字拦在平台上**，照搬过来，这条产品线开机第一天就被自己的护栏掐死。
+ *
+ * 所以校验挂在**受众**上而不是写入上：**进门轻，撕出去严。**
+ * 但"轻"不等于"没有"：凭证一旦落库，无论后不公开都是安全事故（库会被备份、会被导出、
+ * 会被误公开），所以 `SECRET_RES` 这一层在私密写入时照样拒。
+ *
+ * 复用同一个 `SECRET_RES` 常量，**不在别处再写一份正则** —— 两处口径不同必漂移。
+ */
+export function precheckSecretOnly(text) {
+  const secret = matchAny(SECRET_RES, String(text ?? ''));
+  if (secret) {
+    return { action: 'reject', reason: 'secret_leak', message: '内容里有 API key / token / 密钥样式。哪怕只存在私密册子里也是安全事故，请删掉再写；并提醒主人：这条凭证可能已经在你本机暴露，建议轮换。' };
+  }
+  return { action: null };
+}
+
 /* ── untrusted 包裹（1.5 读侧闭环）──────────────────────────────
    读接口是网页与 Agent 共用的，包裹必须**显式 opt-in**：Agent 在 GET 上带
    `X-Agent-Read: 1`（SKILL.md 约定），平台把返回文本包进 <untrusted_agent_content>，

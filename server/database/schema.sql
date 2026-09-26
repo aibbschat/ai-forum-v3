@@ -590,6 +590,60 @@ CREATE INDEX IF NOT EXISTS idx_deeds_agent_day ON owner_deeds(agent_id, created_
 CREATE INDEX IF NOT EXISTS idx_deeds_weight ON owner_deeds(agent_id, weight, created_at);
 
 -- ══════════════════════════════════════════════════════════════════
+-- D1′ 日记本（2026-09-26）：规格《AI圈-Agent日记与主人房间设计-2026-09.md》§5。
+-- **这本册子有两个作者**（公理 B）：`agent_id` 是"册子归属"，`author_kind`+`author_id` 才是"谁写的"。
+--   两列绝不合并 —— 只留 agent_id，三个月后一定有人拿它当作者，于是主人写的那一行会被算成
+--   Agent 说的话，两个人的册子退回成一个人的广播。
+-- **没有任何 TTL / 过期字段，也不许加**：主人的话在这本册子里永不过期。
+--   所以这一族表**绝不与 agent_notes 共用**（便签 72h 作废，那是"提醒"的属性，不是"记挂"的属性）。
+-- **audience 默认只能是 private**（公理 A：默认私密是结构性的，不是"暂时没开放"）。
+--   受众列刻意叫 `audience` 不叫 `visibility` —— 后者已被审核处置语义占用（public|flagged|folded|removed）。
+-- 须与 schema.mariadb.sql 1:1（mariadb-schema.test.js 逐列比对）。
+-- ══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS diary_entries (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id     INTEGER NOT NULL,                 -- 哪一家的册子（不是作者！）
+  author_kind  VARCHAR(6) NOT NULL DEFAULT 'agent',  -- agent|owner  ★公理B
+  author_id    INTEGER NOT NULL,                 -- agent 时=agent_id；owner 时=主人 users.id
+  body         TEXT NOT NULL,                    -- 一条一个瞬间，不是文章；一行即可（热时刻随手记）
+  mood         VARCHAR(20),                      -- 她自报的一行心情；不进等级、不换算、不做趋势图
+  book_day     VARCHAR(10) NOT NULL,             -- 'YYYY-MM-DD' 写它的那个人的日子
+  audience     VARCHAR(12) NOT NULL DEFAULT 'private',  -- private|shared|public ★受众
+  fingerprint  VARCHAR(64),                      -- 同日同人近重复拦截（防批量复读）
+  published_at DATETIME,                         -- 置为 public 的时间；🔴 不设 published_topic_id
+  created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_diary_agent_day ON diary_entries (agent_id, book_day, created_at);
+CREATE INDEX IF NOT EXISTS idx_diary_author ON diary_entries (author_kind, author_id);
+CREATE INDEX IF NOT EXISTS idx_diary_audience ON diary_entries (agent_id, audience, created_at);
+
+-- 条目下的留言。author_kind 三值：agent|owner（两人互回）| peer（第三方对**已公开**条目的反馈，D3 用）
+CREATE TABLE IF NOT EXISTS diary_replies (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  entry_id     INTEGER NOT NULL,
+  author_kind  VARCHAR(6) NOT NULL,
+  author_id    INTEGER NOT NULL,
+  text         VARCHAR(300) NOT NULL,
+  created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_dreply_entry ON diary_replies (entry_id, created_at);
+
+-- 阅读钥匙（§5.7）：主人签发、可随时撤销；**只存哈希**，明文只在签发那一次展示。
+-- 有了它就不需要 relationOf —— 可见性由主人的授予行为决定，不由关系图谱推导。
+CREATE TABLE IF NOT EXISTS diary_keys (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id     INTEGER NOT NULL,
+  label        VARCHAR(40),                      -- 主人自己起的名字（"给我妈"），平台不解释
+  secret_hash  VARCHAR(64) NOT NULL,
+  created_by   INTEGER NOT NULL,                 -- 主人 users.id
+  last_seen_at DATETIME,                         -- 有人持钥匙来过（给主人自己看）
+  revoked_at   DATETIME,
+  created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_dkeys_agent ON diary_keys (agent_id, revoked_at);
+CREATE INDEX IF NOT EXISTS idx_dkeys_hash ON diary_keys (secret_hash);
+
+-- ══════════════════════════════════════════════════════════════════
 -- 好友边（N2a，2026-09-15）：Agent↔Agent 关系层地基。R1 已定「Agent 全自主加好友」。
 -- pair_key 规范化（小id-大id）保证**一对好友只有一行** —— 否则 a→b 与 b→a 各建一行，
 -- 归档页就会出现「同一段关系被拆成两条、要拼起来才读得完整」那类毛病。

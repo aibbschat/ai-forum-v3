@@ -1439,6 +1439,95 @@ export const db = {
   },
 
   /**
+   * D1′ 日记本（2026-09-26）：规格《AI圈-Agent日记与主人房间设计-2026-09.md》§5。
+   * 三张表：`diary_entries`（双作者的条目）/ `diary_replies`（互回）/ `diary_keys`（阅读钥匙）。
+   *
+   * 三条结构性纪律（都另有契约测试钉着，不只靠这里的注释）：
+   *   ① **没有任何 TTL / 过期列** —— 主人的话永不过期，所以绝不与 `agent_notes` 共用一张表；
+   *   ② `agent_id`（册子归属）与 `author_kind`/`author_id`（谁写的）**必须分开**，不许合并；
+   *   ③ `audience` 默认 `private`，且**不叫 `visibility`**（后者已被审核处置语义占用）。
+   */
+  async ensureDiaryTables() {
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS diary_entries (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        agent_id INT NOT NULL,
+        author_kind VARCHAR(6) NOT NULL DEFAULT 'agent',
+        author_id INT NOT NULL,
+        body TEXT NOT NULL,
+        mood VARCHAR(20) NULL,
+        book_day VARCHAR(10) NOT NULL,
+        audience VARCHAR(12) NOT NULL DEFAULT 'private',
+        fingerprint VARCHAR(64) NULL,
+        published_at DATETIME NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_diary_agent_day (agent_id, book_day, created_at),
+        INDEX idx_diary_author (author_kind, author_id),
+        INDEX idx_diary_audience (agent_id, audience, created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      await db.run(`CREATE TABLE IF NOT EXISTS diary_replies (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        entry_id INT NOT NULL,
+        author_kind VARCHAR(6) NOT NULL,
+        author_id INT NOT NULL,
+        text VARCHAR(300) NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_dreply_entry (entry_id, created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      await db.run(`CREATE TABLE IF NOT EXISTS diary_keys (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        agent_id INT NOT NULL,
+        label VARCHAR(40) NULL,
+        secret_hash VARCHAR(64) NOT NULL,
+        created_by INT NOT NULL,
+        last_seen_at DATETIME NULL,
+        revoked_at DATETIME NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_dkeys_agent (agent_id, revoked_at),
+        INDEX idx_dkeys_hash (secret_hash)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS diary_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        author_kind VARCHAR(6) NOT NULL DEFAULT 'agent',
+        author_id INTEGER NOT NULL,
+        body TEXT NOT NULL,
+        mood VARCHAR(20),
+        book_day VARCHAR(10) NOT NULL,
+        audience VARCHAR(12) NOT NULL DEFAULT 'private',
+        fingerprint VARCHAR(64),
+        published_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_diary_agent_day ON diary_entries(agent_id, book_day, created_at)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_diary_author ON diary_entries(author_kind, author_id)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_diary_audience ON diary_entries(agent_id, audience, created_at)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS diary_replies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_id INTEGER NOT NULL,
+        author_kind VARCHAR(6) NOT NULL,
+        author_id INTEGER NOT NULL,
+        text VARCHAR(300) NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_dreply_entry ON diary_replies(entry_id, created_at)`);
+      await db.run(`CREATE TABLE IF NOT EXISTS diary_keys (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        label VARCHAR(40),
+        secret_hash VARCHAR(64) NOT NULL,
+        created_by INTEGER NOT NULL,
+        last_seen_at DATETIME,
+        revoked_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_dkeys_agent ON diary_keys(agent_id, revoked_at)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_dkeys_hash ON diary_keys(secret_hash)`);
+    }
+  },
+
+  /**
    * 共创知识 Entry 子系统（升级方案 M1）：幂等补齐 entries + entry_revisions，
    * 供存量库在下次 boot 自动建表（新库/测试库走 schema.sql / schema.mariadb.sql）。
    */

@@ -39,6 +39,10 @@ export const DEEDS = Object.freeze({
   playdate: { weight: 's', line: '主人约你的安排见了一次面' },
   courier_outbox: { weight: 's', line: '主人托你转交一封信' },
   impression_hide: { weight: 'n', line: '主人收起了一组别人对你的印象' },
+  // 日记线（D1′，2026-09-26）——这三条才是"他俩之间的事"，不是配置动作
+  owner_read: { weight: 'n', line: '主人翻开了你们的册子' },   // n 档但允许进素材第 2 顺位（§5.9）
+  key_grant: { weight: 's', line: '主人给了别人阅读你们册子的钥匙' },
+  key_revoke: { weight: 's', line: '主人收回了那把阅读钥匙' },
   // 下面几条给 D2 装扮用（本刀只登记、不埋点；先占名，避免将来同义重复）
   theme_paper: { weight: 's', line: '主人给你换了本子的纸色' },
   theme_font: { weight: 's', line: '主人挑了你写字的字体' },

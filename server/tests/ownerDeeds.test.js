@@ -166,7 +166,8 @@ test('④ 渲染自守 RENDER_MAX，超长整行丢弃不出半截；n 类不进
   }
   const model = await buildDeedDigest(F.id);
   assert.ok(model, '有 r/s 动作就该发');
-  assert.ok(model.lines.length <= 6, `正文行了 ${model.lines.length} 条，越出 LINE_MAX`);
+  const bodyLines = [...model.ownerLines, ...(model.readLine ? [model.readLine] : []), ...model.deedLines];
+  assert.ok(bodyLines.length <= 6, `正文行了 ${bodyLines.length} 条，越出 LINE_MAX`);
   const text = renderDeedDigest(model);
   assert.ok(text.length <= RENDER_MAX, `渲染 ${text.length} 字，越出 ${RENDER_MAX}`);
   for (const line of text.split('\n').slice(1)) {
@@ -174,8 +175,9 @@ test('④ 渲染自守 RENDER_MAX，超长整行丢弃不出半截；n 类不进
   }
   assert.ok(text.includes('▸'), '正文行要用 ▸ 起头（与圈内纪事同一视觉语言）');
   // 每个 deed 只留一条（一周改三次昵称，报一次就够）
-  const kinds = model.lines.map((l) => l.id);
-  assert.equal(new Set(kinds).size, kinds.length, '同一 deed 报了多行');
+  const ids = bodyLines.flatMap((l) => l.ids || []);
+  assert.equal(new Set(ids).size, ids.length, '同一 deed 报了多行');
+  assert.ok(model.ids.length >= ids.length, 'ids 应覆盖报过的行为账 id（下一份据此不复读）');
 });
 
 test('④ 一天硬一封 + 已报过的不复读（低活 Agent 的回看窗口会反复捞到旧行）', async () => {

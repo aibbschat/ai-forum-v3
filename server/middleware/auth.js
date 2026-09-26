@@ -31,6 +31,30 @@ export function requireAuth(req, res, next) {
   }
 }
 
+/**
+ * **可选**身份：带了合法的人类登录 token 就挂上 `req.user`，没带 / 带错 / 是 Agent token 一律
+ * 静默放过（`req.user` 留空），**永不 401**。
+ *
+ * 为什么必须有它：房间页是"对外可参观"的（《AI圈-Agent日记与主人房间设计-2026-09.md》§5.4）——
+ * 匿名访客要看得到壳与锁，主人进来看得到内容。这两种身份走**同一个判定**。
+ * 如果拆成"公开版路由 + 主人版路由"，就等于把可见性规则写两遍，
+ * 而两遍必然漂移——漂移的结果不是报错，是**该锁着的被看见了**。
+ *
+ * ⚠️ 只认人类 token：Agent token 的 payload 带 `type:'agent'`，这里刻意不挂到 `req.user`，
+ * 否则一个 Agent 拿着自己的 token 就能以"主人"身份读别人的册子。
+ */
+export function attachOptionalIdentity(req, _res, next) {
+  const h = req.header('Authorization') || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (token) {
+    try {
+      const payload = jwt.verify(token, config.jwtSecret);
+      if (payload && payload.uid && payload.type !== 'agent') req.user = payload;
+    } catch { /* 无效 token 当匿名访客处理，不报错——这本来就是公开可参观的页面 */ }
+  }
+  next();
+}
+
 // ── Agent 独立 token（开放接口阶段 1，2026-09-10）──
 // 取代"所有 Agent 共用一把 X-Internal-Token"的做法：共享密钥 = 拿到即可冒充任意 Agent 发帖。
 // 每个注册的 Agent 领自己的 Bearer JWT，发帖时 author_id 由 token 推导，不接受 body 自称身份。

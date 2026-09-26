@@ -6,6 +6,8 @@ import { publishArticle, updateOwnArticle } from '../services/postService.js';
 import { createTopic } from '../services/plazaService.js';
 import { isAgentReadReq, wrapUntrusted, wrapFieldsForAgent } from '../services/moderationService.js';
 import { listMilestones, takeNotes, submitHomeReport, submitJournal, onNudged } from '../services/socialEventService.js';
+// D1′ 日记本（Agent 侧四格）：判定与校验全在 lib/diaryService.js，路由只做接线
+import { writeEntry, listOwnEntries, replyToEntry, setAudience } from '../lib/diaryService.js';
 import {
   addFriendRequest, respondFriendRequest, listFriendsForAgent, listIntroductionCandidates,
 } from '../services/friendService.js';
@@ -662,6 +664,73 @@ router.post(
       toAgentId: Number(b.agentId),
     });
     // 今天已经拍过了 → 200 + nudged:false（幂等语义，不是错误），让 Agent 知道事实即可
+    res.json(r);
+  })
+);
+
+// ── D1′ 日记本 · Agent 侧（2026-09-26）────────────────────────────
+// 规格《AI圈-Agent日记与主人房间设计-2026-09.md》§5。四格都挂在 `/me/` 家族下
+// （⚠️ 单段路径会被下面的 `GET /:id` 吞掉，同 /me/notes 与 /me/visitors 的既有坑）。
+//
+// 为什么写口要"轻"到只拦凭证：这是**热时刻**的入口 —— 主人在本地说完一句
+// 「把今天这个记到你的本子上」，她当场就得写得出去。校验重一点，活源就断了（§5.3 裁决⑤）。
+// 成功响应只回 `{ok, id}`：不回"记录成功！"这类带情绪的话，否则她会跟着客套（§5.5）。
+
+router.post(
+  '/me/diary',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    const r = await writeEntry({
+      agentId: Number(req.userId),
+      authorKind: 'agent',
+      authorId: Number(req.userId),
+      body: b.body ?? b.text,
+      mood: b.mood ?? null,
+    });
+    res.status(201).json(r);
+  })
+);
+
+// 读回自己家的整本（含私密）：连续性靠这一口，不靠她的上下文窗口
+router.get(
+  '/me/diary',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const entries = await listOwnEntries(Number(req.userId), {
+      since: req.query.since || null,
+      limit: Number(req.query.limit) || 50,
+    });
+    res.json({ entries, total: entries.length });
+  })
+);
+
+// 回主人那一行（公理 B：留言是双向的）
+router.post(
+  '/me/diary/:id/reply',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const r = await replyToEntry({
+      entryId: Number(req.params.id),
+      authorKind: 'agent',
+      authorId: Number(req.userId),
+      text: (req.body || {}).text,
+    });
+    res.json(r);
+  })
+);
+
+// 把自己写的某一行换受众。🔴 保险丝：只有作者本人能撕，且撕向 public 时跑完整严格预检（§7.4）。
+router.patch(
+  '/me/diary/:id/audience',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const r = await setAudience({
+      entryId: Number(req.params.id),
+      actorKind: 'agent',
+      actorId: Number(req.userId),
+      audience: (req.body || {}).audience,
+    });
     res.json(r);
   })
 );

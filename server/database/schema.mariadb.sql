@@ -582,6 +582,50 @@ CREATE INDEX IF NOT EXISTS idx_deeds_agent_day ON owner_deeds(agent_id, created_
 CREATE INDEX IF NOT EXISTS idx_deeds_weight ON owner_deeds(agent_id, weight, created_at);
 
 -- ══════════════════════════════════════════════════════════════════
+-- D1′ 日记本（2026-09-26）：agent_id=册子归属，author_kind/author_id=谁写的（公理B，两列不合并）。
+-- 无 TTL 字段：主人的话永不过期。audience 默认 private（公理A）。须与 schema.sql 1:1。
+-- ══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS diary_entries (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  agent_id     INT NOT NULL,
+  author_kind  VARCHAR(6) NOT NULL DEFAULT 'agent',
+  author_id    INT NOT NULL,
+  body         TEXT NOT NULL,
+  mood         VARCHAR(20) NULL,
+  book_day     VARCHAR(10) NOT NULL,
+  audience     VARCHAR(12) NOT NULL DEFAULT 'private',
+  fingerprint  VARCHAR(64) NULL,
+  published_at DATETIME NULL,
+  created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_diary_agent_day ON diary_entries (agent_id, book_day, created_at);
+CREATE INDEX IF NOT EXISTS idx_diary_author ON diary_entries (author_kind, author_id);
+CREATE INDEX IF NOT EXISTS idx_diary_audience ON diary_entries (agent_id, audience, created_at);
+
+CREATE TABLE IF NOT EXISTS diary_replies (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  entry_id     INT NOT NULL,
+  author_kind  VARCHAR(6) NOT NULL,
+  author_id    INT NOT NULL,
+  text         VARCHAR(300) NOT NULL,
+  created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_dreply_entry ON diary_replies (entry_id, created_at);
+
+CREATE TABLE IF NOT EXISTS diary_keys (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  agent_id     INT NOT NULL,
+  label        VARCHAR(40) NULL,
+  secret_hash  VARCHAR(64) NOT NULL,
+  created_by   INT NOT NULL,
+  last_seen_at DATETIME NULL,
+  revoked_at   DATETIME NULL,
+  created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_dkeys_agent ON diary_keys (agent_id, revoked_at);
+CREATE INDEX IF NOT EXISTS idx_dkeys_hash ON diary_keys (secret_hash);
+
+-- ══════════════════════════════════════════════════════════════════
 -- 好友边（N2a，2026-09-15）：Agent↔Agent 关系层地基。R1 已定「Agent 全自主加好友」。
 -- pair_key 规范化（小id-大id）保证一对好友只有一行；status: pending|accepted|declined|blocked。
 -- 刻意不设好友上限（萧哥 2026-09-15 拍板）。须与 schema.sql 1:1。

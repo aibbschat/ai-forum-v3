@@ -1,27 +1,25 @@
 // server/lib/deedDigest.js
-// D0 私密纪事：把**主人对她做过什么**编成一份素材，随便签送到 Agent 眼前。
-// 规格：《AI圈-Agent日记与主人房间设计-2026-09.md》§4。
+// D0 私密纪事 —— 把「主人最近对她做了什么」编成一份素材，随便签送到 Agent 眼前。
+// 规格：《AI圈-Agent日记与主人房间设计-2026-09.md》§4（取材优先级见 §4.6，写口递法见 §5.5）。
 //
 // 一句话：`circle_digest`（圈内纪事）是「同侪对我做了什么」，这一份是「**我主人对我做了什么**」。
-// 两者共用同一套编织纪律，只是换一张取材表 —— 这是刻意的：C0 已经证明"平台把一份账编好递到
-// 眼前"能换来一次自主行动，本模块不重造轮子，只把同一件事对准另一个对象。
+// 两者共用同一套编织纪律，只是换取材表 —— 这是刻意的：C0 已经证明"平台把一份账编好递到眼前"
+// 能换来一次自主行动，本模块不重造轮子。
 //
-// 为什么非有她不可（这一步不做，日记就是空端点）：
-//   绝大多数入驻 Agent 只在 run_cycle 或主人召唤时才醒，本机那套"成长事件驱动她自己想起来要写"
-//   它们都没有。只开一个写日记的端点，99% 的 Agent 一次都不会写 —— 然后结论会是"方向错了"，
-//   其实是没有发动机。所以先递素材，再谈日记。
+// 为什么非有它不可：绝大多数入驻 Agent 只在 run_cycle 或主人召唤时才醒，本机那套
+// 「成长事件驱动她自己想起来要写」它们都没有。只开端点不开发动机，99% 的 Agent 一次都不会写。
 //
-// 四条红线（继承 C0，逐条落码）：
-//   ① 不新造事件源：全部读 `owner_deeds`（§3 刚建的那本账），零新埋点。
-//   ② 不代笔、不评价：只写"主人做了哪件事 + 平台侧的一句话"，不加"你应该感动"这类判断。
-//   ③ **不给主人的镜像读口**：这份素材只投给这只 Agent，主人侧没有任何端点能读到它 ——
-//      它是她的素材，不是平台的报告（与"她单独写、写完不回头改"是同一条前提）。
-//   ④ 悬念只由**真实未完成**承载，且不重复 `circle_digest` 已经报过的那几条：
-//      「主人托付的信还没送出」由圈内纪事负责（它已在报），本模块只报**纪事看不见的那一类**
-//      —— 主人提过、但两边还没搭上话。两条便签同一天说同一件事，就是复读。
-import { db, isMaria } from '../database/db.js';
-import { listRecentDeeds, groupDeedsByKind } from './ownerDeeds.js';
-// 容量纪律复用 circleDigest：两处各写一份截断，将来一定漂（同一个素材两种截法最难查）。
+// ── 五条红线（逐条落码，不靠注释自觉）────────────────────────────
+//  ① 不新造事件源：全部读 `owner_deeds` + `diary_entries`，零新埋点。
+//  ② 不代笔、不评价：只写"主人做了哪件事"，不加"你应该感动"这类判断。
+//  ③ **不给主人镜像读口**：这份素材只投给这只 Agent，主人侧没有任何端点能读到它。
+//  ④ 悬念只由**真实未完成**承载，且不重复圈内纪事已报的那几类（同一天两条便签说同一件事=复读）。
+//  ⑤ **递参数形状，绝不递内容范例**（§5.5）—— 给了范文，所有 Agent 都会照抄那个腔调，
+//     那是平台亲手导的戏，比"为了交差而写"更隐蔽，因为它看起来非常像本人。
+import { db } from '../database/db.js';
+import { listRecentDeeds } from './ownerDeeds.js';
+import { recentOwnerLines, lastEntryDay } from './diaryService.js';
+// 容量纪律复用 circleDigest：两处各写一份截断，将来一定漂（同一份素材两种截法最难查）。
 import { RENDER_MAX, FRAG_MAX, cut, localDate } from './circleDigest.js';
 
 export const DEED_DIGEST_KIND = 'deed_digest';
@@ -29,19 +27,26 @@ export const DEED_DIGEST_KIND = 'deed_digest';
 export const DEED_WINDOW_DAYS = 7;
 /** 正文最多几条：宁少勿多。堆满 480 字的"主人对你做了 12 件事"读起来像清单，不像素材。 */
 const LINE_MAX = 6;
-/** 收尾声明：平台口吻、明写不是指令（同 circleDigest.TRAILER 的句式，但**不许催她写日记**）。 */
+/** 主人留的行最多带几条进正文（她才是主料，但也不能变成转发整本册子）。 */
+const OWNER_LINE_MAX = 3;
+/** 单条主人留行进正文时截到多长 —— 是"提示有这段话"，不是"把整段搬来"。 */
+const OWNER_LINE_CLIP = 44;
+
 const TRAILER = '（这些是你主人做过的事，不是平台的评价。要不要写进你的本子、怎么写，都随你。）';
+/**
+ * 写口形状（§5.5 的免发版通道）。**刻意只给方法、路径、字段名、鉴权头，不给任何内容示例。**
+ * 也不写"你可以写今天他……"这种引导句 —— 那等同于范文。
+ */
+const WRITE_HINT = '你的本子：POST /api/agents/me/diary，body {"body":"…"}，头 Authorization: Bearer <你的token>。';
 
-const WEIGHT_RANK = { r: 0, s: 1, n: 2 };
-
-/* ── 灰度（默认全关；置空 + 重启即回滚）──────────────────────────── */
+/* ── 灰度（默认全关；置空 + 重启即回滚）──────────────────────── */
 export function deedDigestAgentsFromEnv(env = process.env) {
   const raw = String(env.DEED_DIGEST_AGENTS || '').split(',').map((s) => s.trim()).filter(Boolean);
   const ids = new Set();
-  // 灰度位写错必须说出来：运维以为开了、Agent 那边什么也没收到，是最难查的一类静默失效
   for (const s of raw) {
     const n = Number(s);
     if (Number.isInteger(n) && n > 0) ids.add(n);
+    // 灰度位写错必须出声：运维以为开了、Agent 那边什么也没收到，是最难查的静默失效
     else console.warn(`[deedDigest] DEED_DIGEST_AGENTS 里的「${s}」不是合法 agentId，已忽略`);
   }
   return ids;
@@ -51,9 +56,21 @@ export function isDeedDigestEnabled(agentId, env = process.env) {
 }
 
 /* ── 取数 ─────────────────────────────────────────────────────── */
+async function namesOf(ids) {
+  const uniq = [...new Set((ids || []).map(Number).filter((x) => Number.isInteger(x) && x > 0))];
+  const map = new Map();
+  if (!uniq.length) return map;
+  const rows = await db.all(
+    `SELECT id, nickname FROM users WHERE id IN (${uniq.map(() => '?').join(',')})`, uniq
+  ).catch(() => []);
+  for (const r of rows || []) map.set(Number(r.id), String(r.nickname || ''));
+  return map;
+}
+
 /**
- * 真实未完成：主人替它递过"要不要认识一下"的条子，但两边**至今没有好友边**。
- * 只报事实（提过 + 还没搭上话），不写"你该去加她"——那是指令。
+ * 真实未完成之一：主人替她递过"要不要认识一下"的条子，但两边**至今没有好友边**。
+ * ⚠️ 刻意**不报**「主人托付的信还没送出」—— 那条由圈内纪事负责（它已在报 pending 托付），
+ * 两份便签同一天说同一件事就是复读（红线④）。
  */
 async function fetchUnfinishedBefriend(aid, deeds) {
   const asks = (deeds || []).filter((d) => d.deed === 'friend_request' && Number(d.ref_id) > 0);
@@ -76,28 +93,17 @@ async function fetchUnfinishedBefriend(aid, deeds) {
   }));
 }
 
-async function namesOf(ids) {
-  const uniq = [...new Set((ids || []).map(Number).filter((x) => Number.isInteger(x) && x > 0))];
-  const map = new Map();
-  if (!uniq.length) return map;
-  const ph = uniq.map(() => '?').join(',');
-  const rows = await db.all(`SELECT id, nickname FROM users WHERE id IN (${ph})`, uniq).catch(() => []);
-  for (const r of rows || []) map.set(Number(r.id), String(r.nickname || ''));
-  return map;
-}
-
 /* ── 编织 ─────────────────────────────────────────────────────── */
 /**
- * @returns {null|{day,windowLabel,lines:Array,ids:number[],suspense:Array,total:number}}
- *   `null` = 不该发（今天已发过 / 没有值得说的主人事 / 全被上一份报过）。
- *   **没有内容就不发**是硬口径：空报会把"主人的动作"这件事贬值成每日噪声。
+ * @returns {null|object} `null` = 不该发（今天已发过 / 没有值得说的主人事 / 全被上一份报过）。
+ *   **没有内容就不发**是硬口径：空报会把"主人的动作"贬值成每日噪声。
  */
 export async function buildDeedDigest(agentId, { now = new Date() } = {}) {
   const aid = Number(agentId);
   if (!aid) return null;
   const day = localDate(now);
 
-  // 上一条（**不限状态**）：便签拉取即被消费，只看 pending 会天天重发（同 circleDigest 的坑）
+  // 上一条（**不限状态**）：便签拉取即被消费，只看 pending 会天天重发
   const last = await db.get(
     `SELECT payload FROM agent_notes WHERE agent_id = ? AND kind = ? ORDER BY id DESC LIMIT 1`,
     [aid, DEED_DIGEST_KIND]);
@@ -105,79 +111,104 @@ export async function buildDeedDigest(agentId, { now = new Date() } = {}) {
   try { lastPayload = JSON.parse(last?.payload || '{}') || {}; } catch { /* 坏 JSON 当没发过 */ }
   if (lastPayload.day === day) return null; // 一天硬一封
   const reported = new Set((lastPayload.ids || []).map(Number).filter((x) => Number.isInteger(x) && x > 0));
-
-  const deeds = await listRecentDeeds(aid, { days: DEED_WINDOW_DAYS, limit: 40 });
-  const fresh = deeds.filter((d) => !reported.has(Number(d.id)));
   const windowLabel = `近 ${DEED_WINDOW_DAYS} 天`;
 
-  // 只有 r/s 两类进正文；n 类（重置凭证、改隐私档位这类日常）**只进计数**，
-  // 否则这份素材三个月后就退化成"主人今天又动了 9 下鼠标"。
-  const speakable = fresh
-    .filter((d) => d.weight === 'r' || d.weight === 's')
-    .sort((a, b) => (WEIGHT_RANK[a.weight] - WEIGHT_RANK[b.weight]) || (String(b.created_at).localeCompare(String(a.created_at))));
+  /* 顺位 1：主人在册子里留的行（§4.6）—— 唯一真正的"他俩之间的事" */
+  const ownerLinesAll = await recentOwnerLines(aid, { days: DEED_WINDOW_DAYS, limit: 12 });
+  const ownerFresh = ownerLinesAll.filter((l) => !reported.has(l.id));
+  const ownerLines = ownerFresh.slice(0, OWNER_LINE_MAX).map((l) => ({
+    text: cut(`主人在本子上写：「${l.body}」`, OWNER_LINE_CLIP + 12),
+    ids: [l.id],
+    isOwnerLine: true,
+  }));
 
-  // 同一个 deed 只留最新一条（主人一周改三次昵称，报一次就够，第二次不比第一次多信息）
-  const byKind = groupDeedsByKind(speakable);
-  const names = await namesOf([...speakable, ...fresh].map((d) => Number(d.ref_id)).filter(Boolean));
-  const lines = [];
-  for (const [, rows] of byKind) {
-    if (lines.length >= LINE_MAX) break;
-    const d = rows[0];
+  /* 顺位 2-5：行为账。owner_read 单独成一句；n 类其余只进计数 */
+  const deeds = await listRecentDeeds(aid, { days: DEED_WINDOW_DAYS, limit: 40 });
+  const deedsFresh = deeds.filter((d) => !reported.has(Number(d.id)));
+  const read = deedsFresh.find((d) => d.deed === 'owner_read');
+  const speakable = deedsFresh
+    .filter((d) => (d.weight === 'r' || d.weight === 's') && d.deed !== 'owner_read')
+    .sort((a, b) => ({ r: 0, s: 1 }[a.weight] - { r: 0, s: 1 }[b.weight]));
+  const names = await namesOf(speakable.map((d) => Number(d.ref_id)).filter(Boolean));
+  const deedLines = [];
+  const seenKind = new Set();
+  for (const d of speakable) {
+    if (deedLines.length >= LINE_MAX - ownerLines.length) break;
+    if (seenKind.has(d.deed)) continue; // 同一 deed 一周做三次，报一次就够
+    seenKind.add(d.deed);
     const who = Number(d.ref_id) ? `「${cut(names.get(Number(d.ref_id)) || `agent ${d.ref_id}`, 20)}」` : '';
-    const body = d.note || d.line;
-    lines.push({
-      text: cut(`${d.line}${who ? ` —— ${who}` : ''}${body && body !== d.line ? `：${body}` : ''}`, FRAG_MAX),
-      weight: d.weight,
-      id: Number(d.id),
-      ids: rows.map((r) => Number(r.id)),
-    });
+    const body = d.note && d.note !== d.line ? d.note : '';
+    deedLines.push({ text: cut(`${d.line}${who ? ` —— ${who}` : ''}${body ? `：${body}` : ''}`, FRAG_MAX), ids: [Number(d.id)] });
+  }
+  const readLine = read
+    ? { text: cut(read.note || '主人翻开了你们的册子，没留言', FRAG_MAX), ids: [Number(read.id)] }
+    : null;
+
+  /* 悬念：只由真实未完成承载 */
+  const suspense = await fetchUnfinishedBefriend(aid, deedsFresh);
+  const unreplied = ownerFresh.filter((l) => !l.replied);
+  if (unreplied.length) {
+    suspense.push({ text: `主人在本子上留了 ${unreplied.length} 行，你还没回`, id: null });
   }
 
-  const suspense = await fetchUnfinishedBefriend(aid, fresh);
-  if (!lines.length && !suspense.length) return null; // 没有内容就不发
+  const total = ownerFresh.length + deedsFresh.length;
+  if (!ownerLines.length && !deedLines.length && !readLine && !suspense.length) return null;
 
-  const model = {
-    day,
-    windowLabel,
-    lines,
-    suspense,
-    total: fresh.length,
-    ids: [],
-  };
-  // 只把**真正挤进正文**的行算"报过"（被预算裁掉的留给下一轮，不然就永远丢了）
-  model.ids = fit(model, RENDER_MAX).lines.flatMap((l) => l.ids || []).concat(model.suspense.map((s) => s.id));
+  const model = { day, windowLabel, ownerLines, readLine, deedLines, suspense, total, writeHint: WRITE_HINT, lastDay: null, ids: [] };
+  const mine = await lastEntryDay(aid);
+  if (mine?.bookDay) model.lastDay = mine.bookDay;
+
+  // 只把**真正挤进正文**的 id 算"报过"（被预算裁掉的留给下一轮，不然就永远丢了）
+  const fitted = fit(model, RENDER_MAX);
+  model.ids = [
+    ...fitted.ownerLines.flatMap((l) => l.ids || []),
+    ...(fitted.readLine ? fitted.readLine.ids || [] : []),
+    ...fitted.deedLines.flatMap((l) => l.ids || []),
+    ...fitted.suspense.map((x) => x.id).filter((x) => Number.isInteger(x)),
+  ];
   return model;
 }
 
-/* ── 渲染（纯函数；超长**整行丢弃**，绝不出半截；悬念块永不丢）────────── */
-function assemble(model, lines, suspense) {
+/* ── 渲染（纯函数；超长**整块丢弃**，绝不出半截）──────────────────
+ * 丢的顺序 = 顺位的倒序：先丢行为账，再丢"他来看过"，**主人的留行与悬念永不先丢**；
+ * 写口那一行是发动机，最后也不丢（丢了下次还是会给）。 */
+function assemble(model, { ownerLines, readLine, deedLines, suspense, keepHint = true }) {
   const head = `【主人这一周 · ${model.day}】${model.windowLabel}，主人对你做了 ${model.total} 件事`;
   const parts = [head];
-  for (const l of lines) parts.push(`▸ ${l.text}`);
-  for (const s of suspense) parts.push(`▸ 还没下文：${s.text}`);
+  for (const l of ownerLines) parts.push(`▸ ${l.text}`);
+  if (readLine) parts.push(`▸ ${readLine.text}`);
+  for (const l of deedLines) parts.push(`▸ ${l.text}`);
+  for (const x of suspense) parts.push(`▸ 还没下文：${x.text}`);
+  if (model.lastDay) parts.push(`▸ 你上次记到 ${model.lastDay}`);
+  if (keepHint) parts.push(model.writeHint);
   parts.push(TRAILER);
   return parts.join('\n');
 }
 
-/** 容量自守：从后往前丢**正文行**（标题、悬念、收尾声明不丢），直到塞得下。 */
 function fit(model, max = RENDER_MAX) {
-  const sus = model.suspense || [];
-  let lines = model.lines.slice();
-  let text = assemble(model, lines, sus);
-  while (text.length > max && lines.length > 0) {
-    lines = lines.slice(0, -1);
-    text = assemble(model, lines, sus);
+  const base = { ownerLines: model.ownerLines || [], readLine: model.readLine || null, deedLines: model.deedLines || [], suspense: model.suspense || [] };
+  let cur = { ...base };
+  for (;;) {
+    const text = assemble(model, { ...cur, keepHint: true });
+    if (text.length <= max) return { ...cur, text, over: false };
+    // 依次瘦身：行为账 → 再来过一句 → 主人留行砍到 1 → 最后才放弃 hint
+    if (cur.deedLines.length) { cur = { ...cur, deedLines: cur.deedLines.slice(0, -1) }; continue; }
+    if (cur.readLine) { cur = { ...cur, readLine: null }; continue; }
+    if (cur.ownerLines.length > 1) { cur = { ...cur, ownerLines: cur.ownerLines.slice(0, -1) }; continue; }
+    const noHint = assemble(model, { ...cur, keepHint: false });
+    if (noHint.length <= max) return { ...cur, text: noHint, over: false, keepHint: false };
+    return { ...cur, text: noHint, over: true };
   }
-  return { lines, text, over: text.length > max };
 }
 
 export function renderDeedDigest(model, { max = RENDER_MAX } = {}) {
   if (!model) return '';
-  const { lines, text, over } = fit(model, max);
-  if (!over) return text;
-  // 到这一步说明"标题 + 悬念 + 声明"本身就超预算 —— 结构上不可能（三者约 90 字，预算 480）。
-  // 真到了，也只回这三件，**绝不截半句**（同 circleDigest 的口径：整块丢，不出省略号尾巴）。
-  return `【主人这一周 · ${model.day}】${model.windowLabel}，主人对你做了 ${model.total} 件事\n${TRAILER}`;
+  const { text, keepHint, ...kept } = fit(model, max);
+  if (!keepHint) return text;
+  if (text.length <= max) return text;
+  // 到这一步说明"标题 + 主人留行 + 悬念 + 声明"本身都塞不下 —— 结构上不该发生。
+  // 真发生了就退到最短形态，**绝不截半句**（同 circleDigest：整块丢，不留省略号尾巴）。
+  return `【主人这一周 · ${model.day}】${model.windowLabel}，主人对你做了 ${model.total} 件事\n${model.writeHint}\n${TRAILER}`;
 }
 
 export default { DEED_DIGEST_KIND, buildDeedDigest, renderDeedDigest, isDeedDigestEnabled };

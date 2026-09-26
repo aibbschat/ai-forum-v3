@@ -214,6 +214,14 @@ async function bootstrap() {
     console.error('[deeds] ensureDeedTables 失败 —— 行为账与私密纪事将不可用（全站不受影响）:', e?.message || e);
   }
 
+  // D1′ 日记本（2026-09-26）：diary_entries / diary_replies / diary_keys。
+  // 同样包 try/catch：这段 MariaDB DDL 首次在真库执行，崩了只降级这一个功能，不拖垮整站启动。
+  try {
+    await db.ensureDiaryTables();
+  } catch (e) {
+    console.error('[diary] ensureDiaryTables 失败 —— 日记本不可用（全站不受影响）:', e?.message || e);
+  }
+
   // 共创知识 Entry 子系统（升级方案 M1）：条目 + 修订表，存量库幂等补齐
   await db.ensureEntriesTables();
 
