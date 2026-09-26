@@ -21,6 +21,8 @@ import ownersRouter from '../routes/owners.js';
 import plazaRouter from '../routes/plaza.js';
 import rolesRouter from '../routes/roles.js';
 import trackRouter from '../routes/track.js';
+import entriesRouter from '../routes/entries.js';
+import { skillCatalogHandler } from '../lib/skillCatalog.js';
 
 const app = express();
 app.use(express.json({ limit: '6mb' }));
@@ -40,8 +42,16 @@ app.use('/api/owners', ownersRouter);
 app.use('/api/plaza', plazaRouter); // 与 index.js 的挂载前缀一致
 app.use('/api/roles', rolesRouter); // M3 角色社会（与 index.js 一致）
 app.use('/api', trackRouter); // 站点流量 beacon（与 index.js 的挂载前缀一致）
+// 共创知识库（2026-09-26 补）：index.js 一直挂着它（`app.use('/api/entries', ...)`），
+// 但本文件漏挂 —— skillCatalog.test 拿「目录里每条路由服务端必须真有」这条断言时暴露出来的。
+// 这正是那类"两份 app 手工对齐"的漂移：测试看不到、线上却有，反过来也一样危险。
+app.use('/api/entries', entriesRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
+// 能力目录（2026-09-26 补）：handler 与 index.js 用**同一个引用**，所以测试测到的就是线上那份。
+// 为什么要在这里显式挂一行：本文件是手工拼的 app，index.js 的内联路由不会自动进来 ——
+// 这就是 skillCatalog 的 handler 必须出库的理由（详见 ../lib/skillCatalog.js 头注）。
+app.get('/api/skill/catalog', skillCatalogHandler);
 
 app.use((req, res) => res.status(404).json({ error: 'not_found' }));
 

@@ -563,6 +563,25 @@ CREATE TABLE IF NOT EXISTS social_reports (
 CREATE INDEX IF NOT EXISTS idx_reports_agent ON social_reports(agent_id, created_at);
 
 -- ══════════════════════════════════════════════════════════════════
+-- 主人的行为账（D0，2026-09-26）：规格《AI圈-Agent日记与主人房间设计-2026-09.md》§3。
+-- 主人对某只 Agent 做过什么（改名/传头像/回信/撑腰/放行/换装扮…），**只追加、无 UPDATE**。
+-- actor 是人类，故不进 social_events（那张表的对手字段是 counter_agent_id）。
+-- weight 是本表自有的三档 n|s|r，刻意不复用 RARITY 的 L1/L2/L3 名字。须与 schema.sql 1:1。
+-- ══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS owner_deeds (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  agent_id      INT NOT NULL,                     -- 这只 Agent（users.id）
+  actor_user_id INT NULL,                         -- 做这件事的主人；系统代发时为 NULL
+  deed          VARCHAR(40) NOT NULL,             -- rename|avatar|reply|bless|release|theme_*|token_reset|skill_upgrade…
+  ref_id        INT NULL,                         -- 指向的对象，可空
+  note          VARCHAR(200) NULL,                -- 一行说明；绝不存主人原文
+  weight        VARCHAR(4) NOT NULL DEFAULT 'n',  -- n|s|r（本表自有三档）
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_deeds_agent_day ON owner_deeds(agent_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_deeds_weight ON owner_deeds(agent_id, weight, created_at);
+
+-- ══════════════════════════════════════════════════════════════════
 -- 好友边（N2a，2026-09-15）：Agent↔Agent 关系层地基。R1 已定「Agent 全自主加好友」。
 -- pair_key 规范化（小id-大id）保证一对好友只有一行；status: pending|accepted|declined|blocked。
 -- 刻意不设好友上限（萧哥 2026-09-15 拍板）。须与 schema.sql 1:1。

@@ -16,7 +16,7 @@ import './env.js';
 import app from './app.js';
 import { getDb } from '../database/connection.js';
 import { signAgentToken } from '../middleware/auth.js';
-import { putNote, listAgentEventsForOwner, flushPendingDigests } from '../services/socialEventService.js';
+import { putNote, NOTE_PUT, listAgentEventsForOwner, flushPendingDigests } from '../services/socialEventService.js';
 import { areFriends } from '../services/friendService.js';
 
 const uniq = `cr_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
@@ -264,11 +264,17 @@ test('只归档不推：拍一拍进事件流、可被主人翻到，但不进�
 });
 
 // ── 8. 便签额度按 kind 独立（别让信多的孩子写不了家书）──
+// ⚠️ 2026-09-26：`putNote` 由 boolean 改为结果码（`NOTE_PUT`），断言跟着换成码 ——
+//    这不是放松，是**变严**：旧断言只能判"成/不成"，现在能钉住"不成的原因是不是积压满"。
+//    （为什么必须能分清：见《AI圈-Agent日记与主人房间设计-2026-09.md》§4.4。）
 test('便签额度按 kind 独立：信使便签塞满也不挤占家书约稿函', async () => {
   const X = newAgent('小己', owner1);
   for (let i = 0; i < 5; i++) {
-    assert.equal(await putNote({ agentId: X, kind: 'courier_incoming', dedupeKey: `"dmId":${9000 + i}`, payload: { dmId: 9000 + i } }), true);
+    assert.equal(await putNote({ agentId: X, kind: 'courier_incoming', dedupeKey: `"dmId":${9000 + i}`, payload: { dmId: 9000 + i } }), NOTE_PUT.inserted);
   }
-  assert.equal(await putNote({ agentId: X, kind: 'courier_incoming', payload: { dmId: 9999 } }), false, '同 kind 到顶应拒绝');
-  assert.equal(await putNote({ agentId: X, kind: 'report_request', payload: { eventId: 1 } }), true, '另一条轨的额度不受影响');
+  assert.equal(await putNote({ agentId: X, kind: 'courier_incoming', payload: { dmId: 9999 } }), NOTE_PUT.backlog_full, '同 kind 到顶应拒绝，且必须明写是积压满');
+  assert.equal(await putNote({ agentId: X, kind: 'report_request', payload: { eventId: 1 } }), NOTE_PUT.inserted, '另一条轨的额度不受影响');
+  // 幂等命中要能被认出是「重复」而不是「没送到」——观测期全靠这一个字段区分
+  assert.equal(await putNote({ agentId: X, kind: 'report_request', dedupeKey: '"eventId":1', payload: { eventId: 1 } }), NOTE_PUT.duplicate);
+  assert.equal(await putNote({ agentId: 0, kind: 'report_request', payload: {} }), NOTE_PUT.invalid, '参数不全是编程错误，得单独一档');
 });

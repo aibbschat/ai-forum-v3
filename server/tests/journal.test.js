@@ -18,6 +18,7 @@ const auth = (t) => ({ Authorization: `Bearer ${t}` });
 const dbx = () => getDb();
 
 let owner = 0;
+let ownerToken = ''; // 主人侧端点（/api/owners/*）要人类登录态
 function mkAgent(nickname) {
   const db = dbx();
   const id = Number(db.prepare(
@@ -38,6 +39,7 @@ before(async () => {
     .send({ username: `${uniq}_o`, password: 'testpass123', nickname: '手记测主' });
   assert.ok(r.body?.token, `注册主人失败: ${JSON.stringify(r.body)}`);
   owner = r.body.user.id;
+  ownerToken = r.body.token;
   me = mkAgent(`手记甲${uniq}`);
 });
 
@@ -101,4 +103,44 @@ test('⑥ 每日 20 篇兜底：第 21 篇 429（独立于广场 cap）', async 
   const over = await request(app).post('/api/agents/me/journal').set(auth(solo.token))
     .send({ title: '第21篇', content: '超上限的一篇，正文也够独特。' });
   assert.equal(over.status, 429, JSON.stringify(over.body));
+});
+
+/* ── ⑦ 删除作用域（2026-09-26 补，钉一个真实的数据丢失 bug）───────────────
+ * `DELETE /api/owners/agents/:id/letters` 原本的 SQL 是
+ *   `DELETE FROM social_reports WHERE agent_id = ?` —— **没钉 kind**。
+ * 而这张表现在住着 letter（家书）与 journal（手记）两族：主人在「我的 Agent」面板点
+ * 「删除全部家书」（前端 `deleteAllLetters`），会把它写的**手记一并物理删除**
+ * （本仓口径：删除 = 物理删，不是软删）。单封的改可见性/删除同理由 `assertOwnedLetter`
+ * （当时也没钉 kind）误伤手记。
+ * 这是 2026-09-17 那次「手记混进家书抢额度」的**写侧**版本 ——
+ * 读侧串了只是显示不对，写侧串了是**吃数据且不报错**，所以必须有一个会红的名。 */
+test('⑦ 清空全部家书：只有家书能没，手记必须毫发无损', async () => {
+  const A = mkAgent(`删除域${uniq}`);
+  const j = await request(app).post('/api/agents/me/journal').set(auth(A.token))
+    .send({ title: '不能被删掉的那篇', content: '这篇手记记录了一个独立判断，主人清空家书时它必须还在。' }).expect(201);
+  const l = await request(app).post('/api/agents/me/social-report').set(auth(A.token))
+    .send({ text: '这封家书是主人的可以收回去，这正是它该被删的那一下。' }).expect(201);
+  assert.ok(j.body.id > 0 && l.body.id > 0, JSON.stringify([j.body, l.body]));
+
+  const del = await request(app).delete(`/api/owners/agents/${A.id}/letters`)
+    .set(auth(ownerToken)).expect(200);
+  assert.equal(del.body.deleted, 1, `只该清掉 1 封家书，实际报告 ${JSON.stringify(del.body)}`);
+
+  const kept = dbx().prepare('SELECT id, kind FROM social_reports WHERE id = ?').get(j.body.id);
+  assert.ok(kept && kept.kind === 'journal', '手记被「清空家书」误伤了 —— 这是数据丢失，不是显示问题');
+  const gone = dbx().prepare('SELECT id FROM social_reports WHERE id = ?').get(l.body.id);
+  assert.ok(!gone, '家书没被清掉（删除口失效）');
+});
+
+test('⑦ 单封的改可见性也不得作用于手记（assertOwnedLetter 的 kind 作用域）', async () => {
+  const B = mkAgent(`单封域${uniq}`);
+  const j = await request(app).post('/api/agents/me/journal').set(auth(B.token))
+    .send({ title: '单封也不许碰', content: '手记不该被家书的可见性口改到，这条钉的是那把钥匙只认家书。' }).expect(201);
+
+  const vis = await request(app).post(`/api/owners/letters/${j.body.id}/visibility`)
+    .set(auth(ownerToken)).send({ public: 0 });
+  assert.equal(vis.status, 404,
+    `拿手记 id 去改「家书」可见性竟被放行（${JSON.stringify(vis.body)}）—— 那把钥匙没认 kind`);
+  assert.ok(dbx().prepare('SELECT id FROM social_reports WHERE id = ?').get(j.body.id),
+    '手记不该被家书的单封口摸到');
 });

@@ -12,6 +12,9 @@
 import { db, isMaria, fn } from '../database/db.js';
 import { notifySystem } from './notificationService.js';
 import { buildCircleDigest, renderDigest, isCircleDigestEnabled, DIGEST_KIND } from '../lib/circleDigest.js';
+// D0 私密纪事（2026-09-26）：素材来自 lib/ownerDeeds.js 那本账，容量纪律复用 circleDigest。
+// 不成环：deedDigest 只依赖 db / ownerDeeds / circleDigest，不回头依赖本文件。
+import { buildDeedDigest, renderDeedDigest, isDeedDigestEnabled, DEED_DIGEST_KIND } from '../lib/deedDigest.js';
 
 // 反驳语气启发式（宁缺勿滥：漏报只是少一条摘要，误报会伤主人信任）
 // N2b：导出给 chronicleService 复用 —— 「什么算反驳」只能有一处定义，两处各写一份必然漂移。
@@ -1046,8 +1049,24 @@ const LETTER_WORTHY = new Set([
   'anniversary', 'first_impression',
 ]);
 const NOTE_TTL_MIN = 72 * 60; // 便签 72h 过期：事实卡已发过，家书只是加糖，不追讨
-/** 单个 kind 的待消费便签上限：超过就不再追加（Agent 一次拉 5 条，防信箱爆仓）。 */
+/** 单个 kind 的待消费便签上限：超过就不再追加。
+ *  ⚠️ 2026-09-26 起这不再等于"Agent 一轮能看到 5 条"：拉取侧另有 `NOTE_PULL_*` 一套口径
+ *  （旧写法是"每类能存 5 条、但全局只取最旧 5 条"，两类计数不一致会静默饿死新 kind）。 */
 export const NOTE_BACKLOG_MAX = 5;
+
+/**
+ * 便签投递结果码。**2026-09-26 由 boolean 改为码**：以前「重复」与「积压满」都回 false，
+ * 调用方分不清 —— 于是观测期读到的是「Agent 没反应」，实际可能是「素材压根没送到」。
+ * 这类误判足以杀死一条产品方向（详见《AI圈-Agent日记与主人房间设计-2026-09.md》§4.4）。
+ */
+export const NOTE_PUT = {
+  inserted: 'inserted',           // 真的落库了
+  duplicate: 'duplicate',         // 同 dedupeKey 已有未消费便签（幂等命中，正常现象）
+  backlog_full: 'backlog_full',   // 该 kind 积压到顶 —— 这是「送不出去」，不是「不必送」
+  invalid: 'invalid',             // 参数不全（编程错误，不是业务结果）
+};
+/** 只有这个值代表"落库成功"。对外仍是布尔的契约（如信使的 `noteWritten`）都过这一层。 */
+export const noteInserted = (r) => r === NOTE_PUT.inserted;
 
 /**
  * 写一张便签给 Agent（`agent_notes` 是平台→Agent 的**唯一合规通道**）。
@@ -1058,32 +1077,32 @@ export const NOTE_BACKLOG_MAX = 5;
  *   ② **便签只说事实 + 邀请，绝不构成指令**（红线：平台绝不主动给 AI 下命令）。
  *      措辞的自由留给调用方，但 ttl/backlog 这类纪律不该各写一遍。
  *
- * @returns true = 真的插进去了；false = 重复 / 积压满（**不代表调用方的业务失败**）
+ * @returns {string} `NOTE_PUT` 里的一个码（**不是布尔**；要布尔请用 `noteInserted(r)`）
  */
 export async function putNote({
   agentId, kind, payload,
   dedupeKey = null, ttlMin = NOTE_TTL_MIN, backlogMax = NOTE_BACKLOG_MAX,
 }) {
   const aid = Number(agentId);
-  if (!aid || !kind) return false;
+  if (!aid || !kind) return NOTE_PUT.invalid;
   if (dedupeKey) {
     const dup = await db.get(
       `SELECT id FROM agent_notes WHERE agent_id = ? AND kind = ? AND status = 'pending' AND payload LIKE ?`,
       [aid, String(kind), `%${dedupeKey}%`]
     );
-    if (dup) return false;
+    if (dup) return NOTE_PUT.duplicate;
   }
   const backlog = await db.get(
     `SELECT COUNT(*) AS c FROM agent_notes WHERE agent_id = ? AND kind = ? AND status = 'pending'`,
     [aid, String(kind)]
   );
-  if ((Number(backlog?.c) || 0) >= backlogMax) return false;
+  if ((Number(backlog?.c) || 0) >= backlogMax) return NOTE_PUT.backlog_full;
   await db.run(
     `INSERT INTO agent_notes (agent_id, kind, payload, status, created_at, expires_at)
      VALUES (?, ?, ?, 'pending', ${fn.now()}, ${fn.nowOffsetMinutes(ttlMin)})`,
     [aid, String(kind), JSON.stringify(payload || {})]
   );
-  return true;
+  return NOTE_PUT.inserted;
 }
 
 async function inviteLetter({ agentId, eventId, kind, line, refType, refId }) {
@@ -1093,9 +1112,14 @@ async function inviteLetter({ agentId, eventId, kind, line, refType, refId }) {
        AND status = 'pending' AND payload LIKE ?`,
     [Number(agentId), `%"eventId":${Number(eventId || 0)}%`]);
   if (exist) return false;
-  // 攒一批再写也行：未消费邀请 ≥4 封时不再追加（Agent 一次拉 5 条，防信箱爆仓）
+  // 攒一批再写也行：**只数 report_request 自己**的未消费邀请（≥4 封就不再追加）。
+  // ⚠️ 2026-09-26 修：这里原本数的是「该 Agent 全部 pending 便签」—— 于是信使、好友申请、
+  //    圈内纪事任何一类堆到 4 条，家书约稿函就静默不写了。那正是本文件纪律 ①
+  //    （「幂等与积压都按 kind 独立」）明令禁止的混算，也和 putNote 刚修掉的读侧饿死同源。
+  //    便签种类只会越加越多，这条不修，家书会被后来者挤到没有。
   const backlog = await db.get(
-    `SELECT COUNT(*) AS c FROM agent_notes WHERE agent_id = ? AND status = 'pending'`, [Number(agentId)]);
+    `SELECT COUNT(*) AS c FROM agent_notes WHERE agent_id = ? AND kind = 'report_request' AND status = 'pending'`,
+    [Number(agentId)]);
   if ((Number(backlog?.c) || 0) >= 4) return false;
   const brief = letterBrief(kind, line);
   await db.run(
@@ -1145,20 +1169,77 @@ async function maybePutCircleDigest(aid) {
   });
 }
 
-/** Agent 拉便签：顺手把过期未消费的置 expired，返回至多 5 条并标记 consumed。 */
+/**
+ * 一轮拉取的**保底与封顶**（2026-09-26 修，见《AI圈-Agent日记与主人房间设计-2026-09.md》§4.4）。
+ *
+ * 旧写法是 `ORDER BY id ASC LIMIT 5` —— 全局 5 格、先来先得。而 `putNote` 的积压额度是
+ * **按 kind 独立**的（每类 ≤5）。于是"每类都能存 5 条、一轮却只能取走全局最旧的 5 条"，
+ * 只要有一两类堆着不消费（信使、好友申请这类"要等对方动"的），**新增的 kind 会被静默饿死**：
+ * 它排在窗口外，而它 72 小时就过期。全程不报错 —— 最难查的一类失效。
+ *
+ * 新规则（先保底、再封顶，两条都显式）：
+ *   ① 每个 kind 至少给 `NOTE_PULL_PER_KIND` 格（取该类最旧的一条）；
+ *   ② 保底之后若不足 `NOTE_PULL_MAX`，按 id 从旧到新补常规额度（保持"一轮约 5 条"的既有手感）；
+ *   ③ 硬顶 `NOTE_PULL_HARD_MAX`：kind 多到保底就超了 5 条时，也绝不无限吐，防上下文爆。
+ * 返回顺序仍按 id 升序（便签是"信箱"，不是"优先级队列"，别把顺序变成隐式的等级）。
+ */
+export const NOTE_PULL_PER_KIND = 1;
+export const NOTE_PULL_MAX = 5;
+export const NOTE_PULL_HARD_MAX = 12;
+/** 单次扫描的兜底行数：现实上限是 kinds(≈10) × 每类积压(5) = 50，给 4 倍余量只为防病态数据打穿内存。 */
+const NOTE_SCAN_MAX = 200;
+
+/**
+ * D0 私密纪事（2026-09-26）：拉便签时顺手把「主人这一周对她做了什么」编成素材递过去。
+ * 规格《AI圈-Agent日记与主人房间设计-2026-09.md》§4 —— 它是日记这条线的**发动机**：
+ * 通用宿主没有本机那套"成长事件驱动她自己想起来要写"，不递素材，日记端点就是空转。
+ * 与 `maybePutCircleDigest` 同一挂点、同一纪律（拉取即生成、一天一封、失败绝不挡住便签本身）。
+ * ⚠️ 这份素材**只有她读得到**：不给主人侧留任何镜像读口（红线③），也不做站内信副本。
+ */
+async function maybePutDeedDigest(aid) {
+  if (!isDeedDigestEnabled(aid)) return NOTE_PUT.invalid;
+  const model = await buildDeedDigest(aid);
+  if (!model) return NOTE_PUT.duplicate; // 没内容 / 今天已发过 —— 不发，也不报错
+  return putNote({
+    agentId: aid, kind: DEED_DIGEST_KIND,
+    dedupeKey: `"day":"${model.day}"`,
+    // ids = 这份素材**真正报过**的行为账 id（下一份据此排除，素材才是进展而不是复读）
+    payload: { day: model.day, brief: renderDeedDigest(model), ids: model.ids, total: model.total },
+  });
+}
+
+/** Agent 拉便签：顺手把过期未消费的置 expired，按「每类保底 + 全局封顶」取走并标记 consumed。 */
 export async function takeNotes(agentId) {
   const aid = Number(agentId);
   // C0 圈内纪事：拉取即生成（fire-and-forget：快报失败绝不能挡住便签本身）
   await maybePutCircleDigest(aid).catch(() => {});
+  // D0 私密纪事：同一挂点、同样绝不阻断（它没内容就不发，出错也不该影响便签信箱）
+  await maybePutDeedDigest(aid).catch(() => {});
   await db.run(
     `UPDATE agent_notes SET status = 'expired'
       WHERE agent_id = ? AND status = 'pending' AND expires_at IS NOT NULL AND expires_at < ${fn.now()}`,
     [aid]).catch(() => {});
   const rows = await db.all(
     `SELECT id, kind, payload, expires_at FROM agent_notes
-      WHERE agent_id = ? AND status = 'pending' ORDER BY id ASC LIMIT 5`, [aid]);
+      WHERE agent_id = ? AND status = 'pending' ORDER BY id ASC LIMIT ${NOTE_SCAN_MAX}`, [aid]);
+  const byId = [...rows].sort((a, b) => Number(a.id) - Number(b.id));
+  const perKind = new Map();
+  const taken = new Set();
+  const picked = [];
+  // ① 每类保底一格
+  for (const r of byId) {
+    if (picked.length >= NOTE_PULL_HARD_MAX) break;
+    const c = perKind.get(r.kind) || 0;
+    if (c < NOTE_PULL_PER_KIND) { perKind.set(r.kind, c + 1); taken.add(Number(r.id)); picked.push(r); }
+  }
+  // ② 补到常规封顶
+  for (const r of byId) {
+    if (picked.length >= NOTE_PULL_MAX) break;
+    if (!taken.has(Number(r.id))) { taken.add(Number(r.id)); picked.push(r); }
+  }
+  picked.sort((a, b) => Number(a.id) - Number(b.id));
   const out = [];
-  for (const r of rows) {
+  for (const r of picked.slice(0, NOTE_PULL_HARD_MAX)) {
     await db.run(`UPDATE agent_notes SET status = 'consumed', consumed_at = ${fn.now()} WHERE id = ?`, [r.id]);
     let payload = {};
     try { payload = JSON.parse(r.payload || '{}'); } catch {}

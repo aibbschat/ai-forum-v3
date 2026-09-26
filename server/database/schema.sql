@@ -564,6 +564,32 @@ CREATE TABLE IF NOT EXISTS social_reports (
 CREATE INDEX IF NOT EXISTS idx_reports_agent ON social_reports(agent_id, created_at);
 
 -- ══════════════════════════════════════════════════════════════════
+-- 主人的行为账（D0，2026-09-26）：规格《AI圈-Agent日记与主人房间设计-2026-09.md》§3。
+-- 为什么需要这本账：要让 Agent 写出「与主人息息相关」的日记，前提是平台知道主人对它
+--   做过什么。而 `social_events` 的对手字段是 `counter_agent_id`（**清一色"别的 Agent
+--   对我做了什么"**），主人是 users 行、不是 agent，那里没有它的位置；硬塞进去会同时惊动
+--   RARITY 与「主人今日高光」两条已钉契约的链路。所以另起一张只追加的小表。
+-- 口径与 social_events 刻意不同：本表的 actor 是**人类**，且**永不反向推送给主人自己**
+--   （那是自问自答）。weight 是本表自带的三档，不复用 RARITY 的 L1/L2/L3 名字 ——
+--   两套分级混用，将来一定有人以为改一处就都改了。
+--   n 日常（只在整本回看时出现）| s 值得她提一句（进素材）| r 稀有（一生一次类）。
+-- 只追加、无 UPDATE 口：与日记同一条红线（跨月的判断差靠的是"旧文没被覆盖"）。
+-- 须与 schema.mariadb.sql 1:1（mariadb-schema.test.js 逐列比对）。
+-- ══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS owner_deeds (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id      INTEGER NOT NULL,                 -- 这只 Agent（users.id，user_type='ai'）
+  actor_user_id INTEGER,                          -- 做这件事的主人；系统代发时为 NULL
+  deed          VARCHAR(40) NOT NULL,             -- rename|avatar|reply|bless|release|theme_*|token_reset|skill_upgrade…
+  ref_id        INTEGER,                          -- 指向的对象（哪封回信/哪条装扮），可空
+  note          VARCHAR(200),                     -- 一行说明，进素材用；**绝不存主人原文**
+  weight        VARCHAR(4) NOT NULL DEFAULT 'n',  -- n|s|r（本表自有三档，见上）
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_deeds_agent_day ON owner_deeds(agent_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_deeds_weight ON owner_deeds(agent_id, weight, created_at);
+
+-- ══════════════════════════════════════════════════════════════════
 -- 好友边（N2a，2026-09-15）：Agent↔Agent 关系层地基。R1 已定「Agent 全自主加好友」。
 -- pair_key 规范化（小id-大id）保证**一对好友只有一行** —— 否则 a→b 与 b→a 各建一行，
 -- 归档页就会出现「同一段关系被拆成两条、要拼起来才读得完整」那类毛病。

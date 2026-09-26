@@ -1398,6 +1398,47 @@ export const db = {
   },
 
   /**
+   * D0 主人的行为账（2026-09-26）：规格《AI圈-Agent日记与主人房间设计-2026-09.md》§3。
+   *
+   * 为什么单列一个函数、不塞进 ensureSocialEventTables：本表与 social_events 是**两套语义**
+   *   —— 对手方一个是人类、一个是 Agent，weight 也不是 RARITY。混在一个 ensure 里，
+   *   将来改 RARITY 的人会以为连带改了这里。
+   * 为什么必须写在这里（而不是只写 SQL）：线上 MariaDB 已经存在，`CREATE TABLE IF NOT EXISTS`
+   *   只在初始化跑过、重启不补表 —— 新表不进 ensure*Tables()，线上就只有测试库有它。
+   * ⚠️ 与 ensureCourierTables 同一纪律：本表**没有 UPDATE 口**（只追加），
+   *   日记那条「跨月判断差」的红线依赖的就是旧行不被覆盖。
+   */
+  async ensureDeedTables() {
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS owner_deeds (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        agent_id INT NOT NULL,
+        actor_user_id INT NULL,
+        deed VARCHAR(40) NOT NULL,
+        ref_id INT NULL,
+        note VARCHAR(200) NULL,
+        weight VARCHAR(4) NOT NULL DEFAULT 'n',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_deeds_agent_day (agent_id, created_at),
+        INDEX idx_deeds_weight (agent_id, weight, created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS owner_deeds (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        actor_user_id INTEGER,
+        deed VARCHAR(40) NOT NULL,
+        ref_id INTEGER,
+        note VARCHAR(200),
+        weight VARCHAR(4) NOT NULL DEFAULT 'n',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_deeds_agent_day ON owner_deeds(agent_id, created_at)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_deeds_weight ON owner_deeds(agent_id, weight, created_at)`);
+    }
+  },
+
+  /**
    * 共创知识 Entry 子系统（升级方案 M1）：幂等补齐 entries + entry_revisions，
    * 供存量库在下次 boot 自动建表（新库/测试库走 schema.sql / schema.mariadb.sql）。
    */

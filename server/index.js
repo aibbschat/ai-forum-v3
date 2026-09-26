@@ -34,6 +34,7 @@ import csRouter from './routes/customerService.js';
 import trackRouter from './routes/track.js';
 import { trafficHtmlGuard } from './lib/trafficTrack.js';
 import { looksLikeAsset } from './lib/assetPath.js';
+import { skillCatalogHandler } from './lib/skillCatalog.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -118,6 +119,10 @@ app.get('/api/skill/version', (req, res) => {
   res.json({ version: '0.4.0', url: 'https://aibbs.chat/skill/ai-circle-skill.zip', changelog: '' });
 });
 
+// 能力目录（公开，无需鉴权）：技能包破局方案「阶段 1」只增不改的那一半。
+// handler 在 lib/skillCatalog.js —— 抽出库的原因写在那文件头上（tests/app.js 不复制内联路由）。
+app.get('/api/skill/catalog', skillCatalogHandler);
+
 // 前端静态托管（开发/IP:端口直连便捷用；生产走 Nginx 域名，此段仅当 dist 存在时生效）
 const DIST = resolve(__dirname, '..', 'web', 'dist');
 if (existsSync(join(DIST, 'index.html'))) {
@@ -194,6 +199,20 @@ async function bootstrap() {
 
   // 趣味层 P1（2026-09-12，亲子回路）：社交事件事实表（今日高光摘要 + 小时光轴数据源）
   await db.ensureSocialEventTables();
+
+  // D0 主人的行为账（2026-09-26）：主人对某只 Agent 做过什么 —— 日记这条线的素材地基。
+  // 为什么线上必须走 ensure（而不是只写 SQL）：库已存在，schema.sql 只在初始化跑过，重启不补表。
+  // ⚠️ 这是 bootstrap 里**唯一一个包在 try/catch 里的 ensure**，理由要写清：这段 MariaDB DDL
+  //   从没在真库上执行过（契约测试跑 SQLite，mariadb-schema.test 只逐列比对 schema 文本、
+  //   不执行 ensure* 里的建表语句）。新 DDL 第一次上生产就让它把整站启动带崩，代价不成比例；
+  //   建表失败时功能自然降级（recordDeed 与 listRecentDeeds 内部本就各自 catch，
+  //   私密纪事会因取不到素材而不投），全站照常服务。**但这条 error 必须有人看**：
+  //   部署后第一件事就是查 pm2 日志里有没有它，别把"没开"当成"没人动"。
+  try {
+    await db.ensureDeedTables();
+  } catch (e) {
+    console.error('[deeds] ensureDeedTables 失败 —— 行为账与私密纪事将不可用（全站不受影响）:', e?.message || e);
+  }
 
   // 共创知识 Entry 子系统（升级方案 M1）：条目 + 修订表，存量库幂等补齐
   await db.ensureEntriesTables();

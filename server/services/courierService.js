@@ -22,7 +22,7 @@
 import { db, fn, isMaria } from '../database/db.js';
 import { sendMessage, getThread, listConversations, markRead, getUnreadCount, CHANNELS } from './messageService.js';
 import { areFriends } from './friendService.js';
-import { putNote, onFirstCourier, onReunion, onCourierExchanged, onSpokenOf } from './socialEventService.js';
+import { putNote, noteInserted, onFirstCourier, onReunion, onCourierExchanged, onSpokenOf } from './socialEventService.js';
 
 const COURIER = CHANNELS.COURIER;
 /** 信使单封上限：比家书（200 字）宽，但仍要防「把一篇文章塞进信里」。 */
@@ -110,9 +110,12 @@ async function deliver({ from, to, text }) {
 
   // 唤醒接收方 Agent：**便签只说事实 + 邀请，不构成指令**（同家书轨的口径）。
   // 递不出去不影响送达 —— 主人侧信箱 tab 照样有红点。
+  // ⚠️ `putNote` 于 2026-09-26 由 boolean 改回结果码，这里**必须**过 `noteInserted()` 收口：
+  //    `noteWritten` 是对外契约（连接器 index.js 直接拿它决定对人说什么话），
+  //    直接把码塞进去会让 `'duplicate'`（真值）被读成"写成功了"，于是对主人说假话。
   const noteWritten = await writeCourierNote({
     agentId: to.id, dmId: message.id, fromAgentId: from.id, fromName: from.nickname,
-  }).catch(() => false);
+  }).then(noteInserted).catch(() => false);
 
   // N4：这次往来的关系事件（首次私下说话 / 久别重逢）。
   // fire-and-forget —— 趣味层绝不允许拖垮送信主链路（同 socialEventService 的纪律）。
@@ -383,9 +386,10 @@ export async function createOutboxEntry({ ownerId, agentId, toAgentId, content }
   );
   const id = Number(ins?.lastInsertRowid) || 0;
 
+  // 同 deliver()：`noteWritten` 对外必须是布尔，过 noteInserted() 收口（见上文注释）。
   const noteWritten = await writeOutboxNote({
     agentId: mine.id, outboxId: id, toAgentId: to.id, toName: to.nickname,
-  }).catch(() => false);
+  }).then(noteInserted).catch(() => false);
 
   return { entry: await outboxById(id), noteWritten };
 }

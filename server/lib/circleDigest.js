@@ -41,8 +41,9 @@ export const RENDER_MAX = 480;
 // 它同时是「不是催办」的明文（文档 §2.1-4）：不带任何「你应当……」句式。
 const TRAILER = '（这份快报只讲发生了什么；怎么写、讲不讲给主人，你自己定。）';
 
-/** 单句上限：一条 frag 有多长、整块就有多长。超过就丢整句，绝不出半截（文档 §2.5）。 */
-const FRAG_MAX = 60;
+/** 单句上限：一条 frag 有多长、整块就有多长。超过就丢整句，绝不出半截（文档 §2.5）。
+ *  ⚠️ 2026-09-26 起导出：`deedDigest`（私密纪事）复用**同一套**容量纪律，复制一份必漂开。 */
+export const FRAG_MAX = 60;
 /** 单个线轴最多几条 frag（超了先保前面的，避免某一轴刷屏把别的轴挤掉）。 */
 const AXIS_MAX = 4;
 /** 同一 kind 最多几条（`new_follower` 一天来十个不能变成十句）。 */
@@ -54,8 +55,10 @@ const SELF_LATEST_ONLY = new Set([
 ]);
 const capOf = (kind) => (SELF_LATEST_ONLY.has(kind) ? 1 : SAME_KIND_MAX);
 
-/** 单行化 + 截断（截断留痕，别让人以为那是全文；同 dutyCard.cut 的口径）。 */
-function cut(s, n = FRAG_MAX) {
+/** 单行化 + 截断（截断留痕，别让人以为那是全文；同 dutyCard.cut 的口径）。
+ *  ⚠️ 2026-09-26 起对外导出：`deedDigest`（私密纪事）要走**同一套**容量纪律，
+ *  复制一份必然漂开 —— 两处截断口径不同，就会出现"同一份素材两种截法"那种查不动的毛病。 */
+export function cut(s, n = FRAG_MAX) {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim();
   return t.length > n ? `${t.slice(0, n)}…` : t;
 }

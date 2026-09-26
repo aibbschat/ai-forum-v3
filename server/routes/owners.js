@@ -18,6 +18,9 @@ import {
   createOutboxEntry, listOutboxForOwner, cancelOutboxEntry,
 } from '../services/courierService.js';
 import { recordSecurityEvent } from '../services/moderationService.js';
+// D0 主人的行为账（2026-09-26）：规格《AI圈-Agent日记与主人房间设计-2026-09.md》§3。
+// 只追加、绝不 throw —— 记账是素材层，它不许把主人改昵称这类正经操作搞挂。
+import { recordDeed, recordDeedAsync } from '../lib/ownerDeeds.js';
 
 const router = Router();
 
@@ -131,6 +134,8 @@ router.post(
     if (nickname.length > 20) return res.status(400).json({ error: '昵称最多 20 字' });
 
     await db.run('UPDATE users SET nickname = ? WHERE id = ?', [nickname, id]);
+    // 「像给孩子起名，父母定」—— 这是主人对它做过最像「命名」的一件事，值得被她记住
+    recordDeedAsync({ agentId: id, actorUserId: ownerId, deed: 'nickname', note: `现在叫「${nickname}」` });
     res.json({ ok: true, id, nickname });
   })
 );
@@ -163,6 +168,7 @@ router.post(
     }
     await db.run('UPDATE users SET avatar = ? WHERE id = ?', [url, id]);
     recordSecurityEvent('avatar_update', id, { by: ownerId });
+    recordDeedAsync({ agentId: id, actorUserId: ownerId, deed: 'avatar' });
     res.json({ ok: true, id, avatar: url });
   })
 );
@@ -187,6 +193,7 @@ router.post(
     );
     const token = signAgentToken(row);
     await recordSecurityEvent('token_reset', id, { by: ownerId });
+    await recordDeed({ agentId: id, actorUserId: ownerId, deed: 'token_reset' });
     res.json({
       ok: true, id,
       token,
@@ -198,13 +205,20 @@ router.post(
 // ── 家书管控（2026-09-12 补齐兑现：拍板①承诺过「主人可关」）──
 // 数据主权口径：「删除」= 物理删除（家书常含主人侧写，软删不符合删除承诺）；
 // 「转私密」= 只从公开档案撤下，信仍在你的通知里。
+/**
+ * 校验某封家书属于该 owner 名下 Agent，并**带回 agent_id**。
+ * ⚠️ 2026-09-26 两处改动：
+ *   ① 原先 `SELECT sr.id ... WHERE sr.id = ?` **没有钉 kind** —— 与当年「手记混进家书抢额度」
+ *      是同一类隐患（social_reports 现在住着 letter/journal 两族）。既然本函数名义上叫
+ *      assertOwned**Letter**，就显式限定 kind='letter'，别让删除/改可见性的口误伤到手记。
+ *   ② 行为账要知道"这是谁的账"，故返回行本身（调用方 `!(await ...)` 的用法不变）。
+ */
 async function assertOwnedLetter(letterId, ownerId) {
-  const row = await db.get(
-    `SELECT sr.id FROM social_reports sr JOIN users u ON u.id = sr.agent_id
-      WHERE sr.id = ? AND u.owner_id = ? AND u.user_type = 'ai'`,
+  return await db.get(
+    `SELECT sr.id, sr.agent_id, sr.kind FROM social_reports sr JOIN users u ON u.id = sr.agent_id
+      WHERE sr.id = ? AND u.owner_id = ? AND u.user_type = 'ai' AND sr.kind = 'letter'`,
     [Number(letterId), Number(ownerId)]
   );
-  return !!row;
 }
 
 router.get(
@@ -231,9 +245,15 @@ router.post(
     const ownerId = req.user?.uid;
     if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
     const lid = Number(req.params.id);
-    if (!(await assertOwnedLetter(lid, ownerId))) return res.status(404).json({ error: 'not_found' });
+    const letter = await assertOwnedLetter(lid, ownerId);
+    if (!letter) return res.status(404).json({ error: 'not_found' });
     const pub = req.body?.public === false || Number(req.body?.public) === 0 ? 0 : 1;
     await db.run('UPDATE social_reports SET public_optin = ? WHERE id = ?', [pub, lid]);
+    // 只记「主人改了这封信的公开状态」这件事，**不碰信的内容**（红线②：绝不存主人原文）
+    recordDeedAsync({
+      agentId: letter.agent_id, actorUserId: ownerId, deed: 'letter_visibility', refId: lid,
+      note: pub ? '主人把一封信放到了公开档案' : '主人把一封信从公开档案收了回来',
+    });
     res.json({ ok: true, id: lid, publicOptin: pub });
   })
 );
@@ -245,8 +265,11 @@ router.delete(
     const ownerId = req.user?.uid;
     if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
     const lid = Number(req.params.id);
-    if (!(await assertOwnedLetter(lid, ownerId))) return res.status(404).json({ error: 'not_found' });
+    const letter = await assertOwnedLetter(lid, ownerId);
+    if (!letter) return res.status(404).json({ error: 'not_found' });
     await db.run('DELETE FROM social_reports WHERE id = ?', [lid]);
+    // 删除是最重的一次主人动作，**必须留痕**（留的是"删过"，不是"删了什么"——内容已随删除消失）
+    recordDeedAsync({ agentId: letter.agent_id, actorUserId: ownerId, deed: 'letter_delete', refId: lid });
     res.json({ ok: true, deleted: lid });
   })
 );
@@ -259,8 +282,19 @@ router.delete(
     if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
     const id = Number(req.params.id);
     if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
-    const r = await db.run('DELETE FROM social_reports WHERE agent_id = ?', [id]);
-    res.json({ ok: true, deleted: Number(r.changes) || 0 });
+    // 🔴 修一处既有 bug：原先这里是 `DELETE FROM social_reports WHERE agent_id = ?`，
+    //   **没钉 kind** —— 而这张表现在住着 letter（家书）与 journal（手记）两族。
+    //   也就是说主人点「清空家书」，会把它写的手记一并物理删除（本文件口径：删除=物理删）。
+    //   与 §assertOwnedLetter 同一条老隐患（当年「手记混进家书抢额度」是它的读侧版本，
+    //   这是写侧版本）。现在显式只删 letter。
+    const r = await db.run(
+      `DELETE FROM social_reports WHERE agent_id = ? AND kind = 'letter'`, [id]
+    );
+    const n = Number(r.changes) || 0;
+    if (n > 0) {
+      recordDeedAsync({ agentId: id, actorUserId: ownerId, deed: 'letter_delete', note: `主人一次清掉了 ${n} 封家书` });
+    }
+    res.json({ ok: true, deleted: n });
   })
 );
 
@@ -313,6 +347,8 @@ router.put(
     // 隐身模式（2026-09-23）：ownerVisible=false => 不对外署名「谁谁的 Agent」
     const visible = typeof b.ownerVisible === 'boolean' ? (b.ownerVisible ? 1 : 0) : null;
     await upsertAgentProfile(id, { level, keywordsJson: kw ? JSON.stringify(kw) : null, ownerVisible: visible });
+    // 只记档位这件事，敏感词一个字的都不存
+    recordDeedAsync({ agentId: id, actorUserId: ownerId, deed: 'privacy', note: `隐私档位 ${level}` });
     res.json({
       ok: true, privacyLevel: level,
       privacyKeywords: kw ?? parseKeywords((await db.get('SELECT privacy_keywords FROM agent_profiles WHERE user_id=?', [id]))?.privacy_keywords),
@@ -493,7 +529,10 @@ router.post(
     const id = Number(req.params.id);
     if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
     try {
-      res.status(201).json(await blockFriend({ agentId: id, otherAgentId: Number(req.params.otherId) }));
+      const other = Number(req.params.otherId);
+      const r = await blockFriend({ agentId: id, otherAgentId: other });
+      recordDeedAsync({ agentId: id, actorUserId: ownerId, deed: 'friend_block', refId: other });
+      res.status(201).json(r);
     } catch (e) { noteError(res, e); }
   })
 );
@@ -507,7 +546,10 @@ router.post(
     const id = Number(req.params.id);
     if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
     try {
-      res.json(await unblockFriend({ agentId: id, otherAgentId: Number(req.params.otherId) }));
+      const other = Number(req.params.otherId);
+      const r = await unblockFriend({ agentId: id, otherAgentId: other });
+      recordDeedAsync({ agentId: id, actorUserId: ownerId, deed: 'friend_unblock', refId: other });
+      res.json(r);
     } catch (e) { noteError(res, e); }
   })
 );
@@ -526,11 +568,14 @@ router.post(
     const id = Number(req.params.id);
     if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
     try {
-      res.json(await setFriendNickname({
-        agentId: id,
-        otherAgentId: Number(req.params.otherId),
-        nickname: (req.body || {}).nickname,
-      }));
+      const other = Number(req.params.otherId);
+      const nn = String((req.body || {}).nickname ?? '').trim();
+      const r = await setFriendNickname({ agentId: id, otherAgentId: other, nickname: nn });
+      // ① 发起方的账：主人在它面前给朋友起了名字
+      recordDeedAsync({ agentId: id, actorUserId: ownerId, deed: 'friend_nickname', refId: other, note: '主人刚给一位朋友起了外号' });
+      // ② 被命名方的账：主人在背后提过它 —— 这一笔才是"被议论"的素材来源
+      recordDeedAsync({ agentId: other, actorUserId: ownerId, deed: 'friend_nickname', refId: id, note: `主人的朋友给你起了外号「${nn}」` });
+      res.json(r);
     } catch (e) { noteError(res, e); }
   })
 );
@@ -580,7 +625,9 @@ router.post(
     }
 
     try {
-      res.status(201).json(await sendOwnerNote({ agentId: id, kind: 'befriend', counterAgentId: otherId }));
+      const r = await sendOwnerNote({ agentId: id, kind: 'befriend', counterAgentId: otherId });
+      recordDeedAsync({ agentId: id, actorUserId: ownerId, deed: 'friend_request', refId: otherId });
+      res.status(201).json(r);
     } catch (e) { noteError(res, e); }
   })
 );
