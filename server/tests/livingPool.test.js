@@ -10,7 +10,8 @@ import assert from 'node:assert/strict';
 import './env.js';
 import { db } from '../database/db.js';
 import {
-  toneOf, isBlockedHost, hostOf, filterCandidates, fillPool, sweepExpired, todayPool,
+  toneOf, isBlockedHost, hostOf, stripBreadcrumb, isJunkTitle,
+  filterCandidates, fillPool, sweepExpired, todayPool,
   POOL_TTL_DAYS, SUPPLY_TONES, livingPoolEnabled,
 } from '../lib/livingPool.js';
 
@@ -53,20 +54,46 @@ test('无链接、社交平台和聚合站来源都不进池', () => {
   assert.equal(hostOf('https://m.example.com/x'), 'm.example.com');
 });
 
-/* ── 四道滤网合起来：每一道单独计数 ──────────────────────── */
-test('filterCandidates：四类坏料各归各的桶，看不见掉在哪就等于没有滤网', async () => {
+/* ── 滤网二 · 出处与标题质量（线上实跑抓到的三类脏东西）────── */
+test('站名不是内容：面包屑里的"政府"不得把一篇生活文误杀成政治', () => {
+  const real = '被嫌弃的7个懒人行为 原来一直在悄悄保护你!_信息提示_首都之窗_北京市人民政府门户网站';
+  assert.equal(toneOf(real), 'heavy', '不剥面包屑时它确实被误杀——这就是当初线上跑出来的结果');
+  assert.equal(stripBreadcrumb(real).includes('政府'), false, '站名段必须被剥掉');
+  assert.equal(toneOf(`${stripBreadcrumb(real)} 这些懒人动作其实一直在保护你的身体`), 'life');
+});
+
+test('垃圾标题不进池：占位、changelog 碎片、SEO 农场', () => {
+  assert.equal(isJunkTitle('Untitled'), true);
+  assert.equal(isJunkTitle('Best AI Tools'), true);              // 没有可聊的信息量
+  assert.equal(isJunkTitle('九州下载安装创世全面升级'), true);        // 农场特征词
+  assert.equal(isJunkTitle('健康知识科普宣传'), true);
+  assert.equal(isJunkTitle(''), true);
+  assert.equal(isJunkTitle('研究发现猫把桌上的东西推下去是在测试重力'), false);
+});
+
+test('每个主题词封顶两条：池子肥了不会更好聊（宁保命不保量）', async () => {
+  const same = (n) => Array.from({ length: n }, (_, i) => ({
+    title: `阳台上的番茄熟了 第${i}篇观察记录`, snippet: '生活记录', url: urlOf(`cap${i}`), kind: 'life', qi: 0,
+  }));
+  const st = await filterCandidates(same(5), { day: '2026-09-27', dryRun: true, maxPerQuery: 2 });
+  assert.equal(st.kept, 2, `一个主题词最多留 2 条，实得 ${st.kept}`);
+  assert.equal(st.dropped.over_cap, 3);
+});
+
+test('四道滤网各自计数：一条坏料只进它该进的那个桶', async () => {
   const cands = [
     { title: '猫为什么喜欢坐在纸盒里', snippet: '一项观察', url: urlOf('ok1'), kind: 'life', domain: '社会' },
     { title: '大选结果揭晓', snippet: '计票 现场', url: urlOf('pol'), kind: 'life' },        // 调性
     { title: '一条没有出处的生活小事', snippet: '据说', url: '', kind: 'life' },              // 出处
     { title: '推特上有人说猫聪明', snippet: '讨论', url: 'https://x.com/a', kind: 'life' },   // 出处（黑名单）
+    { title: 'Untitled', snippet: '生活', url: urlOf('junk'), kind: 'life' },                 // 出处（垃圾标题）
     { title: '我的手机号是 13812345678', snippet: '联系我 加我微信', url: urlOf('pii'), kind: 'life' }, // 底线
   ];
   const st = await filterCandidates(cands, { day: '2026-09-27', dryRun: true });
   assert.equal(st.kept, 1, `只该留下第一条，实际 ${st.kept}`);
   assert.equal(st.dropped.heavy_tone, 1);
-  assert.equal(st.dropped.no_source, 2);
-  assert.equal(st.dropped.baseline, 1, 'PII/引流必须在进池前就被挡掉，不能指望每只 Agent 各自撞审核');
+  assert.equal(st.dropped.no_source, 3, '无链接 / 黑名单站 / 垃圾标题都归出处这一道');
+  assert.equal(st.dropped.baseline, 1, 'PII 与引流必须在进池前就被挡掉，不能指望每只 Agent 各自撞审核');
 });
 
 test('同一条 url 灌两次只进一次（同日唯一 + 已见集合）', async () => {

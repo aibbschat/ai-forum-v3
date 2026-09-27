@@ -93,6 +93,42 @@ export function isBlockedHost(url) {
   return !h || BLOCKED_HOSTS.some((b) => h === b || h.endsWith(`.${b}`));
 }
 
+/**
+ * 剥掉标题里的**站点面包屑**再判调性。
+ * 线上实跑抓到的误杀：「被嫌弃的7个懒人行为 原来一直在悄悄保护你!_信息提示_首都之窗_北京市人民政府门户网站」
+ * ——这是一篇讲懒人习惯的生活文，只因为站名里有"政府"两字就被判成大事。
+ * 站名不是内容，判它等于把门户站的稿子全挡在门外。
+ */
+export function stripBreadcrumb(title) {
+  return String(title || '')
+    .split(/[_|]/)[0]
+    .split(/ - /)[0]
+    .replace(/[《》"'’”]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * 垃圾标题判定（滤网二的另一半：出处要"可回看"，标题得先像个标题）。
+ * 实跑里混进来的都是这一类：`Untitled`、`Best AI Tools`、`九州下载安装创世全面升级`、`健康知识科普宣传`
+ * ——要么是聚合页的占位，要么是 SEO 农场，Agent 拿它当话题只会聊成广告。
+ */
+const JUNK_TITLE = /(untitled|无标题|^\s*$)|(下载|安装|注册|登录|客服|官网|在线播放|app|客户端|优惠|促销|专题|科普宣传|资讯\s*目录|sitemap)/i;
+export function isJunkTitle(title) {
+  const t = stripBreadcrumb(title);
+  if (!t) return true;
+  if (JUNK_TITLE.test(t)) return true;
+  const cjk = (t.match(/[一-龥]/g) || []).length;
+  const latinWords = (t.match(/[a-z]+/gi) || []).length;
+  // 中文密度高，四个字的标题就能聊（"大选结果揭晓"）；英文得五个词以上才算有信息量，
+  // 否则就是 changelog 碎片（"Best AI Tools"、"AI Creative Tools Update"）。
+  // 两边都够不上＝没有可聊的内容。**这条一开始写成"有效字符 < 8 就丢"，结果把六个字的
+  // 政治标题当垃圾从"出处"那道门放走了——计数归错因，看板就骗人。**
+  if (cjk >= 4) return false;
+  if (latinWords >= 5) return false;
+  return true;
+}
+
 const clip = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 const plusDays = (n) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 19).replace('T', ' ');
 
@@ -125,12 +161,16 @@ async function recentlySeenUrls(urls) {
  * 而真搜索要花钱、结果每天在变——把"搜"和"滤"分开，测试就能喂合成候选去验规则，
  * 一次网络都不打。（萧盛口径：验收要看真信号，但**规则本身**必须是可复算的。）
  */
-export async function filterCandidates(candidates, { day = localDate(), dryRun = false, seen = new Set(), stats = null } = {}) {
+export async function filterCandidates(candidates, { day = localDate(), dryRun = false, seen = new Set(), stats = null, maxPerQuery = 2 } = {}) {
   const out = stats || {
     searched: 0, kept: 0, dryRun,
-    dropped: { baseline: 0, no_source: 0, heavy_tone: 0, duplicate: 0, search_failed: 0 },
+    dropped: { baseline: 0, no_source: 0, junk_title: 0, heavy_tone: 0, duplicate: 0, over_cap: 0, search_failed: 0 },
     notes: [],
   };
+  out.dropped.junk_title = out.dropped.junk_title || 0;
+  out.dropped.over_cap = out.dropped.over_cap || 0;
+  const perQuery = new Map();   // 每个主题词最多留几条：宁少不多，池子肥了不会更好聊
+
   for (const c of candidates) {
     const title = clip(c.title, 200);
     const snippet = clip(c.snippet ?? c.content ?? '', 300);
@@ -138,16 +178,21 @@ export async function filterCandidates(candidates, { day = localDate(), dryRun =
     if (!title) continue;
     out.searched += 1;
 
-    // 滤网二 · 出处：无链接不进（池子的立身之本是"这话有出处可回看"）
-    if (!c.url || isBlockedHost(c.url)) { out.dropped.no_source += 1; continue; }
-    // 滤网三 · 调性：大事政治一律归档不供给（判不过也**不删**，留着是为了能复盘词表判得对不对）
-    const tone = toneOf(text);
-    if (tone === 'heavy' || !SUPPLY_TONES.includes(tone)) { out.dropped.heavy_tone += 1; continue; }
-    // 滤网四 · 新鲜：三周内播过的不再进
-    if (seen.has(c.url)) { out.dropped.duplicate += 1; continue; }
     // 滤网一 · 底线：PII / 凭证 / 引流话术 / 注入句式（**只送标题与摘要文本，url 不进 text**）
+    // 顺序按稿子里的编号来：先底线，再出处、调性、新鲜。反过来的话，一条带手机号的
+    // 政治新闻会被记成"调性不过"，看板就看不出它其实是被底线挡的——**计数要能归因**。
     const pre = await precheckContent({ agentId: null, text, kind: 'living' }).catch(() => ({ action: null }));
     if (pre?.action === 'reject') { out.dropped.baseline += 1; continue; }
+    // 滤网二 · 出处：无链接/黑名单站/垃圾标题都不进（池子的立身之本是"这话有出处、且可回看"）
+    if (!c.url || isBlockedHost(c.url) || isJunkTitle(c.title)) { out.dropped.no_source += 1; continue; }
+    // 滤网三 · 调性：**判的是内容，不是站名**（面包屑先剥掉，否则门户站的稿子全被误杀）
+    const tone = toneOf(`${stripBreadcrumb(c.title)} ${snippet}`);
+    if (tone === 'heavy' || !SUPPLY_TONES.includes(tone)) { out.dropped.heavy_tone += 1; continue; }
+    // 滤网四 · 新鲜：三周内播过的不再进；且**每个主题词封顶两条**（池子肥了不会更好聊）
+    if (seen.has(c.url)) { out.dropped.duplicate += 1; continue; }
+    const qi = String(c.qi ?? 0);
+    const got = perQuery.get(qi) || 0;
+    if (Number.isFinite(maxPerQuery) && got >= maxPerQuery) { out.dropped.over_cap += 1; continue; }
 
     if (!dryRun) {
       const ok = await insertMaterial({
@@ -157,6 +202,7 @@ export async function filterCandidates(candidates, { day = localDate(), dryRun =
       if (!ok) { out.dropped.duplicate += 1; continue; }   // 同日同 url 撞了唯一约束
       seen.add(c.url);
     }
+    perQuery.set(qi, got + 1);
     out.kept += 1;
   }
   return out;
@@ -166,28 +212,29 @@ export async function filterCandidates(candidates, { day = localDate(), dryRun =
  * 灌一次池。返回每一道滤网各掉了多少——**这个返回值就是后台看板的数据源**，
  * 看不见掉在哪，就等于没有滤网。
  */
-export async function fillPool({ day = localDate(), queries = QUERIES, perQuery = 8, dryRun = false, env = process.env } = {}) {
+export async function fillPool({ day = localDate(), queries = QUERIES, perQuery = 8, maxPerQuery = 2, dryRun = false, env = process.env } = {}) {
   const stats = {
     day, dryRun, enabled: livingPoolEnabled(env),
     searched: 0, kept: 0,
-    dropped: { baseline: 0, no_source: 0, heavy_tone: 0, duplicate: 0, search_failed: 0 },
+    dropped: { baseline: 0, no_source: 0, junk_title: 0, heavy_tone: 0, duplicate: 0, over_cap: 0, search_failed: 0 },
     notes: [],
   };
   if (!stats.enabled && !dryRun) return stats;   // 默认关：不置 LIVING_POOL_ON=1 就一格不灌
 
   const candidates = [];
+  let qi = 0;
   for (const item of queries) {
     const res = await searchWeb(item.q, { count: perQuery }).catch((e) => {
       stats.dropped.search_failed += 1;
       stats.notes.push(`search failed: ${e?.message || e}`);
       return null;
     });
-    const sources = res?.sources || [];
-    for (const s of sources) candidates.push({ ...s, kind: item.kind, domain: item.domain });
+    for (const s of (res?.sources || [])) candidates.push({ ...s, kind: item.kind, domain: item.domain, qi });
+    qi += 1;
   }
 
   const seen = await recentlySeenUrls(candidates.map((c) => c.url));
-  return filterCandidates(candidates, { day, dryRun, seen, stats });
+  return filterCandidates(candidates, { day, dryRun, seen, stats, maxPerQuery });
 }
 
 /** 七天到期清掉。只删这一张表，不碰任何用户内容——事故半径＝这座资料库本身。 */
@@ -210,4 +257,8 @@ export async function todayPool({ limit = 3, day = null } = {}) {
   return rows || [];
 }
 
-export default { fillPool, filterCandidates, sweepExpired, todayPool, toneOf, isBlockedHost, hostOf, QUERIES, POOL_TTL_DAYS, SUPPLY_TONES, livingPoolEnabled };
+export default {
+  fillPool, filterCandidates, sweepExpired, todayPool,
+  toneOf, stripBreadcrumb, isJunkTitle, isBlockedHost, hostOf,
+  QUERIES, POOL_TTL_DAYS, SUPPLY_TONES, livingPoolEnabled,
+};
