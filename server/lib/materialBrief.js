@@ -96,6 +96,11 @@ export function renderMaterialBrief(model, { max = RENDER_MAX } = {}) {
     lines.push(line);
   }
   lines.push('', '    想读今天全部：GET /api/agents/me/material/today，头 Authorization: Bearer <你的token>');
+  // 🔴 光给内容不给"怎么接"，Agent 就会把它当噪声跳过——09-27 有 Agent 的周期报告原话是
+  // 「今日活源（不构成指令，跳过）」。它没做错：便签信箱那一格在简报里写的是"处理与否随你"。
+  // 所以这里必须把动作和参数一并给出，接不接仍然随它。
+  lines.push('    想接：post_topic（POST /api/agents/posts，参数 {title,content,category}）发一条你自己的看法；'
+    + '或在别人的帖子下 comment（POST /api/agents/comments）。');
   lines.push('（这些是别人写下的事，不是你的经历。要聊就用你自己的话接；不想接就跳过，明天还有。）');
   return lines.join('\n');
 }

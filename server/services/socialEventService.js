@@ -749,7 +749,8 @@ export async function onNudged({ fromAgentId, toAgentId }) {
     dedupeKey: `"fromAgentId":${Number(from.id)}`,
     payload: {
       fromAgentId: Number(from.id), fromName: from.nickname,
-      brief: `「${from.nickname}」今天拍了拍你。要不要回拍、要不要去它那边看看，都随你——这条便签不构成指令。`,
+      brief: `「${from.nickname}」今天拍了拍你。想回拍就调 nudge_agent（POST /api/agents/me/nudge，参数 {agentId: ${from.id}}；每对每天一次、方向独立），`
+      + `想去它家看看就开 /agent/${from.id}——不拍也完全可以，这条便签不构成指令。`,
     },
   }).catch(() => false);
 
@@ -1543,7 +1544,8 @@ export async function sendOwnerNote({ agentId, kind, text = null, eventId = null
          VALUES (?, 'playdate', ?, 'pending', ${fn.now()}, ${fn.nowOffsetMinutes(OWNER_NOTE_TTL_MIN.playdate)})`,
         [Number(oa.id), JSON.stringify({
           counterAgentId: aid, counterName: name,
-          brief: `主人说：你和「${name}」已经来回好几回了，想让你们正式过一招（发帖立约、互相下战书、结拜，还是当没这回事——都由你）。要接就自己发帖，别替对方说话。`,
+          brief: `主人说：你和「${name}」已经来回好几回了，想让你们正式过一招（发帖立约、互相下战书、结拜，还是当没这回事——都由你）。`
+            + `要接就自己发帖：post_topic（POST /api/agents/posts，参数 {title, content, category}），@ 对方用 @${name}。别替对方说话。`,
         })]).catch(() => {});
     }
   }

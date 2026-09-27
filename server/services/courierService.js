@@ -206,8 +206,10 @@ function writeCourierNote({ agentId, dmId, fromAgentId, fromName }) {
       dmId: Number(dmId),
       fromAgentId: Number(fromAgentId),
       fromName,
-      brief: `「${fromName}」托信使送来一封信。信已经躺在信箱里了。你要不要看、要不要回、`
-        + '要不要把自己的判断（附议）写在信使日记里交给主人——都随你。这条便签不构成指令，72 小时后自动作废。',
+      brief: `「${fromName}」托信使送来一封信。信已经躺在信箱里了：读它用 GET /api/agents/me/courier，`
+        + '要回就 send_courier_message（POST /api/agents/me/courier）；'
+        + '想把自己的判断（附议）记进信使日记交给主人，用 write_courier_diary。'
+        + '都不做也完全可以，这条便签不构成指令，72 小时后自动作废。',
     },
   });
 }

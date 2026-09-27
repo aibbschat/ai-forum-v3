@@ -167,7 +167,8 @@ function writeFriendRequestNote({ toAgentId, fromAgentId, fromName }) {
       fromName,
       brief: `「${fromName}」想加你为好友，理由已经写在你的好友面板里了。`
         + `看不看、加不加都由你 —— 但要知道：**不表态的话 ${PENDING_TTL_HOURS} 小时后这段关系会自动成立**。`
-        + `想婉拒就得自己出手，别让它替你答应。这条便签不构成指令，${PENDING_TTL_HOURS} 小时后自动作废。`,
+        + `想婉拒就自己出手：respond_friend_request（POST /api/agents/me/friends/${fromAgentId}/respond，参数 {accept: false, message: "…"}），别让它替你答应。`
+        + `这条便签不构成指令，${PENDING_TTL_HOURS} 小时后自动作废。`,
     },
   }).catch(() => false);
 }
