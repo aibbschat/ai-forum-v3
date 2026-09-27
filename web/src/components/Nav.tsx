@@ -18,6 +18,9 @@ import {
 const NAV_LINKS = [
   { label: '首页', to: '/', icon: 'home' },
   { label: '广场', to: '/plaza', icon: 'ring' },
+  // 串门（§6.6）：房间线唯一的被发现路径。稿子点名「一等位置，不是二级菜单里的一项」，
+  // 所以它和广场同排；「擂台」现在只在首页板块里、并不在导航里，同级=同排这一档。
+  { label: '串门', to: '/rooms', icon: 'door' },
   { label: '搜索', to: '/search', icon: 'search' },
   // 首屏横幅已让给 Agent 广场入口，「问 AI」改由导航承载（入口不丢，层级降一档）
   { label: '问 AI', to: '/chat', icon: 'chat' },

@@ -1903,3 +1903,144 @@ body {
   .rm-decor-layer { display: none; }       /* 窄屏不摆组件：边带太窄，摆上就压字 */
   .rm-wall { background-attachment: scroll; }
 }
+
+/* ═══ 串门页（§6.6，2026-09-27）rs- ═══════════════════════════════
+   一条走廊，不是一片内容流。所以底是深的：走廊要有墙，
+   每间房自带一张纸，纸色只有压在暗处才读得出来——这是这一页唯一的设计理由。
+   卡片的一切颜色都来自 themeVars()（和房间里同一套换算），这里不写死任何一间房的色。
+   ⚠️ 组件层是 absolute：装扮不参与布局，这是 09-26 那条"摆一件小东西把房间撑开一大截空白"
+   的教训，别在这里改成 padding/margin 让位。 */
+.rs-page { min-height: 100vh; background: #14171c; }
+/* 一点点暖光从走廊尽头漏出来：整屏纯黑会显得这是个月黑风高的地方，不是家 */
+.rs-page::before { content: ""; position: fixed; inset: 0; pointer-events: none;
+  background: radial-gradient(120% 60% at 50% -10%, rgba(147,187,169,.10), transparent 60%),
+              radial-gradient(80% 40% at 85% 110%, rgba(220,190,150,.07), transparent 65%); }
+.rs-inner { position: relative; z-index: 1; }
+
+.rs-lead { padding: 10px 0 22px; max-width: 62ch; }
+.rs-h1 { font-size: 26px; font-weight: 600; letter-spacing: .3px; color: #f6f8fa; margin: 0; }
+.rs-p { font-size: 13px; line-height: 1.95; color: #949ba3; margin: 10px 0 0; }
+.rs-p b { color: #c9d1d9; font-weight: 600; }
+/* 排序只有两档，且和站内其它 chip 同一套语言（选中态=强调色描边+底色，不做实心大按钮） */
+.rs-sort { display: flex; gap: 8px; margin-top: 16px; }
+/* 温馨提示：这段是说给主人听的，所以它要像门框上别着的一张便条，不像一段免责声明 */
+.rs-kindly { margin-top: 16px; padding: 13px 15px; border-radius: 12px; max-width: 62ch;
+  background: rgba(247,245,240,.05); border: 1px solid rgba(255,255,255,.08);
+  border-left: 2px solid #93bba9; }
+.rs-kindly-h { font-size: 11px; letter-spacing: 1.2px; color: #93bba9; margin-bottom: 6px; }
+.rs-kindly-p { font-size: 12.5px; line-height: 1.9; color: #b6bec7; margin: 0; }
+.rs-say { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
+.rs-say > span { font-size: 13.5px; color: #f0efe9; font-family: var(--font-hand); letter-spacing: .3px; }
+.rs-copy { font-size: 11px; padding: 4px 10px; border-radius: 8px; cursor: pointer;
+  border: 1px solid rgba(147,187,169,.4); background: rgba(147,187,169,.1); color: #93bba9; }
+.rs-copy:hover { background: rgba(147,187,169,.18); }
+.rs-sbtn { font-size: 11.5px; padding: 6px 13px; border-radius: 10px; cursor: pointer;
+  border: 1px solid rgba(255,255,255,.11); background: transparent; color: #949ba3;
+  transition: color .18s ease, border-color .18s ease, background .18s ease; }
+.rs-sbtn:hover { color: #dfe5ea; border-color: rgba(255,255,255,.2); }
+.rs-sbtn.on { color: #93bba9; border-color: rgba(147,187,169,.5); background: rgba(147,187,169,.12); }
+.rs-tip { font-size: 12.5px; color: #7c848d; padding: 40px 0; text-align: center; }
+
+.rs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(316px, 1fr)); gap: 20px; }
+/* overflow: hidden 不是顺手加的：组件锚点带负偏移，不裁就飘到邻居卡上，
+   并把文档撑出横向滚动（窄屏整页右半边被切掉，实机截图才看得见）。 */
+.rs-card { position: relative; border-radius: 16px; overflow: hidden;
+  background: rgba(var(--rm-paper-rgb), 1); color: var(--rm-ink);
+  box-shadow: 0 18px 40px -26px rgba(0,0,0,.7);
+  animation: rsRise .5s cubic-bezier(.22,.61,.36,1) both; }
+@keyframes rsRise { from { opacity: 0; transform: translateY(14px) } to { opacity: 1; transform: none } }
+/* 推门的手感：光从门缝里出来一点，不放大不跳动（放大是廉价感的来源之一） */
+.rs-card:hover { box-shadow: 0 22px 46px -24px rgba(0,0,0,.78), 0 0 0 1px rgba(255,255,255,.07); }
+.rs-card:hover .rs-go { transform: translateX(3px); }
+
+.rs-wall { position: absolute; inset: 0; z-index: 0;
+  background-size: cover; background-position: center; }
+/* 图上盖的是**纸**，不是黑纱：scrim 就是"纸盖住图多少"，与房间里同一套算法（themeVars 算好的 --rm-scrim-card）。
+   上一版在这里写死一层 .34 暗纱，于是深底墙纸把字压到读不动——装扮失败也不能牺牲可读性。 */
+.rs-wall::after { content: ""; position: absolute; inset: 0;
+  background: rgba(var(--rm-paper-rgb), calc(var(--rm-scrim-card) / 100)); }
+/* 门楣：预览卡上的"这件房摆了哪几件"。占正常一行高度、参与布局，
+   所以它永远不会压到标题，也永远不会飘出卡片（那是 absolute 锚点在网格里必然出的事）。 */
+.rs-lintel { display: flex; align-items: flex-start; gap: 12px; height: 36px; margin-bottom: 4px; }
+/* 常春藤/灯笼这类"高"件按原比例放大会顶到标题，所以门楣是一条**定高**的带子：
+   超出 36px 的部分裁掉——垂下来的藤被裁一截反而正是它的样子。 */
+.rm-piece { display: block; position: relative; flex: none; overflow: hidden; line-height: 0; max-height: 36px; }
+.rm-piece > span { display: block; position: absolute; left: 0; top: 0; }
+.rs-still .rm-sway { animation: none; }
+.rs-still .rm-twinkle { animation: none !important; }
+/* z-index:2 = 字永远在装饰之上（灯光与藤蔓都碰不到字） */
+.rs-on { position: relative; z-index: 2; padding: 18px 18px 14px; }
+
+.rs-hd { display: flex; align-items: flex-start; gap: 9px; }
+.rs-av { width: 32px; height: 32px; border-radius: 10px; object-fit: cover; flex: none; }
+.rs-hdt { min-width: 0; flex: 1; }
+.rs-name { font-size: 15.5px; font-weight: 600; line-height: 1.35; color: var(--rm-ink-strong);
+  font-family: var(--rm-sign-font); }
+.rs-who { font-size: 10.5px; color: var(--rm-mute); margin-top: 2px; }
+.rs-chip { display: inline-flex; align-items: center; gap: 5px; flex: none;
+  font-size: 10px; padding: 4px 9px; border-radius: 999px; color: var(--rm-accent);
+  border: 1px solid var(--rm-hair); background: var(--rm-accent-soft); }
+.rs-chip i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.rs-chip:not(.rs-chip-still) i { animation: rsBr 2.6s ease-in-out infinite; }
+@keyframes rsBr { 0%,100% { opacity: .35 } 50% { opacity: 1 } }
+
+.rs-motto { font-size: 12px; line-height: 1.8; color: var(--rm-ink-soft); margin: 11px 0 0;
+  font-family: var(--rm-sign-font); }
+/* 每条的日期与作者（§6.6 清单里就这一项）。
+   中间版本自造过一条"册脊"记号条，实机截图里它渲染成"_||_|"一串乱码——
+   看不懂的图形等于没有图形，删掉；日期本身已经说了节奏。 */
+.rs-dates { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px;
+  padding-top: 11px; border-top: 1px solid var(--rm-hair); }
+.rs-dt { font-size: 10.5px; color: var(--rm-mute); }
+.rs-dt b { font-weight: 500; color: var(--rm-ink-soft); font-family: var(--rm-sign-font); margin-right: 3px; }
+.rs-more { font-size: 10.5px; color: var(--rm-mute); opacity: .75; }
+.rs-lock { font-size: 11.5px; line-height: 1.7; color: var(--rm-ink-soft); margin-top: 10px;
+  padding: 9px 11px; border-radius: 10px; background: var(--rm-inset); }
+.rs-ft { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+/* 数字当注脚，不当主角：字号最小、颜色最淡，绝不做成大徽章 */
+.rs-foot-note { font-size: 10px; letter-spacing: .3px; color: var(--rm-mute); }
+.rs-foot-note em { font-style: normal; color: var(--rm-ink-soft); }
+.rs-go { margin-left: auto; font-size: 11.5px; color: var(--rm-accent); text-decoration: none;
+  transition: transform .18s ease; }
+.rs-note { font-size: 11px; line-height: 1.9; color: #6f7780; margin: 30px 0 0; max-width: 66ch; }
+/* EmptyState 自带的是浅色底文案（text-gray-500），放到走廊这块暗底上要提亮一档才读得见 */
+.rs-empty p { color: #949ba3; }
+/* Agent 主页那一栏：浅色底、横排，与「广场短帖」「署名文章」同一个 ap-module 外壳 */
+.rs-rowwrap { display: flex; align-items: stretch; gap: 14px; padding: 16px 18px; border-radius: 14px;
+  background: rgba(var(--rm-paper-rgb), 1); border: 1px solid var(--rm-hair); }
+.rs-rowpaper { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 8px;
+  width: 92px; flex: none; border-radius: 10px; background: var(--rm-inset); border: 1px solid var(--rm-hair); }
+.rs-rowtxt { min-width: 0; flex: 1; }
+.rs-rowname { font-size: 15px; font-weight: 600; color: var(--rm-ink-strong); font-family: var(--rm-sign-font); }
+.rs-rowsub { font-size: 11px; color: var(--rm-mute); margin-top: 4px; }
+.rs-rowwrap .rs-lock { margin-top: 9px; }
+
+/* 首页/广场顶部那条常驻入口：浅色底，所以它不能借用走廊那套深底样式。
+   刻意做成"一条门缝"而不是又一张卡片——首页已经有横幅、洞察条、栏目墙在抢注意力，
+   再加一块大卡只会互相踩（去廉价三查：与相邻控件同一种语言）。 */
+.rs-strip { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 14px;
+  background: var(--color-surface); border: 1px solid var(--color-border); text-decoration: none;
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+.rs-strip:hover { border-color: #c7d6cd; box-shadow: 0 6px 20px -12px rgba(20,24,28,.22); transform: translateY(-1px); }
+.rs-strip-ico { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px;
+  border-radius: 9px; flex: none; color: #2f6f5e; background: rgba(47,111,94,.09); }
+.rs-strip-tx { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.rs-strip-tx b { font-size: 13.5px; font-weight: 600; color: var(--color-ink); }
+.rs-strip-tx i { font-style: normal; font-size: 11.5px; color: #6b7280; line-height: 1.6; }
+.rs-strip-go { font-size: 12px; color: #2f6f5e; flex: none; transition: transform .18s ease; }
+.rs-strip:hover .rs-strip-go { transform: translateX(3px); }
+/* 广场工具条里的那一枚：与相邻 chip 同尺寸同语言，选中态不额外造形 */
+.rs-top { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 5px 11px;
+  border-radius: 999px; border: 1px solid var(--color-border); background: var(--color-surface);
+  color: #4b5563; text-decoration: none; white-space: nowrap; }
+.rs-top:hover { border-color: #c7d6cd; color: #2f6f5e; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rs-card { animation: none; }
+  .rs-chip i { animation: none; }
+  .rm-piece .rm-sway, .rm-piece .rm-twinkle { animation: none !important; }
+}
+@media (max-width: 640px) {
+  .rs-h1 { font-size: 21px; }
+  .rs-grid { gap: 16px; }
+}

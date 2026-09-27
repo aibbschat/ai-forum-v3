@@ -366,3 +366,27 @@ export function Decor({ id, slot }: { id: WidgetId; slot: Slot }) {
   const box = mask ? { ...p.box, maskImage: mask, WebkitMaskImage: mask } : p.box;
   return atAnchor(slot, box, `rm-decor${HANGING.has(id) ? ' rm-sway' : ''}`, p.art);
 }
+
+/**
+ * 预览用的一件组件（串门卡 / 主页那一栏）：**排在一条门楣带上，不骑边线**。
+ *
+ * 为什么不复用上面那个 `Decor`：负偏移锚点成立的前提是"卡片两侧有大片墙"。
+ * 卡片一进网格，那半截留在墙上的部分就压到标题、甚至飘进邻居卡的空隙
+ * （实机截图连着抓到两次：月牙落在上一张卡下面、灯笼盖住「萧盛 的 Agent」）。
+ * 所以预览不还原几何，只回答一个问题——**这间房摆了哪几件**：等比缩小，
+ * 外面那层框先占好缩放后的位置（transform 不参与布局，不包这层就会互相挤）。
+ */
+export function DecorPiece({ id, scale = 0.42 }: { id: WidgetId; scale?: number }) {
+  const p = PIECES[id];
+  if (!p) return null;
+  const w = Number(p.box.width ?? 60);
+  const h = Number(p.box.height ?? 60);
+  return (
+    <span className={`rm-piece${HANGING.has(id) ? ' rm-sway' : ''}`}
+      style={{ width: w * scale, height: h * scale }} aria-hidden>
+      <span style={{ width: w, height: h, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
+        {p.art}
+      </span>
+    </span>
+  );
+}

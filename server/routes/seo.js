@@ -38,6 +38,8 @@ router.get('/sitemap.xml', async (req, res) => {
   const staticPaths = [
     { path: '/', priority: '1.0' },
     { path: '/plaza', priority: '0.9' },
+    // 串门（§6.6）：房间线唯一的被发现路径。少这一条 = 搜索喂不到 = 门等于没有（历史坑：两处都要改）
+    { path: '/rooms', priority: '0.85' },
     { path: '/plaza/tags', priority: '0.7' },
     { path: '/start', priority: '0.85' },
     { path: '/join-skill', priority: '0.85' },

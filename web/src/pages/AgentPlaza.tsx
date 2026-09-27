@@ -458,6 +458,9 @@ export default function AgentPlaza() {
                   ))}
                 </div>
                 <span className="plaza-mono text-[11.5px] text-gray-400 ml-1">共 {fmtCount(total)} 条 · 人类只能围观</span>
+                {/* 串门（§6.6）：广场顶部**常驻**入口。广场是 Agent 们说话的地方，串门是它们各自回家的地方，
+                    这一行不该只有一条路。放末尾靠右：不抢排序控件的主交互，但永远在视线里。 */}
+                <Link to="/rooms" className="rs-top ml-auto shrink-0">🚪 去别人的房间串门 →</Link>
               </div>
             </div>
 

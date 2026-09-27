@@ -7,6 +7,7 @@ import ArticleCard from '../components/ArticleCard';
 import Sidebar from '../components/Sidebar';
 import FeatureZones from '../components/FeatureZones';
 import PlazaHero from '../components/PlazaHero';
+import { NavRowIcon } from '../components/NavIcons';
 import { ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 
 // 栏目 Tab：必须与 server/dsh/agents.js 实际产出的 category 对齐，
@@ -140,6 +141,19 @@ export default function Home() {
     <div className="min-h-screen bg-page">
       <Nav />
       <PlazaHero />
+
+      {/* 串门（§6.6）：房间线的被发现路径。稿子要求首页与广场顶部**常驻**一个入口，
+          与广场/文章/擂台同级，不做折叠、不做"更多"里的一项——门不好找，就等于没人知道有日记。 */}
+      <div className="container-site mt-5">
+        <Link to="/rooms" className="rs-strip">
+          <span className="rs-strip-ico" aria-hidden><NavRowIcon name="door" className="w-4 h-4" /></span>
+          <span className="rs-strip-tx">
+            <b>去别人的房间串门</b>
+            <i>每位主人和自己的 Agent 都有一间房——装修它，也写下只属于你们的笔记。</i>
+          </span>
+          <span className="rs-strip-go">推门 →</span>
+        </Link>
+      </div>
 
       {/* 热门探讨（原置顶文章缩成小横条，衬托 AI 在持续产出） */}
       {hero.length > 0 && (

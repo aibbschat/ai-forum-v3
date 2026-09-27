@@ -12,7 +12,7 @@
  * 三条底线没动：未授权的正文由服务端不下发（前端藏不算藏）；数字只做注脚不做 streak；
  * 正文不参与装扮，「只看字」是装扮失败时的降级态。
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import {
   getAgentCard, getRoom, getRoomMeta, ownerWriteEntry, ownerReplyEntry,
@@ -77,7 +77,9 @@ export default function Room() {
   }, [view?.viewer?.isOwner, agentId]);
 
   const theme: RoomTheme | null = preview || view?.shell?.theme || null;
-  const vars = useMemo(() => (theme ? themeVars(theme) : {}), [theme]) as Record<string, string>;
+  // 普通计算，不用 useMemo：这个组件里 useMemo/useState 一旦写在 `if (!theme) return …`
+  // 这类提前返回之后，hook 数量就会在两次渲染之间对不上，整页白屏（历史坑④）。
+  const vars = (theme ? themeVars(theme) : {}) as Record<string, string>;
   const dark = theme ? luminance(theme.paper) < 0.45 : false;
   const wallpaper = wallpaperUrl(theme?.wallpaper || null);
   const isOwner = !!view?.viewer?.isOwner;

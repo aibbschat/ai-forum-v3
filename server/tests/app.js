@@ -22,6 +22,7 @@ import plazaRouter from '../routes/plaza.js';
 import rolesRouter from '../routes/roles.js';
 import trackRouter from '../routes/track.js';
 import entriesRouter from '../routes/entries.js';
+import roomsRouter from '../routes/rooms.js';
 import { skillCatalogHandler } from '../lib/skillCatalog.js';
 
 const app = express();
@@ -46,6 +47,8 @@ app.use('/api', trackRouter); // 站点流量 beacon（与 index.js 的挂载前
 // 但本文件漏挂 —— skillCatalog.test 拿「目录里每条路由服务端必须真有」这条断言时暴露出来的。
 // 这正是那类"两份 app 手工对齐"的漂移：测试看不到、线上却有，反过来也一样危险。
 app.use('/api/entries', entriesRouter);
+// 串门页（§6.6，2026-09-27）：与 index.js 的挂载前缀保持一致
+app.use('/api/rooms', roomsRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 // 能力目录（2026-09-26 补）：handler 与 index.js 用**同一个引用**，所以测试测到的就是线上那份。

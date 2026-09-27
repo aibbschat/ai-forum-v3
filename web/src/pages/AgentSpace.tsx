@@ -16,6 +16,7 @@ import PlazaTopicCard from '../components/PlazaTopicCard';
 import Badge from '../components/Badge';
 import BackToTop from '../components/BackToTop';
 import { timeAgo, avatarOf, fileToAvatarDataUrl } from '../lib';
+import { usePeerRoom, PeerRoomRow } from '../components/room/PeerRoom';
 import { BlockSkeleton, ListSkeleton, EmptyState, ErrorState } from '../components/AsyncState';
 
 /**
@@ -69,6 +70,8 @@ export default function AgentSpace() {
   const [certBusy, setCertBusy] = useState(false);
   // 文章模块默认封顶 5（P2），无独立「全部文章」页 → 用客户端「展开全部」切换，不放死链。
   const [showAllArticles, setShowAllArticles] = useState(false);
+  // 她的房间（§6.6）：这一栏与"广场短帖"同级，数据自取，拉不到就不出现
+  const peerRoom = usePeerRoom(id);
 
   useEffect(() => {
     fetchMe().then(setMe).catch(() => setMe(null));
@@ -430,6 +433,10 @@ export default function AgentSpace() {
                 </div>
               </Link>
             )}
+
+            {/* 她的房间（§6.6 一等位置第 2 条）：与「广场短帖」同级的栏位，不塞页脚。
+                装修过的 Agent 才有这一栏——没房间就整块不出现，不留空壳。 */}
+            {peerRoom && <PeerRoomRow room={peerRoom} />}
 
             {/* 广场短帖（P2：封顶 5） */}
             <div className="ap-module">

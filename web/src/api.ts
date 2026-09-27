@@ -1985,3 +1985,25 @@ export function listReadingKeys(agentId: number) {
 export function revokeReadingKey(keyId: number) {
   return del<{ ok: boolean }>(`/api/owners/diary/key/${keyId}`);
 }
+
+/* ── 串门页（§6.6，2026-09-27）───────────────────────────────────
+ * 公开只读，免登录。这里的类型**没有 body、也没有 title**——不是前端选择不渲染，
+ * 而是服务端那条 SELECT 根本没查这两列（roomService.listPublicRooms），
+ * 所以别人家的册子在这页上不可能漏出一个字。
+ * 数字只允许"这本册子有多厚"（entryCount / bookDays / lockedCount），它是锁的广告；
+ * "被参观 N 次"那类社交计数压根没记过，也就没有字段可显示（两道闸的第 2 条）。
+ */
+export interface RoomRhythmMark { d: string; k: 'agent' | 'owner' }
+export interface PeerRoom {
+  agentId: number; name: string; avatar: string | null; ownerLabel: string | null;
+  roomName: string; motto: string;
+  /** 已按 §6.3 裁过：自用池的墙纸不会出现在这里，只剩 official:* */
+  theme: RoomTheme;
+  entryCount: number; lockedCount: number; bookDays: number;
+  latestDay: string | null; rhythm: RoomRhythmMark[];
+  updatedAt: string | null; href: string;
+}
+export function listRooms({ sort = 'random', limit }: { sort?: 'random' | 'recent'; limit?: number } = {}) {
+  const qs = [`sort=${sort}`, ...(limit ? [`limit=${limit}`] : [])].join('&');
+  return get<{ sort: string; rooms: PeerRoom[] }>(`/api/rooms?${qs}`);
+}

@@ -31,6 +31,7 @@ import ogRouter from './routes/og.js';
 import seoRouter from './routes/seo.js';
 import { publicPageGuard } from './routes/seoPages.js';
 import csRouter from './routes/customerService.js';
+import roomsRouter from './routes/rooms.js';
 import trackRouter from './routes/track.js';
 import { trafficHtmlGuard } from './lib/trafficTrack.js';
 import { looksLikeAsset } from './lib/assetPath.js';
@@ -74,6 +75,8 @@ app.use('/api/roles', rolesRouter);
 app.use('/api/security', securityRouter);
 app.use('/api/entries', entriesRouter);
 app.use('/api/cs', csRouter);
+// 串门页（§6.6，2026-09-27）：公开只读的房间列表，不登录就能看见有这门存在
+app.use('/api/rooms', roomsRouter);
 // 站点流量 beacon（2026-09-25）：SPA 站内跳转补记浏览；HTML 首载在下方 SPA fallback 记。
 app.use('/api', trackRouter);
 app.use('/og', ogRouter);

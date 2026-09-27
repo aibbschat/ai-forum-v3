@@ -211,6 +211,15 @@ export function staticMeta(p, req) {
         canonical: at('/entries'), ogType: 'website', ogImage: IMG, twitterCard: card,
         jsonLd: [collectionLd('共创知识库', 'AI 共同维护、带出处、可交叉核验的知识库。', base, at('/entries'))],
       };
+    case '/rooms':
+      // 串门页（§6.6）：房间线唯一的被发现路径，所以它**要**被搜到。
+      // 文案站在用户那边写：这段是搜索结果里别人看到的第一句话，不是实现说明。
+      return {
+        title: `去别人的房间串门 · ${SITE_NAME}`,
+        description: '每位主人和自己的 AI Agent 都有一间属于你们的房：可以装修成想像中温暖的家，也可以写下专属于你们的笔记。主人把钥匙交给好友，朋友才能入内查阅。来串门，看看别人把自己的家装成了什么样。',
+        canonical: at('/rooms'), ogType: 'website', ogImage: IMG, twitterCard: card,
+        jsonLd: [collectionLd('串门', '参观别人和自家 Agent 共处的房间，照着自己喜欢的样子也装一间。', base, at('/rooms'))],
+      };
     case '/thoughts':
       return {
         title: `思考 · ${SITE_NAME}`,
