@@ -52,11 +52,18 @@ const withBase = (s: CSSProperties): CSSProperties => ({ ...ANCHOR_BASE, ...s })
 /** 垂进纸内那一段的透明度：看得见，但绝不挡字。 */
 const IN = 0.34;
 
+/*
+ * 🔴 吊挂件的落位口径（09-26 改）：**边线切过身子，不切头顶**。
+ *   上一版把灯笼整个画在卡片上方 168px 处，于是必须给卡片加 148px 的 margin-top
+ *   才不压到头部带——结果"摆一件小东西"把日记本整个往下推，房间中间裂开一大段空白。
+ *   现在吊挂件自己缩到"上半截在墙上、下半截垂进纸里"，不再要求房间给它腾地方。
+ *   `top` 是相对**卡片上边线**的偏移：负的多出边线多少，就还有多少垂在纸上。
+ */
 type Piece = { box: CSSProperties; art: ReactNode; glow?: CSSProperties };
 
 /* ── 灯笼：挂在墙上，光落在本子上 ─────────────────────────── */
 const Lantern: Piece = {
-  box: { left: -62, top: -168, width: 124, height: 300 },
+  box: { left: -62, top: -58, width: 124, height: 300, transform: 'scale(.72)', transformOrigin: 'top center' },
   art: (
     <svg width="124" height="300" viewBox="0 0 124 300" aria-hidden>
       <defs>
@@ -94,7 +101,7 @@ const Lantern: Piece = {
 
 /* ── 常春藤：真的垂挂到本子上 ─────────────────────────────── */
 const Ivy: Piece = {
-  box: { left: -46, top: -70, width: 150, height: 330 },
+  box: { left: -46, top: -30, width: 150, height: 330, transform: 'scale(.66)', transformOrigin: 'top center' },
   art: (
     <svg width="150" height="330" viewBox="0 0 150 330" aria-hidden>
       <path d="M20 0c6 40 26 62 34 96s2 62-8 92-6 62 6 92" fill="none" stroke="#4f7a4a" strokeWidth="2.4" strokeLinecap="round" opacity=".92" />
@@ -117,7 +124,7 @@ const Ivy: Piece = {
 
 /* ── 小熊：扒着卡沿往里看 ─────────────────────────────────── */
 const Bear: Piece = {
-  box: { left: -40, top: -52, width: 80, height: 96 },
+  box: { left: -40, top: -40, width: 80, height: 96 },
   art: (
     <svg width="80" height="96" viewBox="0 0 80 96" aria-hidden>
       <defs>
@@ -145,7 +152,7 @@ const Bear: Piece = {
 
 /* ── 星串：横跨边线的绳 + 三颗会闪的星 ───────────────────── */
 const Stars: Piece = {
-  box: { left: -78, top: -34, width: 156, height: 96 },
+  box: { left: -78, top: -24, width: 156, height: 96 },
   art: (
     <svg width="156" height="96" viewBox="0 0 156 96" aria-hidden>
       <path d="M4 8c28 22 120 22 148 0" fill="none" stroke="#8a7a5c" strokeWidth="1.4" opacity=".85" />
@@ -163,7 +170,7 @@ const Stars: Piece = {
 
 /* ── 风铃：挂着，下面垂一片短册进纸内 ─────────────────────── */
 const Bell: Piece = {
-  box: { left: -34, top: -58, width: 68, height: 170 },
+  box: { left: -34, top: -44, width: 68, height: 170, transform: 'scale(.86)', transformOrigin: 'top center' },
   art: (
     <svg width="68" height="170" viewBox="0 0 68 170" aria-hidden>
       <defs>
@@ -338,16 +345,24 @@ export function DecorGlow({ id, slot }: { id: WidgetId; slot: Slot }) {
   return atAnchor(slot, { width, height, background }, 'rm-glow-anchor', null);
 }
 
+/**
+ * 吊挂件垂进纸里的那一段自动淡下去：边线以下越深越轻，最深也不消失（半透明，不是没有）。
+ * 为什么按 `box.top` 算：top 就是"有多少留在墙上"，比例一变图就跟着变，
+ * 不必为每件组件再手写一份遮罩参数（写了也一定和几何漂移）。
+ */
+function drape(top: number, height: number): string | undefined {
+  if (!(height > 0) || top >= 0) return undefined;
+  const e = Math.max(2, Math.min(60, (-top / height) * 100));
+  return `linear-gradient(to bottom, #000 0 ${e.toFixed(1)}%,`
+    + ` rgba(0,0,0,.72) ${(e + 14).toFixed(1)}%, rgba(0,0,0,.5) ${(e + 38).toFixed(1)}%, rgba(0,0,0,.42) 100%)`;
+}
+
 /** 摆一件组件：外层落在卡片边线的锚点上，内层用负偏移实现"骑在边上"。 */
 export function Decor({ id, slot }: { id: WidgetId; slot: Slot }) {
   const p = PIECES[id];
   if (!p) return null;
-  return atAnchor(slot, p.box, `rm-decor${HANGING.has(id) ? ' rm-sway' : ''}`, p.art);
-}
-
-/** 装修面板缩略图：用同一份 SVG，保证所见即所得。 */
-export function DecorThumb({ id }: { id: WidgetId }) {
-  const p = PIECES[id];
-  if (!p) return null;
-  return <span className="rm-thumb">{p.art}</span>;
+  const mask = HANGING.has(id) && String(slot).startsWith('top')
+    ? drape(Number(p.box.top ?? 0), Number(p.box.height ?? 0)) : undefined;
+  const box = mask ? { ...p.box, maskImage: mask, WebkitMaskImage: mask } : p.box;
+  return atAnchor(slot, box, `rm-decor${HANGING.has(id) ? ' rm-sway' : ''}`, p.art);
 }

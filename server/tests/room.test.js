@@ -132,7 +132,26 @@ test('墙纸只能指官方表或自己上传过的图——这条是背景注�
   assert.equal(steal.wallpaper, null, '能把别人上传的图摆进自己房间');
 });
 
-/* ── 改动进账（§6.5：换字体是一件会被她记下来的事）─────────────── */
+/* ── 反复上传（萧盛 09-26：「上传一张后就不能再上传了」）────────
+ * 服务端这一侧本来就没有"只能传一张"的限制，所以这条测试钉的是**别把它做出来**：
+ *   第二张不许顶掉第一张、两张都要能选回来、图池要按上传顺序排。
+ * 真正卡住主人的是前端两处（原图直传撞 1.5MB 体积墙 + input 的 value 没在失败路径清空），
+ * 修在 web/src/lib.ts 的 fileToWallpaperDataUrl 与 DecoratePanel.pickFile。 */
+test('墙纸可以反复传：第二张不顶掉第一张，两张都还能选回来', async () => {
+  const C2 = mkAgent('再传');
+  const a1 = await uploadRoomAsset({ agentId: C2.id, ownerId: owner, dataUrl: PNG });
+  const a2 = await uploadRoomAsset({ agentId: C2.id, ownerId: owner, dataUrl: PNG });
+  assert.notEqual(a1.url, a2.url, '第二次上传复用了第一张的文件名');
+  const room = await getRoom(C2.id);
+  assert.equal(room.assets.length, 2, `图池里只剩 ${room.assets.length} 张——上传变成了覆盖`);
+  // 最新的排最前（抽屉里的图池按这个顺序给主人看）
+  assert.equal(room.assets[0].url, a2.url);
+  // 两张都要能被选为墙纸，且来回换都不被 sanitize 挡
+  const first = await saveTheme({ agentId: C2.id, ownerId: owner, theme: { wallpaper: a1.url } });
+  assert.equal(first.theme.wallpaper, a1.url, '传过的图选不回来');
+  const second = await saveTheme({ agentId: C2.id, ownerId: owner, theme: { wallpaper: a2.url } });
+  assert.equal(second.theme.wallpaper, a2.url, '换第二张被挡');
+});
 test('装修改动进 owner_deeds，且只记「动了哪一类」不记色值', async () => {
   const E = mkAgent('进账');
   await saveTheme({ agentId: E.id, ownerId: owner, theme: { signFont: 'kai' } });

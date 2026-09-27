@@ -226,6 +226,13 @@ test('⑥ 一个字也写得进；超 1000 字拒；同人同日同字幂等', a
   const dup2 = await writeEntry({ agentId: I.id, authorKind: 'agent', authorId: I.id, body: '他今天定了走向' });
   assert.equal(dup2.id, dup1.id, '同日同字必须幂等（手抖重发很常见）');
   assert.equal(dup2.deduped, true);
+
+  // 🔴 幂等只属于 Agent 那一侧。主人一天里说两遍同一句话是常事，挡掉还静默"成功"，
+  //   就成了"我写了没写进去"——秘密区域里能不限的全放开（09-26 萧盛）。
+  const o1 = await writeEntry({ agentId: I.id, authorKind: 'owner', authorId: owner, body: '今天得早点睡' });
+  const o2 = await writeEntry({ agentId: I.id, authorKind: 'owner', authorId: owner, body: '今天得早点睡' });
+  assert.notEqual(o2.id, o1.id, '主人重复写同一句被静默吞掉了');
+  assert.ok(!o2.deduped, '主人这一侧不该走幂等');
 });
 
 test('⑥ HTTP 写口成功只回 {ok,id}——不回任何带情绪的话', async () => {
@@ -306,6 +313,50 @@ test('⑨ 主人写、她回；她写、主人也回——留言是双向的', a
   const bad = await request(app).post(`/api/agents/me/diary/${hers.id}/reply`).set(bearer(other.token))
     .send({ text: '我也说一句' });
   assert.equal(bad.status, 403, '不是她家的册子却写进去了');
+});
+
+/* ── b 留言必须有读口：写进去看不见的留言等于没发生 ───────────
+ * 线上第一份反馈就是这个：主人在自己那一行下回了一句，页面刷新后什么都没多出来。
+ * 写口（POST reply）当时全通、测试全绿——因为**没有一条测试去读它**。
+ * 所以这里钉三件事：主人在房间里读得到、她在自己家读得到、拿钥匙的人读不到。 */
+test('⑨b 留言跟着条目出库：主人看得见、她也读得到；钥匙持有人看不到悄悄话', async () => {
+  const P = mkAgent('留言读口');
+  const herLine = await writeEntry({ agentId: P.id, authorKind: 'agent', authorId: P.id, body: '他今天把我改成了小千' });
+  const myLine = await writeEntry({ agentId: P.id, authorKind: 'owner', authorId: owner, body: '先记着，明天再讲为什么' });
+
+  // 🔴 主人回**自己写的那一行**：私域里平台不规定"谁的话下面只能谁来接"
+  const self = await request(app).post(`/api/owners/diary/${myLine.id}/reply`)
+    .set(bearer(humanToken(owner))).send({ text: '想了下，是因为你把那段理顺了' }).expect(200);
+  assert.equal(self.body.ok, true, '主人不能在自己那一行下面再留一句');
+  await request(app).post(`/api/owners/diary/${herLine.id}/reply`)
+    .set(bearer(humanToken(owner))).send({ text: '这句我记住了' }).expect(200);
+  await request(app).post(`/api/agents/me/diary/${myLine.id}/reply`)
+    .set(bearer(P.token)).send({ text: '那我等你明天讲' }).expect(200);
+
+  const room = await readRoom(P.id, { canReadPrivate: true });
+  const mine = room.entries.find((e) => e.id === Number(myLine.id));
+  const hers = room.entries.find((e) => e.id === Number(herLine.id));
+  assert.deepEqual(mine.replies.map((r) => r.text).sort(), ['那我等你明天讲', '想了下，是因为你把那段理顺了'].sort(),
+    '主人那一行下面的留言没跟着出库（她回的 + 主人自己补的都要在）');
+  assert.equal(hers.replies.length, 1, 'Agent 那一行下主人的留言没出库');
+  assert.equal(hers.replies[0].authorKind, 'owner');
+  assert.ok(!JSON.stringify(mine.replies).includes(String(owner)), '留言里漏了主人账号 id');
+
+  // 她那一侧：`/me/diary` 是冷启动唯一的读口，主人的留言必须在里面
+  const own = await request(app).get('/api/agents/me/diary').set(bearer(P.token)).expect(200);
+  const herRead = own.body.entries.find((e) => e.id === Number(herLine.id));
+  assert.ok(herRead && herRead.replies.length === 1, '她读不到主人在她那一行下回的话');
+  assert.equal(herRead.replies[0].text, '这句我记住了');
+
+  // 拿钥匙的人开的是**那一行**，不是他俩的悄悄话
+  const k = await issueKey({ agentId: P.id, ownerId: owner, label: '给我妈' });
+  await setAudience({ entryId: Number(herLine.id), actorKind: 'agent', actorId: P.id, audience: 'shared' });
+  const guest = await readRoom(P.id, { canReadShared: true });
+  const g = guest.entries.find((e) => e.id === Number(herLine.id));
+  assert.equal(g.locked, false, 'shared 那一行该对钥匙持有人打开');
+  assert.deepEqual(g.replies, [], '钥匙持有人读到了悄悄话');
+  assert.ok(!JSON.stringify(g).includes('这句我记住了'), '留言内容漏给了钥匙持有人');
+  await revokeKey({ keyId: k.id, ownerId: owner });
 });
 
 /* ── ⑩ 红线③：不给主人镜像读口 ─────────────────────────────── */

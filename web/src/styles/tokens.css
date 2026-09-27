@@ -1751,9 +1751,10 @@ body {
 .rm-priv { font-size: 10.5px; color: var(--rm-mute); }
 
 /* 正文卡：高遮罩，字永远压得住 */
-/* 吊挂件要挂在日记本**上方的墙上**，所以有它们时卡片上方留 132px 墙面；
-   不留就会伸进头部带压住话术卡——这是实机截图抓到的第二次遮挡。 */
-.rm-card.rm-has-hang { margin-top: 148px; }
+/* 🔴 这里原来有一行 `.rm-card.rm-has-hang { margin-top: 148px }`：为了不让灯笼伸进头部带，
+   给有吊挂件的卡片上方腾了一整段"墙面"。代价是摆一件小东西就把日记本往下推 148px，
+   房间中间裂开一大块空白——**装扮不该改变房间的结构**。
+   现在灯笼自己缩到边线上（见 widgets.tsx 的落位口径），卡片位置只由内容决定。 */
 /* 不能 overflow:hidden —— 组件要骑到边线外；圆角靠背景裁剪，不靠裁切 */
 .rm-card { margin-top: 16px; border-radius: 16px; overflow: visible; position: relative;
   background-clip: padding-box;
@@ -1774,6 +1775,11 @@ body {
 .rm-tx-hand { font-family: var(--rm-sign-font); font-size: 15px; line-height: 1.8; }
 .rm-lock { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--rm-mute); }
 .rm-foot { padding: 10px 18px; border-top: 1px solid var(--rm-hair); font-size: 10px; color: var(--rm-mute); letter-spacing: .3px; }
+/* 留言：缩进一挡、字号小一档，跟着它那一行——两个人的话排在同一列里，不分 tab */
+.rm-reps { margin: 7px 0 0; padding-left: 11px; border-left: 2px solid var(--rm-hair); }
+.rm-rep { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; }
+.rm-rep .rm-sig { font-size: 11.5px; flex: none; }
+.rm-rep .rm-tx { font-size: 13px; line-height: 1.7; color: var(--rm-ink-soft); }
 .rm-reply { margin-top: 7px; display: flex; align-items: center; gap: 8px; }
 .rm-reply input { flex: 1; font-size: 12px; background: transparent; border: 0; outline: none;
   border-bottom: 1px solid var(--rm-hair); color: var(--rm-ink); padding: 3px 0; }
@@ -1814,18 +1820,29 @@ body {
 .rm-gal button.on { outline: 2px solid var(--rm-accent); outline-offset: 2px; }
 .rm-gal em { position: absolute; left: 0; right: 0; bottom: 0; font-style: normal; font-size: 9.5px;
   color: #fff; background: rgba(0,0,0,.4); padding: 3px 0; }
+/* 上传格：永远是入口，不因为已经传过一张就变成缩略图（那样看着像"这张用完了"） */
+.rm-gal button.rm-up { border: 1px dashed var(--rm-hair); background:
+  repeating-linear-gradient(45deg, var(--rm-inset) 0 6px, transparent 6px 12px);
+  display: flex; align-items: center; justify-content: center; }
+.rm-gal button.rm-up span { font-size: 18px; color: var(--rm-accent); line-height: 1; }
+.rm-gal button.rm-up em { background: transparent; color: var(--rm-mute); }
+.rm-gal button.rm-up:hover { border-color: var(--rm-accent); }
 .rm-sw { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
 .rm-sw button { width: 22px; height: 22px; border-radius: 7px; border: 1px solid var(--rm-hair); padding: 0; cursor: pointer; }
 .rm-sw button.on { outline: 1.5px solid var(--rm-accent); outline-offset: 2px; }
+/* 墙纸图池：方格要装得下照片，纸色那排 22px 够了 */
+.rm-sw--wp button { width: 30px; height: 30px; background-size: cover; background-position: center; }
 .rm-seg { display: flex; gap: 6px; flex-wrap: wrap; }
 .rm-seg button { flex: 1; min-width: 62px; font-size: 11px; color: var(--rm-ink-soft); border: 1px solid var(--rm-hair);
   border-radius: 9px; padding: 7px 0; background: rgba(var(--rm-paper-rgb), .5); cursor: pointer; }
 .rm-seg button.on { border-color: var(--rm-accent); color: var(--rm-accent); background: var(--rm-accent-soft); }
-.rm-lib { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
-.rm-lib button { aspect-ratio: 1; border: 1px solid var(--rm-hair); border-radius: 11px; background: rgba(var(--rm-paper-rgb), .5);
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer; padding: 0; }
-.rm-lib button.on { border-color: var(--rm-accent); background: var(--rm-accent-soft); }
-.rm-lib small { font-size: 8.5px; color: var(--rm-mute); }
+/* 组件选择器：只写字。侧栏本来就窄，之前塞真组件图（灯笼那张 300px 高），
+   一件占满一屏，十二件要划十二屏——缩略图在这个宽度里没有意义。 */
+.rm-lib { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+.rm-lib button { border: 1px solid var(--rm-hair); border-radius: 9px; padding: 9px 0; font-size: 12px;
+  color: var(--rm-ink-soft); background: rgba(var(--rm-paper-rgb), .5); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; }
+.rm-lib button.on { border-color: var(--rm-accent); background: var(--rm-accent-soft); color: var(--rm-accent); }
 .rm-slot { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
 .rm-slot button { font-size: 10px; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--rm-hair);
   background: rgba(var(--rm-paper-rgb), .5); color: var(--rm-ink-soft); cursor: pointer; }
@@ -1873,13 +1890,12 @@ body {
 .rm-err { font-size: 11px; color: #b4453a; margin-bottom: 8px; line-height: 1.6; }
 .rm-fontpv { border: 1px solid var(--rm-hair); border-radius: 11px; padding: 10px 13px; font-size: 21px;
   background: rgba(var(--rm-paper-rgb), .5); }
-.rm-thumb { display: block; line-height: 0; transform: scale(.62); transform-origin: center; }
 .rm-placed { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 10px; }
 .rm-placed button { font-size: 10px; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--rm-accent);
   background: var(--rm-accent-soft); color: var(--rm-accent); cursor: pointer; }
 
 @media (max-width: 640px) {
-  .rm-lib { grid-template-columns: repeat(4, 1fr); }
+  .rm-lib { grid-template-columns: repeat(3, 1fr); }
   .rm-gal { grid-template-columns: repeat(2, 1fr); }
   .rm-band { padding: 20px 18px 16px; border-radius: 16px; }
   .rm-title { font-size: 19px; }

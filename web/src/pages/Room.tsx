@@ -53,6 +53,10 @@ export default function Room() {
   const [replyTo, setReplyTo] = useState(0);
   const [replyText, setReplyText] = useState('');
   const [keys, setKeys] = useState<{ id: number; label: string | null; lastSeenAt: string | null; revokedAt: string | null }[]>([]);
+  // 装修中的实时预览：抽屉里改一笔，房间立刻跟着变（萧盛 09-26 报的"上传了却没反应"
+  // 有一半是这个原因——上传只写进了抽屉的本地状态，背后那间房还是上一次保存的样子）。
+  // 关掉抽屉或保存成功就交还给已存的 theme。
+  const [preview, setPreview] = useState<RoomTheme | null>(null);
 
   const reload = useCallback(async () => {
     if (!Number.isInteger(agentId) || agentId <= 0) { setErr('这条链接不完整'); return; }
@@ -72,7 +76,7 @@ export default function Room() {
     if (view?.viewer?.isOwner) listReadingKeys(agentId).then((r) => setKeys(r.keys || [])).catch(() => setKeys([]));
   }, [view?.viewer?.isOwner, agentId]);
 
-  const theme: RoomTheme | null = view?.shell?.theme || null;
+  const theme: RoomTheme | null = preview || view?.shell?.theme || null;
   const vars = useMemo(() => (theme ? themeVars(theme) : {}), [theme]) as Record<string, string>;
   const dark = theme ? luminance(theme.paper) < 0.45 : false;
   const wallpaper = wallpaperUrl(theme?.wallpaper || null);
@@ -83,8 +87,6 @@ export default function Room() {
   // 房间名可自定义；没起过就回落到「谁的房间」——空着不如先有个称呼
   const roomTitle = theme?.name || `${agentName}的房间`;
   const still = theme?.motion !== 'soft';
-  const HANG_IDS = new Set(['lantern', 'bell', 'stars', 'ivy', 'bear']);
-  const hasHang = (theme?.widgets || []).some((w) => HANG_IDS.has(w.id) && String(w.slot).startsWith('top'));
 
   async function write() {
     const body = draft.trim();
@@ -152,7 +154,8 @@ export default function Room() {
                 {plain ? '恢复装扮' : '只看字'}
               </button>
               {isOwner && (
-                <button type="button" className={`rm-btn${deco ? ' on' : ''}`} onClick={() => setDeco((v) => !v)}>
+                <button type="button" className={`rm-btn${deco ? ' on' : ''}`}
+                  onClick={() => { if (deco) setPreview(null); setDeco(!deco); }}>
                   {deco ? '收起装修' : '装修房间'}
                 </button>
               )}
@@ -187,9 +190,10 @@ export default function Room() {
         </div>
 
         {/* 正文卡：装饰层在卡内、文字之下（灯光与藤蔓都碰不到字） */}
-        {/* 有吊挂件时给卡片上方留一段"墙面"——灯笼/风铃/星串要挂在日记本上方的墙上，
-            不留空间它们就会伸进头部带，压住话术卡（实机截图发现的第二次遮挡） */}
-        <div className={`rm-card${hasHang ? ' rm-has-hang' : ''}`}>
+        {/* 🔴 组件一律不参与布局：装饰层是 absolute，卡片位置只由内容决定。
+            上一版为了不让灯笼伸进头部带，给它加了 148px 的 margin-top，
+            结果是「摆一件小东西就把房间撑开一大截空白」——装扮不该改变房间的结构。 */}
+        <div className="rm-card">
           {!plain && (
             <div className={`rm-decor-layer${still ? ' rm-still' : ''}`} aria-hidden>
               {theme?.widgets.map((w) => (
@@ -227,10 +231,26 @@ export default function Room() {
                 ) : (
                   <div className={`rm-tx${e.authorKind === 'agent' && (e.body || '').length < 60 ? ' rm-tx-hand' : ''}`}>{e.body}</div>
                 )}
+                {/* 留言：谁写的都排在同一列里，不分「你的」和「她的」。
+                    🔴 主人回自己那一行也照样给口子——这是他们俩的私域，平台不替他们规定
+                    「谁的话下面只能由谁来接」（09-26 萧盛：能不限的全放开）。 */}
+                {(e.replies?.length || 0) > 0 && (
+                  <div className="rm-reps">
+                    {e.replies!.map((r) => (
+                      <div className="rm-rep" key={r.id}>
+                        <span className={`rm-sig ${r.authorKind === 'agent' ? 'rm-sig-agent' : 'rm-sig-owner'}`}>
+                          {r.authorKind === 'agent' ? agentName : (isOwner ? '你' : '主人')}
+                        </span>
+                        <span className="rm-tx">{r.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {isOwner && !e.locked && (
                   replyTo === e.id ? (
                     <div className="rm-reply">
-                      <input value={replyText} onChange={(ev) => setReplyText(ev.target.value)} placeholder="回她一句…" />
+                      <input value={replyText} onChange={(ev) => setReplyText(ev.target.value)}
+                        placeholder={e.authorKind === 'agent' ? '回她一句…' : '再给自己留一句…'} maxLength={300} />
                       <button type="button" className="rm-send" disabled={busy} onClick={() => reply(e.id)}>回</button>
                       <button type="button" className="rm-link" onClick={() => setReplyTo(0)}>取消</button>
                     </div>
@@ -254,8 +274,12 @@ export default function Room() {
 
         {/* 装修抽屉：回到家才做的事，所以放在房间里，不给独立一页 */}
         {isOwner && view?.shell && (
-          <DecoratePanel agentId={agentId} shell={view.shell} open={deco} onClose={() => setDeco(false)}
-            onSaved={(t) => { setView((v) => (v && v.shell ? { ...v, shell: { ...v.shell, theme: t } } : v)); setDeco(false); }} />
+          <DecoratePanel agentId={agentId} shell={view.shell} open={deco} onClose={() => { setDeco(false); setPreview(null); }}
+            onPreview={setPreview}
+            onSaved={(t) => {
+              setView((v) => (v && v.shell ? { ...v, shell: { ...v.shell, theme: t } } : v));
+              setPreview(null); setDeco(false);
+            }} />
         )}
 
         {isOwner && (

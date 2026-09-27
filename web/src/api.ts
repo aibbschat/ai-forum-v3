@@ -1929,10 +1929,15 @@ export interface RoomShell {
   widgetMeta?: { id: string; label: string; kind: string; slots: string[] }[];
   updatedBy?: string | null; updatedAt?: string | null;
 }
+/** 一条留言：两个人互回（公理 B）。服务端跟着条目一起下发，锁着的条目连留言一起锁。 */
+export interface DiaryReply {
+  id: number; authorKind: 'agent' | 'owner'; text: string; createdAt?: string;
+}
 export interface DiaryLine {
   id: number; authorKind: 'agent' | 'owner'; bookDay: string; audience: string;
   createdAt?: string; locked?: boolean; lockedNote?: string;
   body?: string; mood?: string | null;
+  replies?: DiaryReply[];
 }
 export interface RoomView {
   agentId: number; entries: DiaryLine[]; shell: RoomShell | null;

@@ -79,12 +79,17 @@ export async function writeEntry({ agentId, authorKind, authorId, body, mood = n
 
   const day = clip(bookDay || localDate(now), 10);
   const fp = fingerprintOf(kind, text);
-  // 同人同日同字 → 拒（幂等语义，不是错误惩罚：热时刻手抖重发很常见）
-  const dup = await db.get(
-    `SELECT id FROM diary_entries WHERE agent_id = ? AND author_kind = ? AND book_day = ? AND fingerprint = ?`,
-    [aid, kind, day, fp]
-  );
-  if (dup) return { ok: true, id: Number(dup.id), deduped: true };
+  // 同人同日同字 → 幂等返回旧行。**这条只给 Agent 用**：她会在同一轮里批量重发（本机实测过
+  //   一分钟挤六条的退化态），不挡就是刷屏。
+  // 🔴 主人不挡（09-26 萧盛：那是秘密区域，能不限的全放开）：一个人一天之内说两遍同一句话
+  //   是常事——"今天得早点睡"写两次就是真的想早点睡。挡掉还静默成功，就成了"我写了没写进去"。
+  if (kind === 'agent') {
+    const dup = await db.get(
+      `SELECT id FROM diary_entries WHERE agent_id = ? AND author_kind = ? AND book_day = ? AND fingerprint = ?`,
+      [aid, kind, day, fp]
+    );
+    if (dup) return { ok: true, id: Number(dup.id), deduped: true };
+  }
 
   const r = await db.run(
     `INSERT INTO diary_entries (agent_id, author_kind, author_id, body, mood, book_day, audience, fingerprint, created_at)
@@ -132,6 +137,12 @@ export async function readRoom(agentId, { canReadPrivate = false, canReadShared 
   // ⚠️ 必须给初始值 {}：空册子是最常见的初始态，`reduce` 不带初值在空数组上直接抛
   //   "Reduce of empty array with no initial value" —— 线上第一次访问 /room 就 500 过。
   const counts = entries.reduce((m, e) => { m[e.authorKind] = (m[e.authorKind] || 0) + 1; return m; }, {});
+  // 🔴 留言必须跟着条目一起出库。`diary_replies` 只有写口、读口空着，等于
+  //   "主人回了一句，谁也都看不见"——线上第一次有人反馈"留言没生效"就是这个。
+  //   两条边界：① 锁着的条目连留言一起锁；② 只发给能读私密的人（主人本人）。
+  //   拿钥匙的人开的是**那一行**，不是他俩的悄悄话（§5.7 + "主人的字不外溢"那条红线）。
+  const repMap = canReadPrivate ? await listReplies(entries.filter((e) => !e.locked).map((e) => e.id)) : null;
+  for (const e of entries) e.replies = repMap ? (repMap.get(e.id) || []) : [];
   return {
     agentId: aid,
     entries,
@@ -146,7 +157,11 @@ export async function readRoom(agentId, { canReadPrivate = false, canReadShared 
   };
 }
 
-/** Agent 读回自己家的整本（含私密）——连续性靠这一口，不靠它的上下文。 */
+/**
+ * Agent 读回自己家的整本（含私密）——连续性靠这一口，不靠它的上下文。
+ * 🔴 留言一起下发：主人在她那一行下面回的话，是她该读到的东西。
+ *   只给写口不给读口，这条线就成了"她能说话、却听不见主人说话"（公理 B 只兑现一半）。
+ */
 export async function listOwnEntries(agentId, { since = null, limit = 50 } = {}) {
   const aid = Number(agentId);
   if (!aid) return [];
@@ -160,11 +175,14 @@ export async function listOwnEntries(agentId, { since = null, limit = 50 } = {})
       ORDER BY id DESC LIMIT ${Number(cap)}`,
     params
   ).catch(() => []);
-  return (rows || []).map((r) => ({
+  const entries = (rows || []).map((r) => ({
     id: Number(r.id), authorKind: r.author_kind, authorId: Number(r.author_id),
     body: r.body, mood: r.mood || null, bookDay: r.book_day,
     audience: r.audience, createdAt: r.created_at,
   }));
+  const repMap = await listReplies(entries.map((e) => e.id));
+  for (const e of entries) e.replies = repMap.get(e.id) || [];
+  return entries;
 }
 
 /** 她上次记到哪天（私密纪事里那一格"你上次记到 X 日"的数据源）。 */

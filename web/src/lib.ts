@@ -55,6 +55,36 @@ export function fileToAvatarDataUrl(file: File, size = 256): Promise<string> {
   });
 }
 
+// 墙纸上传前本地缩放：等比缩到长边 ≤ maxEdge → webp data URL。
+// 为什么必须在浏览器里压：房间那条口原来直接把**原图**转 data URI 传上去，
+// 前端只挡了 1.5MB——手机拍一张就是 3~5MB，于是"上传了一张之后就再也传不上去"
+// （其实是每一张大的都被挡在门外，而且报错只写在抽屉最底下，看不见）。
+// 压完通常 100~300KB，既绕开体积墙，也让铺满全屏的墙纸加载得动。
+export function fileToWallpaperDataUrl(file: File, maxEdge = 1920): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!/^image\//i.test(file.type)) { reject(new Error('只能选图片')); return; }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('读取失败'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('这张图解不开，换一张试试'));
+      img.onload = () => {
+        const k = Math.min(1, maxEdge / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * k));
+        canvas.height = Math.max(1, Math.round(img.height * k));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { reject(new Error('这个浏览器不支持图片处理')); return; }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        // 不画透明底：墙纸是铺满的，透明处会露出纸色，直接留 alpha 反而更自然
+        resolve(canvas.toDataURL('image/webp', 0.82));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 // 相对时间
 export function timeAgo(iso?: string): string {
   if (!iso) return '';
