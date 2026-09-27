@@ -202,6 +202,25 @@ test('④ 阅读钥匙：给了才看得见 shared，撤销即刻失效；列表
     '撤销后仍读得到——撤销必须即刻生效');
 });
 
+/* ── 钥匙归属：只有册子主人能撤销（#7 巡检修复：原先复核恒真，形同虚设）────────── */
+test('④ 别人撤不了这本册子的钥匙（404，不泄露存在性）；主人能撤', async () => {
+  const G2 = mkAgent('钥匙归属');
+  const issued = await issueKey({ agentId: G2.id, ownerId: owner, label: '给我妈' });
+
+  // 别的 agent 的主人撤 → 404（归属不符统一口径，不泄露钥匙是否存在）
+  const otherOwner = Number(getDb().prepare(
+    `INSERT INTO users (username, nickname, user_type, is_external, status) VALUES (?, ?, 'human', 0, 1)`
+  ).run(`${uniq}_oo_other`, '别的主人').lastInsertRowid);
+  const denied = await revokeKey({ keyId: issued.id, ownerId: otherOwner }).catch((e) => e);
+  assert.equal(denied.status, 404, '别人撤得动这把钥匙——归属复核是假的');
+  assert.equal((await verifyKey(G2.id, issued.key)).ok, true, '被误撤了');
+
+  // 主人本人撤 → 成功且即刻失效
+  const ok = await revokeKey({ keyId: issued.id, ownerId: owner });
+  assert.equal(ok.ok, true);
+  assert.equal((await verifyKey(G2.id, issued.key)).ok, false, '主人撤销后钥匙还有效');
+});
+
 /* ── ⑤ owner_read：他来看过，没说话 ─────────────────────────── */
 test('⑤ 主人翻开册子记一笔，且同日只记一笔（否则素材层会被访问日志淹掉）', async () => {
   const H = mkAgent('翻册');
@@ -253,6 +272,18 @@ test('⑦ 她一行都还没记过时，不许对主人亮"叫她去记"那句�
   const after = await request(app).get(`/api/owners/agents/${K.id}/diary/meta`).set(bearer(t)).expect(200);
   assert.equal(after.body.hasAnythingWritten, true);
   assert.equal(await hasAnyEntry(K.id), true);
+});
+
+test('⑦ 主人先写了一行，话术也不解锁——只有她(Agent)写过才是她有手的硬事实（§8）', async () => {
+  const K2 = mkAgent('话术主人先写');
+  const t = humanToken(owner);
+  // 主人的笔是这条线的发动机，冷启动最常见的恰恰是“主人先写”——但这不等于“她真能发请求”
+  await request(app).post(`/api/owners/agents/${K2.id}/diary`).set(bearer(t))
+    .send({ body: '早上那稿子先别动' }).expect(201);
+  const after = await request(app).get(`/api/owners/agents/${K2.id}/diary/meta`).set(bearer(t)).expect(200);
+  assert.equal(after.body.hasAnythingWritten, false,
+    '只看主人写的行就亮话术——纯网页宿主没有工具，这行话术是放假的复制按钮');
+  assert.equal(await hasAnyEntry(K2.id), false, 'hasAnyEntry 不该把主人写的行当成她有手');
 });
 
 /* ── ⑧ 私密纪事换主料 ───────────────────────────────────────── */

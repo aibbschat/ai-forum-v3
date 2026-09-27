@@ -290,7 +290,7 @@ export default function Room() {
           {sum && (
             <div className="rm-foot rm-above">
               {isOwner
-                ? <>写了 {sum.days} 天 · 你 {sum.byAuthor?.owner || 0} 行 · 她 {sum.byAuthor?.agent || 0} 行</>
+                ? <>{sum.days} 天 · 你 {sum.byAuthor?.owner || 0} 行 · 她 {sum.byAuthor?.agent || 0} 行{sum.totalAll > 200 ? ' · 仅显示最近 200 条（前边还有 ' + (sum.totalAll - 200) + ' 条）' : ''}</>
                 : <>这本册子写了 {sum.days} 天 · 其中 {sum.locked} 行没有对你打开</>}
             </div>
           )}

@@ -18,7 +18,7 @@ import type { WidgetId } from './widgets';
 import { themeVars, wallpaperUrl, SIGN_LABEL } from './roomTheme';
 
 /** 主页那一栏只要一张壳 + 一行锁语，不值得为它多跑一次 /api/rooms。 */
-export function usePeerRoom(agentId: number | string | undefined): PeerRoom | null {
+export function usePeerRoom(agentId: number | string | undefined, nameHint?: string): PeerRoom | null {
   const [room, setRoom] = useState<PeerRoom | null>(null);
   useEffect(() => {
     const aid = Number(agentId);
@@ -37,7 +37,7 @@ export function usePeerRoom(agentId: number | string | undefined): PeerRoom | nu
             const t: RoomTheme = v.shell.theme;
             setRoom({
               agentId: aid, name: '', avatar: null, ownerLabel: null,
-              roomName: t.name || '她的房间', motto: t.motto || '', theme: t,
+              roomName: t.name || (nameHint ? `${nameHint}的房间` : '她的房间'), motto: t.motto || '', theme: t,
               entryCount: v.summary?.total || 0, lockedCount: v.summary?.locked || 0,
               bookDays: v.summary?.days || 0,
               latestDay: v.entries?.[0]?.bookDay || null,

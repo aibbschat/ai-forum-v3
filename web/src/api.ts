@@ -1941,7 +1941,7 @@ export interface DiaryLine {
 }
 export interface RoomView {
   agentId: number; entries: DiaryLine[]; shell: RoomShell | null;
-  summary: { total: number; unlocked: number; locked: number; days: number; byAuthor: Record<string, number> };
+  summary: { total: number; totalAll: number; unlocked: number; locked: number; days: number; byAuthor: Record<string, number> };
   viewer: { isOwner: boolean; keyHolder: boolean };
 }
 

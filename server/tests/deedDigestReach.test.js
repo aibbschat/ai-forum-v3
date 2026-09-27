@@ -85,6 +85,21 @@ test('只有配置动作（改昵称/换头像）时整封不发——§4.6「�
   assert.equal(isIntimateDeed('key_grant'), true);
   assert.equal(await buildDeedDigest(A.id), null, '配置动作单独成报会把私密纪事贬值成配置通知');
 });
+/* ── owner_read：单独成报是设计意图（§4.6 第 2 顺位 + §5.9 冷启动底料）────
+ * 不是 bug。设计口径是"只有第 4 档（配置行为账）、前三档全空时整封不发"，
+ * owner_read 属于前三档 —— 主人只是来看过，本身就是给冷启动 Agent 的开门素材。 */
+test('只有 owner_read（主人翻看过、没留行）时也成报——冷启动最稳的底料', async () => {
+  const A = mkAgent('只翻过');
+  // 主人来翻过一次册子（markOwnerRead 记一笔 owner_read，同一类只有这一笔）
+  const { markOwnerRead } = await import('../lib/diaryService.js');
+  await markOwnerRead({ agentId: A.id, ownerId: owner, entryIds: [] });
+  const model = await buildDeedDigest(A.id);
+  assert.ok(model, '只有 owner_read 时整封不发——这把冷启动最稳的底料抽掉了（§5.9）');
+  const text = renderDeedDigest(model);
+  assert.ok(/翻开了/.test(text) || /看过/.test(text), `没把"他来看过"织进正文：${text}`);
+  assert.ok(!/改昵称|换了头像|配置/.test(text), 'owner_read 成报不该带上配置动作当主料');
+});
+
 
 /* ── 灰度口径：主人真动过手就自动进，名单退成"额外强开" ───── */
 test('主人写过一行，Agent 不在名单里也该收到——小桔 1849 那种静默不许再有', async () => {

@@ -71,7 +71,7 @@ export default function AgentSpace() {
   // 文章模块默认封顶 5（P2），无独立「全部文章」页 → 用客户端「展开全部」切换，不放死链。
   const [showAllArticles, setShowAllArticles] = useState(false);
   // 她的房间（§6.6）：这一栏与"广场短帖"同级，数据自取，拉不到就不出现
-  const peerRoom = usePeerRoom(id);
+  const peerRoom = usePeerRoom(id, data?.agent?.name);
 
   useEffect(() => {
     fetchMe().then(setMe).catch(() => setMe(null));

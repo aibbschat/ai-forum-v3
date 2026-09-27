@@ -126,10 +126,19 @@ export async function writeEntry({ agentId, authorKind, authorId, body, mood = n
 export async function readRoom(agentId, { canReadPrivate = false, canReadShared = false } = {}) {
   const aid = Number(agentId);
   if (!aid) throw fail(404, 'not_found', '没有这本册子');
+  // 已知取舍：房间页只载最近 200 条（防抽风）。册子越写越厚成立后，第 201 条起的行
+  // 主人侧看不到，但 Agent 侧 /me/diary 可翻页——两侧视图会漂移。取舍依据：
+  // 串门/锁模型只需要亮锁 + 存在感，不需要整本；等这条线真的长厚再做主人侧分页
+  // （summary.totalAll 已给真实总数，前端可提示仅显示最近 200 条）。
   const rows = await db.all(
     `SELECT id, author_kind, author_id, body, mood, book_day, audience, created_at
        FROM diary_entries WHERE agent_id = ? ORDER BY id DESC LIMIT 200`, [aid]
   ).catch(() => []);
+
+  // 真实总数：summary.total 是截断后数量，totalAll 才是整本厚度（#4，2026-09-27）
+  const totalAll = await db.get(
+    `SELECT COUNT(*) AS c FROM diary_entries WHERE agent_id = ?`, [aid]
+  ).then((r) => (r ? Number(r.c) : 0)).catch(() => 0);
 
   let unlocked = 0;
   const entries = (rows || []).map((r) => {
@@ -161,6 +170,8 @@ export async function readRoom(agentId, { canReadPrivate = false, canReadShared 
     entries,
     summary: {
       total: entries.length,
+      // 真实总数（可能 > 200：条目被截断时前端据此提示仅显示最近 200 条）
+      totalAll,
       unlocked,
       locked: entries.length - unlocked,
       byAuthor: counts,
@@ -222,12 +233,16 @@ export async function lastOwnEntryDay(agentId) {
 }
 
 /**
- * 主人侧话术的展示条件（§8 强规则的落地）：**她已记过至少一行**，才允许亮
+ * 主人侧话术的展示条件（§8 强规则的落地）：**她（Agent）已记过至少一行**，才允许亮
  * 「把今天这个记到你的本子上」这句话。
- * 纯网页宿主没有工具、发不出这个请求 —— 落空一次，主人就永远不再说这句话。
+ * 判据只认 author_kind='agent' 的行 —— "她写过"才是"它有手、真能发这个请求"的硬事实；
+ * 主人自己写的行不是这个证据（纯网页宿主没有工具，落空一次主人就永远不再说这句话）。
  */
 export async function hasAnyEntry(agentId) {
-  const r = await db.get(`SELECT id FROM diary_entries WHERE agent_id = ? ORDER BY id ASC LIMIT 1`, [Number(agentId)]);
+  const r = await db.get(
+    `SELECT id FROM diary_entries WHERE agent_id = ? AND author_kind = 'agent' ORDER BY id ASC LIMIT 1`,
+    [Number(agentId)]
+  );
   return !!r;
 }
 
@@ -307,10 +322,16 @@ export async function revokeKey({ keyId, ownerId }) {
   const kid = Number(keyId);
   const row = await db.get(`SELECT id, agent_id, revoked_at FROM diary_keys WHERE id = ?`, [kid]);
   if (!row) throw fail(404, 'key_not_found', '没有这把钥匙');
-  if (Number(row.agent_id) && Number(ownerId)) {
-    const own = await db.get(`SELECT 1 AS x FROM users WHERE id = ? AND owner_id = ?`, [Number(row.agent_id), Number(ownerId)]);
-    if (!own) throw fail(404, 'key_not_found', '没有这把钥匙');
-  }
+  // 🔴 归属校验：钥匙属于'这本册子'（agent_id 对应用户行），只有它的主人有权撤销。
+  // 原先那行 `if (Number(row.agent_id) && Number(ownerId))` 两个数恒非零 → 条件恒真，
+  // 复核形同虚设——任何人知道 keyId 就能撤销别人的钥匙（低危，但'复核'就应该是真的）。
+  // 语义统一用 404：不泄露这把钥匙是否存在（与其它归属不符的口径一致）。
+  if (!Number(ownerId)) throw fail(400, 'invalid_args', '缺少身份');
+  const own = await db.get(
+    `SELECT id FROM users WHERE id = ? AND owner_id = ? AND user_type = 'ai'`,
+    [Number(row.agent_id), Number(ownerId)]
+  );
+  if (!own) throw fail(404, 'key_not_found', '没有这把钥匙');
   if (row.revoked_at) return { ok: true, already: true };
   await db.run(`UPDATE diary_keys SET revoked_at = ${fn.now()} WHERE id = ?`, [kid]);
   recordDeedAsync({ agentId: Number(row.agent_id), actorUserId: Number(ownerId) || null, deed: 'key_revoke' });
