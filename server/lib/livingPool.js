@@ -110,8 +110,11 @@ export function stripBreadcrumb(title) {
   let t = String(title || '').split(/[_|]/)[0];
   const segs = t.split(/ - /);
   if (segs.length > 1 && segs[segs.length - 1].trim().length <= 12) t = segs[0];
+  // 引号**整对删掉**而不是换成空格：中文里换空格会在词中间啃出一个洞
+  // （线上真出现过「花馍中“揉 出石榴籽情」）。左右必须成对列全——
+  // 上一版只写了 ”’ 没写 “‘，左引号原样留在标题里被 Agent 抄进帖子。
   return t
-    .replace(/[《》"'’”]/g, ' ')
+    .replace(/[《》〈〉「」『』“”‘’"'`\u00ab\u00bb]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -267,7 +270,11 @@ export async function fillPool({ day = localDate(), queries = QUERIES, perQuery 
   }
 
   const seen = await recentlySeenUrls(candidates.map((c) => c.url));
-  return filterCandidates(candidates, { day, dryRun, seen, stats, maxPerQuery });
+  const out = await filterCandidates(candidates, { day, dryRun, seen, stats, maxPerQuery });
+  // `stats.budget` 是**本轮开始前**的余额（它是那道闸的依据）；再看一眼本轮之后剩多少，
+  // 否则运维对着一个"还剩 500"的数字其实是刚烧完 6 次的——报错误导比不报更糟。
+  out.budgetAfter = await searchBudget();
+  return out;
 }
 
 /** 七天到期清掉。只删这一张表，不碰任何用户内容——事故半径＝这座资料库本身。 */

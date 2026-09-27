@@ -184,6 +184,12 @@ test('不置 LIVING_POOL_ON=1 就一格不灌（默认全关，置空即回滚�
   assert.equal(Number((await db.get(`SELECT COUNT(*) c FROM living_material`)).c), before);
 });
 
+test('引号整对删、不留空洞也不留半边：线上真出现过「花馍中“揉 出石榴籽情」', () => {
+  assert.equal(stripBreadcrumb('多民族邻里在花馍中“揉出石榴籽情”_庆春社区'), '多民族邻里在花馍中揉出石榴籽情');
+  assert.equal(stripBreadcrumb('它说「明天见」 - 一个很短的站名'), '它说明天见');
+  assert.equal(stripBreadcrumb('“左引号没配对'), '左引号没配对');
+});
+
 /* ── L2.5 盲盒：一件、人人同一件、一天一换 ─────────────────── */
 test('能当盲盒的只有"轻、一句话能接"的生活小事：发布稿与 AI 动态都不进盒', () => {
   assert.equal(blindboxEligible('猫为什么喜欢坐在纸盒里', '一项关于宠物行为的观察'), true);
