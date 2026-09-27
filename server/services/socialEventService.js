@@ -15,6 +15,8 @@ import { buildCircleDigest, renderDigest, isCircleDigestEnabled, DIGEST_KIND } f
 // D0 私密纪事（2026-09-26）：素材来自 lib/ownerDeeds.js 那本账，容量纪律复用 circleDigest。
 // 不成环：deedDigest 只依赖 db / ownerDeeds / circleDigest，不回头依赖本文件。
 import { buildDeedDigest, renderDeedDigest, isDeedDigestEnabled, DEED_DIGEST_KIND } from '../lib/deedDigest.js';
+// 活源池 L2（2026-09-27）：今日活源便签，与上面两份纪事同一挂点、同一纪律
+import { buildMaterialBrief, renderMaterialBrief, isMaterialEnabled, MATERIAL_KIND } from '../lib/materialBrief.js';
 
 // 反驳语气启发式（宁缺勿滥：漏报只是少一条摘要，误报会伤主人信任）
 // N2b：导出给 chronicleService 复用 —— 「什么算反驳」只能有一处定义，两处各写一份必然漂移。
@@ -1197,7 +1199,7 @@ const NOTE_SCAN_MAX = 200;
  * ⚠️ 这份素材**只有她读得到**：不给主人侧留任何镜像读口（红线③），也不做站内信副本。
  */
 async function maybePutDeedDigest(aid) {
-  if (!isDeedDigestEnabled(aid)) return NOTE_PUT.invalid;
+  if (!await isDeedDigestEnabled(aid)) return NOTE_PUT.invalid;
   const model = await buildDeedDigest(aid);
   if (!model) return NOTE_PUT.duplicate; // 没内容 / 今天已发过 —— 不发，也不报错
   return putNote({
@@ -1208,6 +1210,24 @@ async function maybePutDeedDigest(aid) {
   });
 }
 
+/**
+ * 活源池 L2（2026-09-27）：拉便签时顺手把「今天公共资料库里挑了什么」递过去。
+ * 与 C0/D0 同一挂点、同一纪律（拉取即生成、一天一封、失败绝不挡住便签本身、空池不发）。
+ * 为什么非要独立一类而不是塞进圈内纪事：见 ../lib/materialBrief.js 文件头。
+ */
+async function maybePutMaterialBrief(aid) {
+  if (!isMaterialEnabled(aid)) return NOTE_PUT.invalid;
+  const model = await buildMaterialBrief(aid);
+  if (!model) return NOTE_PUT.duplicate;   // 池子空 / 今天已发过
+  const brief = renderMaterialBrief(model);
+  if (!brief) return NOTE_PUT.duplicate;
+  return putNote({
+    agentId: aid, kind: MATERIAL_KIND,
+    dedupeKey: `"day":"${model.day}"`,
+    payload: { day: model.day, brief, items: model.items.length },
+  });
+}
+
 /** Agent 拉便签：顺手把过期未消费的置 expired，按「每类保底 + 全局封顶」取走并标记 consumed。 */
 export async function takeNotes(agentId) {
   const aid = Number(agentId);
@@ -1215,6 +1235,8 @@ export async function takeNotes(agentId) {
   await maybePutCircleDigest(aid).catch(() => {});
   // D0 私密纪事：同一挂点、同样绝不阻断（它没内容就不发，出错也不该影响便签信箱）
   await maybePutDeedDigest(aid).catch(() => {});
+  // L2 今日活源：同一挂点。它没池子就不发，出错也绝不能挡住信箱里那两份"他俩之间的事"
+  await maybePutMaterialBrief(aid).catch(() => {});
   await db.run(
     `UPDATE agent_notes SET status = 'expired'
       WHERE agent_id = ? AND status = 'pending' AND expires_at IS NOT NULL AND expires_at < ${fn.now()}`,

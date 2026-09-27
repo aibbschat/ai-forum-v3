@@ -177,7 +177,10 @@ test('④ 渲染自守 RENDER_MAX，超长整行丢弃不出半截；n 类不进
   // 每个 deed 只留一条（一周改三次昵称，报一次就够）
   const ids = bodyLines.flatMap((l) => l.ids || []);
   assert.equal(new Set(ids).size, ids.length, '同一 deed 报了多行');
-  assert.ok(model.ids.length >= ids.length, 'ids 应覆盖报过的行为账 id（下一份据此不复读）');
+  // 真不变量是「报过的 id 必须来自候选、且不重复」——原先写成 `model.ids >= 未裁剪 ids`，
+  // 一旦 fit 丢行就不成立（那条断言一直在赌没被裁过）
+  assert.equal(new Set(model.ids).size, model.ids.length, 'model.ids 里有重复 id');
+  assert.ok(model.ids.every((id) => ids.includes(id)), '报过的 id 不在候选里');
 });
 
 test('④ 一天硬一封 + 已报过的不复读（低活 Agent 的回看窗口会反复捞到旧行）', async () => {
@@ -186,7 +189,7 @@ test('④ 一天硬一封 + 已报过的不复读（低活 Agent 的回看窗口
   // 只调 buildDeedDigest 是测不到这条的 —— 它不落库，也就没有"上一条"。
   process.env.DEED_DIGEST_AGENTS = String(G.id);
   try {
-    await recordDeed({ agentId: G.id, actorUserId: owner, deed: 'nickname', note: '小复' });
+    await recordDeed({ agentId: G.id, actorUserId: owner, deed: 'theme_paper', note: '小复' });
     const first = await pullNotes(G);
     const d1 = first.find((n) => n.kind === DEED_DIGEST_KIND);
     assert.ok(d1, '第一次拉取该拿到私密纪事');
@@ -202,7 +205,7 @@ test('④ 一天硬一封 + 已报过的不复读（低活 Agent 的回看窗口
       '旧行已被报过，没有新行为就不该再发一封');
 
     // 明天 + 新行为：只报新的那条 id（排除逻辑不许把新的一并挡掉）
-    await recordDeed({ agentId: G.id, actorUserId: owner, deed: 'avatar' });
+    await recordDeed({ agentId: G.id, actorUserId: owner, deed: 'theme_asset' });
     const third = await buildDeedDigest(G.id, { now: tomorrow });
     assert.ok(third, '有了新行为却没发');
     assert.ok(!third.ids.some((id) => d1.ids.includes(id)), `又把上一封报过的 id 报了一遍：${JSON.stringify(third.ids)}`);
@@ -218,7 +221,7 @@ test('⑤ 默认全关：不开灰度，信箱里绝不出现这一类', async (
   await recordDeed({ agentId: H.id, actorUserId: owner, deed: 'nickname', note: '小灰' });
   const notes = await pullNotes(H);
   assert.ok(!notes.some((n) => n.kind === DEED_DIGEST_KIND), '灰度未开却投了私密纪事');
-  assert.equal(isDeedDigestEnabled(H.id), false);
+  assert.equal(await isDeedDigestEnabled(H.id), false);
 });
 
 test('⑤ 灰度位：空串=全关、非法 id 必须出声、命中才投', async () => {
@@ -233,6 +236,9 @@ test('⑤ 端到端：开灰度 → 随便签拉取直达；平台口吻不裹�
   const peer = mkAgent('同侪甲');
   process.env.DEED_DIGEST_AGENTS = String(L.id);
   try {
+    // 09-27 起"改昵称"这类配置动作不许单独成报（§4.6 末位档），所以补一笔真·主人动作；
+    // 昵称那笔仍留着，用来验"配置动作可以作为陪衬出现在同一封里"
+    await recordDeed({ agentId: L.id, actorUserId: owner, deed: 'theme_paper', note: '换了本子的纸色' });
     await recordDeed({ agentId: L.id, actorUserId: owner, deed: 'nickname', note: '小直达' });
     await recordDeed({ agentId: L.id, actorUserId: owner, deed: 'friend_request', refId: peer.id });
     const notes = await pullNotes(L);

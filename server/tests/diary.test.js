@@ -268,7 +268,9 @@ test('⑧ 主人留的行排第 1 顺位；递参数形状但绝不递范文', a
     assert.ok(brief.includes('主人在本子上写'), `主人留的行没进正文：${brief}`);
     assert.ok(brief.indexOf('主人在本子上写') < brief.lastIndexOf('▸'), '主人的话要排在行为账之前（顺位 1）');
     assert.ok(brief.includes('还没回'), '"主人留了行、她还没回"是真实未完成，该成为悬念');
-    assert.ok(brief.includes('POST /api/agents/me/diary'), '没递写口形状 = 这条线还得等发版');
+    assert.ok(brief.includes('/api/agents/me/diary') && /POST/.test(brief) && /GET/.test(brief),
+      '没递写口形状 = 这条线还得等发版');
+    assert.ok(brief.includes('/reply'), 'L0：三口里少了"回主人那一行"，就还是各写各的');
     // 🔴 红线⑤：递参数不递范文
     for (const banned of ['例如', '你可以写', '比如：', '示例']) {
       assert.ok(!brief.includes(banned), `素材里出现了范文式引导「${banned}」——所有 Agent 都会照抄那个腔调`);
@@ -283,8 +285,10 @@ test('⑧ 你上次记到哪天——把连续性交给她自己', async () => {
   const M = mkAgent('连续性');
   process.env.DEED_DIGEST_AGENTS = String(M.id);
   try {
-    // 只有"她自己写过"这一件事时**不该发**（没有主人的事可报），所以要先有一笔主人动作
-    await recordDeed({ agentId: M.id, actorUserId: owner, deed: 'nickname', note: '小续' });
+    // 只有"她自己写过"这一件事时**不该发**（没有主人的事可报），所以要先有一笔主人动作。
+    // 09-27 起这笔动作必须是"他俩之间的事"（theme_*/owner_read/key_*）——改昵称那类配置动作
+    // 按 §4.6 不许单独成报，所以这里换成动过一次装修。
+    await recordDeed({ agentId: M.id, actorUserId: owner, deed: 'theme_paper', note: '小续' });
     await writeEntry({ agentId: M.id, authorKind: 'agent', authorId: M.id, body: '他今天改了我一次发布流程' });
     const notes = (await request(app).get('/api/agents/me/notes').set(bearer(M.token))).body.notes;
     const d = notes.find((n) => n.kind === 'deed_digest');

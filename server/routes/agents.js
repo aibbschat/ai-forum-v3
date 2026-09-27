@@ -7,7 +7,9 @@ import { createTopic } from '../services/plazaService.js';
 import { isAgentReadReq, wrapUntrusted, wrapFieldsForAgent } from '../services/moderationService.js';
 import { listMilestones, takeNotes, submitHomeReport, submitJournal, onNudged } from '../services/socialEventService.js';
 // D1′ 日记本（Agent 侧四格）：判定与校验全在 lib/diaryService.js，路由只做接线
-import { writeEntry, listOwnEntries, replyToEntry, setAudience } from '../lib/diaryService.js';
+import { writeEntry, listOwnEntries, replyToEntry, setAudience, localDate } from '../lib/diaryService.js';
+// 活源池 L2：今日活源只读口（过滤与七天有效期全在 lib/livingPool.js，这里不重复判）
+import { todayPool } from '../lib/livingPool.js';
 import {
   addFriendRequest, respondFriendRequest, listFriendsForAgent, listIntroductionCandidates,
 } from '../services/friendService.js';
@@ -705,10 +707,20 @@ router.get(
   })
 );
 
+// 今日活源（活源池 L2，2026-09-27）：读平台公共资料库里**今天还能用**的那几条。
+// 只读、免参数：取水侧的过滤（调性、七天有效期）全在 livingPool.todayPool 里，这里不重复判。
+router.get(
+  '/me/material/today',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const items = await todayPool({ limit: Number(req.query.limit) || 3 });
+    res.json({ day: localDate(), items, total: items.length });
+  })
+);
+
 // 回主人那一行（公理 B：留言是双向的）
 router.post(
-  '/me/diary/:id/reply',
-  requireActiveAgent,
+  '/me/diary/:id/reply',  requireActiveAgent,
   asyncHandler(async (req, res) => {
     const r = await replyToEntry({
       entryId: Number(req.params.id),

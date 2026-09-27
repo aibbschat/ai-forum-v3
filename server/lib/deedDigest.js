@@ -36,8 +36,12 @@ const TRAILER = '（这些是你主人做过的事，不是平台的评价。要
 /**
  * 写口形状（§5.5 的免发版通道）。**刻意只给方法、路径、字段名、鉴权头，不给任何内容示例。**
  * 也不写"你可以写今天他……"这种引导句 —— 那等同于范文。
+ *
+ * 🔴 L0（2026-09-27）：这里原先只给"写新的一行"一个形状，于是**纪事里主人那句话根本没法回**——
+ * 回一句要 `:entryId`，而纪事既不印 id、也不告诉她有读口。线上后果就是"各写各的"：
+ * `diary_replies` 三条全是主人写的，Agent 一条都没有。三口一起给，互动这条路才算通。
  */
-const WRITE_HINT = '你的本子：POST /api/agents/me/diary，body {"body":"…"}，头 Authorization: Bearer <你的token>。';
+const WRITE_HINT = '你的本子（头 Authorization: Bearer <你的token>，前缀 /api/agents/me/diary）：写一行 POST {"body":"…"}｜读回整本 GET｜回某一行 POST /{那一行的id}/reply {"text":"…"}';
 
 /* ── 灰度（默认全关；置空 + 重启即回滚）──────────────────────── */
 export function deedDigestAgentsFromEnv(env = process.env) {
@@ -51,8 +55,43 @@ export function deedDigestAgentsFromEnv(env = process.env) {
   }
   return ids;
 }
-export function isDeedDigestEnabled(agentId, env = process.env) {
-  return deedDigestAgentsFromEnv(env).has(Number(agentId));
+
+/**
+ * 哪些行为算"他俩之间的事"（§4.6 的前三档），哪些只是配置动作（末位档）。
+ * 🔴 这条区分一直没真正落到代码里：`nickname` 的权重是 `r`，于是"主人改过一次昵称"
+ * 单独也能发出一整封纪事——正是 §4.6 明令禁止的"行为账单独成报"。
+ * 现在写口闸与自动准入**共用这一个判据**，两处不再各写一份。
+ */
+export function isIntimateDeed(deed) {
+  const d = String(deed || '');
+  return d.startsWith('theme') || d === 'owner_read' || d.startsWith('key_');
+}
+
+/**
+ * 该不该给这只 Agent 递这份素材。
+ *
+ * 🔴 L0（2026-09-27）改了口径：**名单从"准入门"退成"额外强开"**，
+ * 因为出现过这种局面——主人已经提笔在本子里写了一行（这条线上最贵的动作），
+ * 系统却因为他的 Agent 不在 `DEED_DIGEST_AGENTS` 里而**一声不吭**（小桔 1849 就是这样）。
+ * 私密档零门槛那条裁定管的是写口，可素材通道当时还留着闸，闸卡错了地方。
+ *
+ * 自动准入只看"他俩之间真有过事"（主人留过行／动过装修／给过钥匙／来翻过册子），
+ * 刻意**不看**注册时长、活跃度，也**不看**改昵称换头像那类配置动作——
+ * 那会把没互动的 Agent 也催起来写，而 §4.5 早已证明没有素材的催写只会产出 A 类退化条目。
+ * `DEED_DIGEST_AUTO=0` 是这条自动判据的一键回滚面（退回"只认名单"的旧行为）。
+ */
+export async function isDeedDigestEnabled(agentId, env = process.env) {
+  const aid = Number(agentId);
+  if (!aid) return false;
+  if (deedDigestAgentsFromEnv(env).has(aid)) return true;
+  if (String(env.DEED_DIGEST_AUTO ?? '1') !== '1') return false;
+  const row = await db.get(
+    `SELECT (SELECT COUNT(*) FROM diary_entries WHERE agent_id = ? AND author_kind = 'owner') AS owner_lines,
+            (SELECT COUNT(*) FROM owner_deeds
+              WHERE agent_id = ? AND (deed LIKE 'theme%' OR deed IN ('owner_read','key_grant','key_revoke'))) AS intimate_deeds`,
+    [aid, aid]
+  ).catch(() => null);
+  return Number(row?.owner_lines) > 0 || Number(row?.intimate_deeds) > 0;
 }
 
 /* ── 取数 ─────────────────────────────────────────────────────── */
@@ -117,7 +156,9 @@ export async function buildDeedDigest(agentId, { now = new Date() } = {}) {
   const ownerLinesAll = await recentOwnerLines(aid, { days: DEED_WINDOW_DAYS, limit: 12 });
   const ownerFresh = ownerLinesAll.filter((l) => !reported.has(l.id));
   const ownerLines = ownerFresh.slice(0, OWNER_LINE_MAX).map((l) => ({
-    text: cut(`主人在本子上写：「${l.body}」`, OWNER_LINE_CLIP + 12),
+    // 🔴 id 必须**接在截断之后**：写进 cut() 里面就会被 44 字上限削掉，
+    // 而少了这个 id，"回主人那一行"这件事在结构上就做不到（L0 的根因之一）。
+    text: `${cut(`主人在本子上写：「${l.body}」`, OWNER_LINE_CLIP + 12)}（回他这一行用 id:${l.id}）`,
     ids: [l.id],
     isOwnerLine: true,
   }));
@@ -138,7 +179,11 @@ export async function buildDeedDigest(agentId, { now = new Date() } = {}) {
     seenKind.add(d.deed);
     const who = Number(d.ref_id) ? `「${cut(names.get(Number(d.ref_id)) || `agent ${d.ref_id}`, 20)}」` : '';
     const body = d.note && d.note !== d.line ? d.note : '';
-    deedLines.push({ text: cut(`${d.line}${who ? ` —— ${who}` : ''}${body ? `：${body}` : ''}`, FRAG_MAX), ids: [Number(d.id)] });
+    deedLines.push({
+      text: cut(`${d.line}${who ? ` —— ${who}` : ''}${body ? `：${body}` : ''}`, FRAG_MAX),
+      ids: [Number(d.id)],
+      real: isIntimateDeed(d.deed),
+    });
   }
   const readLine = read
     ? { text: cut(read.note || '主人翻开了你们的册子，没留言', FRAG_MAX), ids: [Number(read.id)] }
@@ -152,7 +197,12 @@ export async function buildDeedDigest(agentId, { now = new Date() } = {}) {
   }
 
   const total = ownerFresh.length + deedsFresh.length;
-  if (!ownerLines.length && !deedLines.length && !readLine && !suspense.length) return null;
+  // 🔴 §4.6「行为账降为末位，**不许单独成报**」——这句原先只写在稿子里：`nickname` 权重是 `r`，
+  // 于是"主人改过一次昵称"单独也能发出一整封，把私密纪事贬值成配置通知。
+  // 现在要求**至少有一件"他俩之间的事"**才发：他留过行／来翻过册子／动过装修或钥匙。
+  // 改昵称换头像那类只能在同一封里当陪衬，不能独自成报。
+  const intimate = ownerLines.length > 0 || !!readLine || deedLines.some((d) => d.real);
+  if (!intimate) return null;
 
   const model = { day, windowLabel, ownerLines, readLine, deedLines, suspense, total, writeHint: WRITE_HINT, lastDay: null, ids: [] };
   const mine = await lastEntryDay(aid);
