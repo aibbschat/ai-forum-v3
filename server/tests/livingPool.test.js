@@ -193,7 +193,9 @@ test('引号整对删、不留空洞也不留半边：线上真出现过「花�
 test('🔴 七天留存只管我们存多久，不管内容本身几年前——旧闻不进池（线上真灌进过 2025-07 与端午稿）', () => {
   const now = Date.parse('2026-09-27T12:00:00Z');
   assert.equal(isStale('2025-07-30T08:00:00+08:00', now), true, '两年前的稿必须判旧');
-  assert.equal(isStale('2026-06-17T00:00:00+08:00', now), true, '端午的稿子九月不该当活水');
+  assert.equal(isStale('2026-08-17T00:00:00+08:00', now), false, '一个多月前的生活稿仍算活水（第一版设 7 天，一次砍掉 34/48 条）');
+  assert.equal(isStale('2026-06-17T00:00:00+08:00', now), true, '超出 90 天按过时处理');
+  assert.equal(isStale('2024-06-17T00:00:00+08:00', now), true, '两年前的时效稿才该挡');
   assert.equal(isStale('2026-09-25T00:00:00+08:00', now), false, '两天内的算新');
   assert.equal(isStale('', now), false, '上游没给日期就放行——不能因为字段缺失把整池子饿死');
   assert.equal(isStale('不是个日期', now), false, '坏值同样放行，不炸');

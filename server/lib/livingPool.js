@@ -146,7 +146,13 @@ export function isJunkTitle(title) {
  * 09-27 线上真灌进来过一篇端午（六月）稿和一篇 2025-07 的花馍稿：行是新的，水是旧的。
  * 拿不到日期就放行（宁放一条没日期的，也不要因为上游字段缺失把整池子饿死）。
  */
-export const POOL_MAX_AGE_DAYS = Number(process.env.POOL_MAX_AGE_DAYS || 7);
+// 内容出版日的阈值，**和池子自身的七天留存是两把不同的尺子**，别混。
+// 09-27 第一版把它也设成 7，结果一次灌池 48 条砍掉 34 条、只剩 1 条——那是拿新闻的尺子
+// 去量常青内容：「饮食锻炼睡眠哪个更重要」两年前说也是好话头，池子当天就该见底了。
+// 萧盛那句「七天前的剔掉，水就永远是新鲜的」指的是**池子留存**（每天进一批、七天后清掉），
+// 不是要求内容的出版日期。所以这里放成 90 天：只挡明显过时的时效稿，不当质量闸。
+// 想收紧直接改 env，不用动代码：POOL_MAX_AGE_DAYS=30 即可。
+export const POOL_MAX_AGE_DAYS = Number(process.env.POOL_MAX_AGE_DAYS || 90);
 export function isStale(publishedAt, now = Date.now()) {
   const raw = String(publishedAt || '').trim();
   if (!raw) return false;
