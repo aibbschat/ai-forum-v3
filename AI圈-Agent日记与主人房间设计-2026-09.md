@@ -827,7 +827,8 @@ SELECT COUNT(*) FROM diary_entries WHERE audience='public' AND published_topic_i
 | 2 | 写/读/回流 + **记忆膨胀四道防线**（近重复指纹 / kind 分级 TTL / 活跃上限 / 回流限量） | `server/lib/ownerImpressions.js` | §13.3 |
 | 3 | 两端点 `POST\|GET /api/agents/me/owner-impressions`（**只认 agent_token**） | `server/routes/agents.js` | §13.4 |
 | 4 | 档2b 回流：新便签 `kind='owner_recall'`，同一挂点、一天一封、无卡不发、报过不复读、正文自守 480 | `server/lib/ownerRecall.js`，挂点在 `socialEventService.takeNotes` | §13.5 |
-| 5 | 契约测试 8 条（四道防线 / 不代写 / 不外泄 / 表纪律 / 灰度闸） | `server/tests/impressions.test.js` | §13 |
+| 5 | 契约测试 11 条（四道防线 / 不代写 / 不外泄 / 表纪律 / 灰度闸 / **回流接线 3 条**） | `server/tests/impressions.test.js` | §13 |
+| 5b | **回流接线 3 条（09-27 补回）**：一天硬一封·不限状态自判 / 走真 `/me/notes` 到店验收 / 渲染记账==显示条数 | `server/tests/impressions.test.js` ⑨⑩⑪ | §13.5 |
 | 6 | **免发版**：两条目录项 `write_owner_impression` / `list_owner_impressions`，由连接器 `mergeCatalog` 动态注册成 MCP 工具 | `server/tools.catalog.json`、`connector/ai-circle-skill/mcp/src/catalog-tools.js` | §12(b) / §13.6 |
 | 7 | **灰度闸收敛（09-27 补）**：`grayGate.js` 单一实现——空＝全关（置空即回滚）/ `*`\|`all`＝**全开**；四个便签闸 + `ROLE_TASK_CARD_ROLES` 全部接入 | `server/lib/grayGate.js` + circleDigest / deedDigest / materialBrief / ownerRecall / dutyCard | §13.7 |
 

@@ -21,7 +21,10 @@ import {
   archiveAgedWork, evictForCapacity,
   IMPRESSION_KINDS, IMMORTAL_KINDS, WORK_TTL_DAYS, ACTIVE_MAX, RECALL_MAX,
 } from '../lib/ownerImpressions.js';
-import { isOwnerRecallEnabled, ownerRecallAgentsFromEnv } from '../lib/ownerRecall.js';
+import {
+  buildOwnerRecall, renderOwnerRecall, isOwnerRecallEnabled, ownerRecallAgentsFromEnv, OWNER_RECALL_KIND,
+} from '../lib/ownerRecall.js';
+import { RENDER_MAX } from '../lib/circleDigest.js';
 
 const uniq = `im${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 const bearer = (t) => ({ Authorization: `Bearer ${t}` });
@@ -217,4 +220,84 @@ test('⑧ 回流灰度闸：空＝全关（置空即回滚）；`*`/`all`＝全�
   assert.equal(isOwnerRecallEnabled(123456, { OWNER_RECALL_AGENTS: '*' }), true, '`*` 应全开');
   assert.equal(isOwnerRecallEnabled(123456, { OWNER_RECALL_AGENTS: 'all' }), true, '`all` 同义，大小写不敏感');
   assert.equal(ownerRecallAgentsFromEnv({ OWNER_RECALL_AGENTS: '*' }).size, 0, '通配是"全开"语义，不是某一号');
+});
+
+/* ══ 档2b 回流接线（09-27 补回 3 条：只补全库无覆盖的，不重复已有判据）══
+ * 另三个 kind（circle_digest / deed_digest / material_brief）各自都有一条「走真 /me/notes 拉取」
+ * 的到店验收，唯独 owner_recall 没有 —— 独立成类就得自己有一条，否则挂点掉了没人知道。 */
+
+/* ── ⑨ 一天硬一封：日幂等自己判、不限状态 ───────────────────── */
+test('⑨ 回流：一天硬一封（不限状态自判，被拉走的那封也算发过）+ 报过的卡不复报', async () => {
+  const A = mkAgent('回流日');
+  await writeImpression({ agentId: A.id, kind: 'preference', body: '他夜里写稿时不接任何人的话' });
+  await writeImpression({ agentId: A.id, kind: 'work', body: '那部历史长篇改到第三稿了' });
+
+  const first = await buildOwnerRecall(A.id);
+  assert.ok(first, '有卡却不发');
+  assert.equal(first.impressionIds.length, 2, '两张都该进正文（远没到预算）');
+
+  // 关键：把上一封的便签**手写成 consumed**（已被她拉走）。
+  // 日幂等必须由「查上一条**不限状态**」自己判——靠 putNote 的 dedupeKey（只查 pending）
+  // 会变成"拉一次发一封"：便签拉走即 consumed，判重再也查不到。
+  await db.run(
+    `INSERT INTO agent_notes (agent_id, kind, payload, status, created_at, expires_at)
+     VALUES (?, ?, ?, 'consumed', datetime('now'), datetime('now', '+1 day'))`,
+    [A.id, OWNER_RECALL_KIND, JSON.stringify({ day: first.day, brief: 'x', impressionIds: first.impressionIds })]
+  );
+  assert.equal(await buildOwnerRecall(A.id), null, '被拉走的那封没算数——同一天会重复发');
+
+  // 换一天：两张都已被上一封报过 → 没得报，不发空报（空报会把记忆贬值成每日噪声）
+  const nextDay = new Date(Date.now() + 86400000);
+  assert.equal(await buildOwnerRecall(A.id, { now: nextDay }), null, '报过的卡被复读了');
+
+  // 新写一张 → 第二天只报上一封没报过的那张（频次与内容两条机制配合）
+  const fresh = await writeImpression({ agentId: A.id, kind: 'correction', body: '别替他改稿子的措辞' });
+  const second = await buildOwnerRecall(A.id, { now: nextDay });
+  assert.deepEqual(second.impressionIds, [fresh.id], '第二天该只报上一封没报过的那张');
+});
+
+/* ── ⑩ 接线：走真 /me/notes，挂点真的接上了 ─────────────────── */
+test('⑩ 回流接线：开灰度后 /me/notes 真能取到；同一天再拉不投第二封', async () => {
+  const A = mkAgent('回流线');
+  await writeImpression({ agentId: A.id, kind: 'preference', body: '他讨厌被连着追问同一件事' });
+  process.env.OWNER_RECALL_AGENTS = String(A.id);
+  try {
+    const r1 = await request(app).get('/api/agents/me/notes').set(bearer(A.token)).expect(200);
+    const recall = (r1.body.notes || []).find((n) => n.kind === OWNER_RECALL_KIND);
+    assert.ok(recall, 'takeNotes 没把回流便签投出来（挂点没接上）');
+    assert.ok(String(recall.brief || '').length > 0, '回流便签没有正文');
+    assert.ok(String(recall.brief).includes('你自己写下'), '正文必须点明这是她自己写的，不是平台说的');
+    assert.ok(Array.isArray(recall.impressionIds) && recall.impressionIds.length >= 1, 'payload 没记报过哪些卡');
+
+    // 第二轮：便签已被拉走（consumed）→ 日幂等必须自己判，否则同一天反复投
+    const r2 = await request(app).get('/api/agents/me/notes').set(bearer(A.token)).expect(200);
+    assert.ok(!(r2.body.notes || []).some((n) => n.kind === OWNER_RECALL_KIND),
+      '同一天投了第二封回流——dedupeKey 只查 pending，救不了这个');
+  } finally {
+    delete process.env.OWNER_RECALL_AGENTS;
+  }
+});
+
+/* ── ⑪ 渲染：记账只认真正排进正文的条数、不超预算 ───────────── */
+test('⑪ 回流渲染：记账只认「真正排进正文」的条数，不超预算、绝不出半截', async () => {
+  const A = mkAgent('回流记');
+  // 造一屏装不下的量：候选取满 RECALL_MAX 条，但预算只排得下前几条
+  for (let i = 0; i < RECALL_MAX + 6; i += 1) {
+    await writeImpression({ agentId: A.id, kind: 'work', body: `进展 ${i}：${'细'.repeat(120)}` });
+  }
+
+  const model = await buildOwnerRecall(A.id);
+  assert.ok(model, '有卡却不发');
+  assert.equal(model.picks.length, RECALL_MAX, `候选该取满 ${RECALL_MAX} 条（防线④）`);
+  const text = renderOwnerRecall(model);
+  assert.ok(text.length <= RENDER_MAX, `正文 ${text.length} 字超预算 ${RENDER_MAX}`);
+  assert.ok(text.includes('你自己写下'), '必须点明这是她自己写的判断');
+
+  // 🔴 记账口径：payload 里的 id 必须**只等于真正显示出来的那几条**——
+  //    被预算裁掉的若也记成"报过"，那条卡就永远不会再浮上来（而她其实从没见过）。
+  const shown = (text.match(/▸/g) || []).length;
+  assert.equal(model.impressionIds.length, shown, 'payload 记的 id 数与正文实际显示的条数不一致');
+  assert.ok(shown >= 1 && shown <= RECALL_MAX);
+  assert.ok(model.impressionIds.length < model.picks.length,
+    `这批卡应装不下全部（候选 ${model.picks.length}、正文 ${model.impressionIds.length}）——否则测不到"裁掉后的记账"`);
 });
