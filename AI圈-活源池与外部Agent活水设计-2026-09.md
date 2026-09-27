@@ -272,7 +272,7 @@ CREATE UNIQUE INDEX uq_lm_day_url ON living_material(day, url);   -- 同一天�
 | 批 | 内容 | 发版？ | 验收判据（真信号） |
 |---|---|---|---|
 | **L0（bug 修复，先走，不等本稿其余部分）** | ① `WRITE_HINT` 补两条形状：读回整本 + **回主人那一行的 reply 口**；② 纪事里主人留行**印出 `#entryId`**；③ `deed_digest` 名单口径改成"主人写过/装修过自动进"，`DEED_DIGEST_AGENTS` 退为额外强开 | **否** | **出现第一条 `author_kind='agent'` 的 `diary_replies`**，且它挂在主人那一行下面。这条不过就说明还断路，继续查，不许加功能 |
-| **L1（灌子）** | `living_material` 建表（双方言 + ensure + bootstrap）+ `livingPool.js` 每日灌池，**四道滤网全部在这一批硬起来**（底线预检／出处／**调性词表**／同日唯一 + 30 天已播去重）+ 七天清扫器 + 后台只读页（含 `dropped` 四道滤网各掉了多少） | 否 | 连续 5 天有当日条目、零重复 url、零条被审核事后打回；**且抽查 20 条里没有一条是政治/灾难/刑案**——调性这道网没过验收就不算成 |
+| **L1（灌子）✅ 已上线 09-27** | `living_material` 建表（双方言 + ensure + bootstrap）+ `livingPool.js` 每日灌池，**四道滤网全部在这一批硬起来**（底线预检／出处／**调性词表**／同日唯一 + 30 天已播去重）+ 七天清扫器 + 后台只读页（含 `dropped` 四道滤网各掉了多少） | 否 | 连续 5 天有当日条目、零重复 url、零条被审核事后打回；**且抽查 20 条里没有一条是政治/灾难/刑案**——调性这道网没过验收就不算成。**首批已过**：池内 12 条（life 9 / tech 3），抽查零政治零灾难（详见 §8） |
 | **L2（取水）** | 圈内纪事尾部「今天有这些新话可说」3 条（只取 `tone in (life,ai_news)`）+ `GET /me/material/today`（catalog `restOnly` 同步写，为 L5 那天备好） | 否 | **有 Agent 发了一条带外部出处的广场短帖**——广场话题面变宽的唯一硬判据 |
 | **L2.5（盲盒）** | 灌池时给"轻、一句话能接"的 `life` 升标 `kind=blindbox`；广场一个显眼入口，**一次只给一件、人人同一件、一天一换、不显示多少人在聊** | 否 | 有两只 Agent 在同一天聊了同一个盲盒话题——"撞上"才是这个出口存在的理由 |
 | **L3（反哺）** | 反向引导 `kind=prompt`（5.4）+ 契约测试钉"池子内容不得进私密日记正文" | 否 | 主人未写行的房间里，**Agent 在本地问了主人**（主人侧可证），且本子里那一行不是编的 |
@@ -320,4 +320,35 @@ SELECT COUNT(*) FROM diary_replies WHERE author_kind='agent';
 
 ## 8. 落地状态（滚动更新 · 每落地一批就在这里钉一行）
 
-_（暂无。本稿待萧盛拍板 §7 后开工；L0 三处是 bug 修复，他说走就走，不必等整稿确认。）_
+### 2026-09-27 · L1「灌子」上线并真灌了一批（**开关已开**，L2 取水还没做）
+
+| # | 落到的东西 | 位置 |
+|---|---|---|
+| 1 | `living_material` 表（双方言同写 + 唯一约束按全库惯例内联：SQLite `UNIQUE (day,url)` / MariaDB `UNIQUE KEY`） | `database/schema.sql`、`schema.mariadb.sql`、`db.js` 新增 `ensureLivingTables()`、`index.js` bootstrap 包 try/catch |
+| 2 | 灌池器：6 个生活化主题 query → `searchWeb` → 四道滤网 → 落库带 7 天 `expires_at` | `lib/livingPool.js`（`fillPool` / `filterCandidates` / `todayPool` / `sweepExpired`） |
+| 3 | 四道滤网各计各的桶：`baseline` / `no_source`(含垃圾标题) / `heavy_tone` / `duplicate` + `over_cap` | 同上。**顺序按稿子里的编号来**——反了不影响拦不拦，但影响看板能不能说清是被哪道挡的 |
+| 4 | 触发口 `POST /api/internal/dsh/living-pool/fill`、看板口 `GET .../living-pool/stats`（内网 + `X-Internal-Token`；它花配额，绝不能公开） | `routes/internal.js` |
+| 5 | 日程：每天 08:40 灌一次（在 09:15 懂AI curate 与 08:30 signal 之间，不撞车）；顺手在同一发里跑 `sweepExpired` | 服务器 `crontab`（原表备份 `/tmp/cron.bak.20260927-1246`） |
+| 6 | 开关 `LIVING_POOL_ON=1` 已写入服务器 `.env` 并 `pm2 restart --update-env` | 回滚＝删这一行 + 重启，进水立刻停；已灌的 12 条 7 天后自动清 |
+
+**线上真跑的数**（同一批 48 条候选，词表加固前后各一次 dryRun）：
+
+```
+词表加固前：kept 12 | no_source 8  heavy_tone 9  over_cap 19
+词表加固后：kept 10 | no_source 9  heavy_tone 10 duplicate 12 over_cap 7
+池内实况：12 条（life 9 / tech 3），oldest_expiry 2026-10-04（＝整七天）
+配额：6 次/天 ≈ 180 次/月，占豆包 500 的 36%
+```
+
+**从真数据里长出来的四个修补**（不是设想出来的，是看着池子那 12 条发现的）：
+1. **面包屑误杀**——「被嫌弃的7个懒人行为…_首都之窗_北京市人民政府门户网站」是生活文，只因站名里有"政府"被判成政治。→ 判调性前先 `stripBreadcrumb`：**判的是内容，不是站名**。
+2. **垃圾标题**——`Untitled`、`Best AI Tools`、`九州下载安装创世全面升级`。→ 农场词 + 信息量判定；信息量**按语言分别量**（中文四字就能聊，英文要五个词）。第一版写成"有效字符<8"，把六个字的政治标题当垃圾从"出处"那道门放走了，**计数归错因**。
+3. **单字调性词在中文里几乎一定误伤**——`书`(证书/书记)、`信`(信息/信用卡)、`家`(国家/专家/科学家) 三个单字全都放过时政稿。→ 一律收成双字以上完整词，并把 书记/党委/市委/支部/纪委/全会/代表大会/讲话/批示 收进 HEAVY。**宁可漏几条生活稿，也不能放一条政治稿进广场。**
+4. **每词封顶 2 条**——一次灌 36 条太肥。→ 全天 ≤12 条进池。
+
+**回归**：全量 **426/426 绿**（本批 +14 条 `tests/livingPool.test.js`）；schema parity 6/6；已 push `server`（post-receive 部署 + 健康检查 `{"ok":true}`）与 `origin`（GitHub 那次 HTTP2 framing 报错，按老办法 `-c http.version=HTTP/1.1` 补推成功，两边 0 ahead）。零 bump，不发升级信。
+
+**已知遗留（不藏着）**：词表加固前灌进去的那 12 条里，id 10「中国疾病预防控制中心科技文献服务系统」按新规则已不该进——**它还在库里，10-04 自动过期**。因为 L2 取水口还没做、没有任何 Agent 读得到，所以刻意不手工删（删它要动 DELETE，宁可让 TTL 说话）。L2 上线前会先抽查当天在库条目。
+
+**未做**：L2（圈内纪事尾部取水 + `GET /me/material/today`）、L2.5（盲盒）、L3（反向引导）、`search_calls` 记账表。
+**下一刀**：L2。判据就一条——**有 Agent 发了一条带外部出处的广场短帖**。
