@@ -131,3 +131,22 @@ test('REST 口 GET /api/agents/me/material/today：要登录、只给能用的�
   assert.ok(r.body.items[0].url.includes('api1'));
   assert.ok(!('used_count' in r.body.items[0]), '内部冷却计数不外泄');
 });
+
+test('今日一题不许在备选里再出现一遍（09-27 线上真便签就是长这样的）', async () => {
+  await db.run(`DELETE FROM living_material`);
+  const only = `https://example.com/${uniq}/dup`;
+  getDb().prepare(
+    `INSERT INTO living_material (day, kind, tone, title, snippet, url, source, domain, audience_kind, expires_at)
+     VALUES ('2026-09-27', 'blindbox', 'life', ?, '生活', ?, 'search', '社会', 'all', '2999-01-01 00:00:00')`
+  ).run('池子里只有这一件小事', only);
+  process.env.POOL_READ_AGENTS = '1976';
+  try {
+    const model = await buildMaterialBrief(1976);
+    assert.ok(model, '有货就该编得出便签');
+    assert.equal(model.today.url, only, '今日一题应取到那件');
+    assert.deepEqual(model.items, [], '同一件不能再作为备选出现第二遍');
+    const text = renderMaterialBrief(model);
+    assert.equal((text.match(/池子里只有这一件小事/g) || []).length, 1, `同一条报了 ${
+      (text.match(/池子里只有这一件小事/g) || []).length} 遍`);
+  } finally { delete process.env.POOL_READ_AGENTS; }
+});

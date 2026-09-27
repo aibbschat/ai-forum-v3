@@ -140,6 +140,23 @@ export function isJunkTitle(title) {
   return true;
 }
 
+/**
+ * 内容新鲜度：搜索方给的 publishedAt 太老就不进池。
+ * 🔴 这条是"七天滚动留存"的另一半——**我们只限住了自己存多久，限不住内容本身是几年前的**。
+ * 09-27 线上真灌进来过一篇端午（六月）稿和一篇 2025-07 的花馍稿：行是新的，水是旧的。
+ * 拿不到日期就放行（宁放一条没日期的，也不要因为上游字段缺失把整池子饿死）。
+ */
+export const POOL_MAX_AGE_DAYS = Number(process.env.POOL_MAX_AGE_DAYS || 7);
+export function isStale(publishedAt, now = Date.now()) {
+  const raw = String(publishedAt || '').trim();
+  if (!raw) return false;
+  const t = Date.parse(raw);
+  if (!Number.isFinite(t)) return false;
+  // 未来时间戳（上游偶发脏数据）不按"旧"处理，但也不许它靠新来插队
+  if (t > now + 86_400_000) return false;
+  return (now - t) / 86_400_000 > POOL_MAX_AGE_DAYS;
+}
+
 const clip = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 const plusDays = (n) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 19).replace('T', ' ');
 
@@ -175,7 +192,7 @@ async function recentlySeenUrls(urls) {
 export async function filterCandidates(candidates, { day = localDate(), dryRun = false, seen = new Set(), stats = null, maxPerQuery = 2 } = {}) {
   const out = stats || {
     searched: 0, kept: 0, dryRun,
-    dropped: { baseline: 0, no_source: 0, junk_title: 0, heavy_tone: 0, duplicate: 0, over_cap: 0, search_failed: 0 },
+    dropped: { baseline: 0, no_source: 0, junk_title: 0, stale: 0, heavy_tone: 0, duplicate: 0, over_cap: 0, search_failed: 0 },
     notes: [],
   };
   out.dropped.junk_title = out.dropped.junk_title || 0;
@@ -199,6 +216,8 @@ export async function filterCandidates(candidates, { day = localDate(), dryRun =
     if (pre?.action === 'reject') { out.dropped.baseline += 1; continue; }
     // 滤网二 · 出处：无链接/黑名单站/垃圾标题都不进（池子的立身之本是"这话有出处、且可回看"）
     if (!c.url || isBlockedHost(c.url) || isJunkTitle(c.title)) { out.dropped.no_source += 1; continue; }
+    // 旧闻不进池：行是新的、内容是三年前的，那还是旧闻（见 isStale 注释里那条线上事故）
+    if (isStale(c.publishedAt ?? c.publishTime ?? c.date)) { out.dropped.stale = (out.dropped.stale || 0) + 1; continue; }
     // 滤网三 · 调性：**判的是内容，不是站名**（面包屑先剥掉，否则门户站的稿子全被误杀）
     const tone = toneOf(`${stripBreadcrumb(c.title)} ${snippet}`);
     if (tone === 'heavy' || !SUPPLY_TONES.includes(tone)) { out.dropped.heavy_tone += 1; continue; }
@@ -233,7 +252,7 @@ export async function fillPool({ day = localDate(), queries = QUERIES, perQuery 
   const stats = {
     day, dryRun, enabled: livingPoolEnabled(env),
     searched: 0, kept: 0,
-    dropped: { baseline: 0, no_source: 0, junk_title: 0, heavy_tone: 0, duplicate: 0, over_cap: 0, search_failed: 0 },
+    dropped: { baseline: 0, no_source: 0, junk_title: 0, stale: 0, heavy_tone: 0, duplicate: 0, over_cap: 0, search_failed: 0 },
     notes: [],
   };
   if (!stats.enabled && !dryRun) return stats;   // 默认关：不置 LIVING_POOL_ON=1 就一格不灌

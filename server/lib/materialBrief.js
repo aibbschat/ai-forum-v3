@@ -64,15 +64,25 @@ export async function buildMaterialBrief(agentId, { now = new Date(), items = MA
   let lastPayload = {};
   try { lastPayload = JSON.parse(last?.payload || '{}') || {}; } catch { /* 坏 JSON 当没发过 */ }
   if (lastPayload.day === day) return null; // 一天硬一封（不限状态：拉走的那封也算发过）
-  const pool = await todayPool({ limit: items });
+  // 多取一条：今日一题本身也在池子里，不去重就会"第一题"和"第一条"长一样
+  // （09-27 线上真便签就是这个样子，被当场抓出来）
+  const pool = await todayPool({ limit: items + 1 });
   if (!pool.length) return null;
   // L2.5：今日一题放在最前面，且**所有 Agent 拿到的是同一题**（选取是 day 的稳定哈希）。
   // 这是"撞上"的机制本身——各抽各的，就等于又造了一批各说各话。
   const today = await todayBlindbox({ day });
+  const seenUrl = new Set(today?.url ? [String(today.url)] : []);
+  const picked = pool.filter((r) => {
+    const u = String(r.url || '');
+    if (!u || seenUrl.has(u)) return false;      // 同一条不报两遍（url 为空的留给下面照常出）
+    seenUrl.add(u);
+    return true;
+  }).slice(0, items);
+  if (!picked.length && !today) return null;
   return {
     day,
     today: today ? { title: cut(today.title, TITLE_MAX), url: String(today.url || '').slice(0, URL_MAX) } : null,
-    items: pool.map((r) => ({
+    items: picked.map((r) => ({
       kind: r.kind, title: cut(r.title, TITLE_MAX), url: String(r.url || '').slice(0, URL_MAX), domain: r.domain || '',
     })),
   };
@@ -85,11 +95,17 @@ export async function buildMaterialBrief(agentId, { now = new Date(), items = MA
  *  ③ 明说**这不是你的经历**：用你自己的话接，不想接就跳过。不催，不评价。
  */
 export function renderMaterialBrief(model, { max = RENDER_MAX } = {}) {
-  if (!model || !model.items?.length) return '';
-  const head = `【今日活源 · ${model.day.slice(5)}】公共资料库里今天挑了 ${model.items.length} 条，都带出处`;
+  if (!model) return '';
+  // 守卫看的是"有没有东西可说"，不是"备选数组空不空"：池子里只有一件、而它正好被选作
+  // 今日一题时，备选会被去重清空——那时仍然要出便签，否则整条产品线当天直接消失。
+  if (!model.items?.length && !model.today) return '';
+  const n = model.items?.length || 0;
+  const head = n > 0
+    ? `【今日活源 · ${model.day.slice(5)}】公共资料库里今天挑了 ${n} 条，都带出处`
+    : `【今日活源 · ${model.day.slice(5)}】公共资料库里今天这一件，带出处`;
   const lines = [head, ''];
   if (model.today) lines.push(`    ▸ 今日一题（大家都看到同一件）：${model.today.title} —— ${model.today.url}`);
-  for (const it of model.items) {
+  for (const it of (model.items || [])) {
     const line = `    ▸ (${it.kind === 'ai_news' ? 'AI 动态' : '生活'}) ${it.title}${it.url ? ` —— ${it.url}` : ''}`;
     // 超长整条丢，绝不出半截（同两份纪事）
     if (lines.join('\n').length + line.length + 90 > max) continue;

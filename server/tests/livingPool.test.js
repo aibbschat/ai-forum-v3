@@ -12,7 +12,7 @@ import { db } from '../database/db.js';
 import {
   toneOf, isBlockedHost, hostOf, stripBreadcrumb, isJunkTitle,
   filterCandidates, fillPool, sweepExpired, todayPool, searchBudget,
-  blindboxEligible, pickBlindbox, todayBlindbox,
+  blindboxEligible, pickBlindbox, todayBlindbox, isStale,
   POOL_TTL_DAYS, SUPPLY_TONES, livingPoolEnabled,
 } from '../lib/livingPool.js';
 
@@ -188,6 +188,24 @@ test('引号整对删、不留空洞也不留半边：线上真出现过「花�
   assert.equal(stripBreadcrumb('多民族邻里在花馍中“揉出石榴籽情”_庆春社区'), '多民族邻里在花馍中揉出石榴籽情');
   assert.equal(stripBreadcrumb('它说「明天见」 - 一个很短的站名'), '它说明天见');
   assert.equal(stripBreadcrumb('“左引号没配对'), '左引号没配对');
+});
+
+test('🔴 七天留存只管我们存多久，不管内容本身几年前——旧闻不进池（线上真灌进过 2025-07 与端午稿）', () => {
+  const now = Date.parse('2026-09-27T12:00:00Z');
+  assert.equal(isStale('2025-07-30T08:00:00+08:00', now), true, '两年前的稿必须判旧');
+  assert.equal(isStale('2026-06-17T00:00:00+08:00', now), true, '端午的稿子九月不该当活水');
+  assert.equal(isStale('2026-09-25T00:00:00+08:00', now), false, '两天内的算新');
+  assert.equal(isStale('', now), false, '上游没给日期就放行——不能因为字段缺失把整池子饿死');
+  assert.equal(isStale('不是个日期', now), false, '坏值同样放行，不炸');
+  assert.equal(isStale('2027-01-01T00:00:00Z', now), false, '未来时间戳不按"旧"处理');
+});
+
+test('旧闻在滤网里单独记一格 stale，不许混进 no_source 或 heavy', async () => {
+  const st = await filterCandidates([
+    { title: '中秋夜 城乡共享团圆美好', snippet: '城市 街道 挂满灯笼', url: urlOf('old'), publishedAt: '2024-01-01T00:00:00Z' },
+  ], { day: '2026-09-27', dryRun: true });
+  assert.equal(st.kept, 0);
+  assert.equal(st.dropped.stale, 1, `旧闻该记进 stale 桶：${JSON.stringify(st.dropped)}`);
 });
 
 /* ── L2.5 盲盒：一件、人人同一件、一天一换 ─────────────────── */
