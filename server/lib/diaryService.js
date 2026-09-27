@@ -15,6 +15,9 @@
 //     为什么不能反过来：`precheckContent` 第一条就是**主人自设敏感词命中即拒**
 //     （"不要包含工作项目/客户等真实信息"），而"他今天写《屯田策》写到凌晨"正是这本册子的核心内容。
 //     照搬那道护栏，这条产品线开机第一天就被掐死。
+//  ⑤ 决定权在主人（2026-09-28 萧盛裁定）：`audience` 的变更权 **100% 归主人**，Agent 侧恒 403。
+//     理由：房间是两人共有，但"要不要把一条私密日记给外人看"只能由主人定
+//     —— 让模型自己决策必然出隐私事故。此裁定推翻了原 §7.4「谁写的只有谁能撕」。
 //
 // ── 一条容易写错的地方：未授权时**不下发**正文，而不是"前端不渲染"。
 //    稿子 §2-③ 的原话：前端藏不算藏。所以 readRoom 在未授权分支里根本不 SELECT body。
@@ -376,12 +379,43 @@ export async function listKeys(agentId, { includeRevoked = false } = {}) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   受众变更：撕出去那一刀（§7.4 保险丝 + 撕出严）
+   受众变更：撕出去那一刀（决定权在主人 + 撕出严）
    ══════════════════════════════════════════════════════════════ */
+
 /**
- * 谁写的，只有谁能撕。这条校验是整条产品线的保险丝：
- * Agent 不能公开主人写的行，主人也不能公开 Agent 写的行 —— 哪怕主人说"我不在意"。
- * 置为 public 那一刻跑**完整严格预检**（含主人敏感词），不过就不许撕。
+ * 红线闸 `DIARY_PUBLISH_AGENTS`（§5.6）。**默认全关**：未设/空串＝谁也别想往外披露。
+ *
+ * 为什么不接 lib/grayGate.js —— 那个模块支持 `*`/`all` 通配，它是给「噪声类便签闸」用的
+ * （配错顶多多发一份便签，事故半径＝一条便签）。这一条是**隐私红线**：一旦有人顺手写个 `*`
+ * 全站的日记就同时朝公开面敞开，而且**收不回来**（置空只挡新公开，已公开的不会自动收回）。
+ * 所以这里刻意另写一份，**只认显式正整数 ID**；`*`、`all` 以及任何非数字项一律不生效，
+ * 并 warn 留痕 —— 配错必须看得见，既不能静默全开，也不能静默全关。
+ */
+export const DIARY_PUBLISH_ENV = 'DIARY_PUBLISH_AGENTS';
+const warnedBadTokens = new Set();
+
+export function diaryPublishEnabled(agentId, env = process.env) {
+  const raw = String(env?.[DIARY_PUBLISH_ENV] ?? '');
+  const ids = new Set();
+  for (const token of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
+    const n = Number(token);
+    if (Number.isInteger(n) && n > 0) { ids.add(n); continue; }
+    if (!warnedBadTokens.has(token)) {
+      warnedBadTokens.add(token);
+      console.warn(`[diary] ${DIARY_PUBLISH_ENV} 含无效项「${token}」已忽略：这是红线闸，只认显式 Agent ID，不支持通配符`);
+    }
+  }
+  return ids.has(Number(agentId));
+}
+
+/**
+ * 谁有权决定这一行给不给外人看。**2026-09-28 萧盛裁定**：房间是主人与 Agent 共有的，
+ * 但**决定权一定在主人** —— 是否公开、公开哪条只能由主人定，让模型自己决定要不要把一条
+ * 私密日记放出去必然出隐私事故。此裁定推翻了原 §7.4「谁写的只有谁能撕」，故：
+ *   · Agent 侧：恒定 403（`owner_decides`）。它照样能写，只是无权决定要不要给外人看。
+ *   · 主人侧：可动这只 Agent 的**任意一条**，不限 `author_kind`（Agent 写的行也能改）。
+ * 保险丝因此从「校验作者一致」改为「校验**归属**」：这条必须属于调用者名下的 Agent。
+ * 置为 public 那一刻照旧跑**完整严格预检**（含主人敏感词），不过就不许撕。
  */
 export async function setAudience({ entryId, actorKind, actorId, audience }) {
   const eid = Number(entryId);
@@ -391,8 +425,23 @@ export async function setAudience({ entryId, actorKind, actorId, audience }) {
     `SELECT id, agent_id, author_kind, author_id, body, audience FROM diary_entries WHERE id = ?`, [eid]
   );
   if (!entry) throw fail(404, 'entry_not_found', '没有这一条');
-  if (String(entry.author_kind) !== String(actorKind) || Number(entry.author_id) !== Number(actorId)) {
-    throw fail(403, 'not_your_line', '只能公开自己写的那一行');
+
+  if (String(actorKind) !== 'owner') {
+    throw fail(403, 'owner_decides', '日记是否公开由主人决定，你只管写下来',
+      { error: 'owner_decides', message: '日记是否公开由主人决定，你只管写下来' });
+  }
+  // 归属校验：服务层不能只信路由（路由层 owners.js 的 assertOwnedEntry 做同一件事）
+  const owned = await db.get(
+    `SELECT u.id FROM users u WHERE u.id = ? AND u.owner_id = ? AND u.user_type = 'ai'`,
+    [Number(entry.agent_id), Number(actorId)]
+  );
+  if (!owned) throw fail(404, 'entry_not_found', '没有这一条');
+
+  // 红线闸只挡"往外披露"（public/shared），**不挡收回** —— 撤回来必须永远可行（§5.6 回滚陷阱）
+  const already = String(entry.audience) === a;
+  if (a !== 'private' && !already && !diaryPublishEnabled(entry.agent_id)) {
+    throw fail(403, 'publish_disabled', '日记公开功能当前未开放',
+      { error: 'publish_disabled', message: '日记公开功能当前未开放' });
   }
   if (a === 'public' && entry.audience !== 'public') {
     const pre = await precheckContent({ agentId: Number(entry.agent_id), text: entry.body, kind: 'diary' });

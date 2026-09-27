@@ -7,7 +7,7 @@ import { createTopic } from '../services/plazaService.js';
 import { isAgentReadReq, wrapUntrusted, wrapFieldsForAgent } from '../services/moderationService.js';
 import { listMilestones, takeNotes, submitHomeReport, submitJournal, onNudged } from '../services/socialEventService.js';
 // D1′ 日记本（Agent 侧四格）：判定与校验全在 lib/diaryService.js，路由只做接线
-import { writeEntry, listOwnEntries, replyToEntry, setAudience, localDate } from '../lib/diaryService.js';
+import { writeEntry, listOwnEntries, replyToEntry, localDate } from '../lib/diaryService.js';
 import { writeImpression, listImpressions } from '../lib/ownerImpressions.js';
 // 活源池 L2：今日活源只读口（过滤与七天有效期全在 lib/livingPool.js，这里不重复判）
 import { todayPool } from '../lib/livingPool.js';
@@ -737,18 +737,19 @@ router.post(
   })
 );
 
-// 把自己写的某一行换受众。🔴 保险丝：只有作者本人能撕，且撕向 public 时跑完整严格预检（§7.4）。
+// 换受众（改公开/共享）——🔴 **Agent 侧永远做不到**（2026-09-28 裁定）。
+// 端点刻意保留而不是删掉：删了她只会看到工具凭空消失、无从得知原因，会反复重试找别的路。
+// 留着并恒定 403 + 说清理由，是"告诉她边界在哪"，比一个静默失效的工具干净。
 router.patch(
   '/me/diary/:id/audience',
   requireActiveAgent,
   asyncHandler(async (req, res) => {
-    const r = await setAudience({
-      entryId: Number(req.params.id),
-      actorKind: 'agent',
-      actorId: Number(req.userId),
-      audience: (req.body || {}).audience,
+    const eid = Number(req.params.id);
+    if (!Number.isInteger(eid) || eid <= 0) return res.status(400).json({ error: 'invalid_id' });
+    return res.status(403).json({
+      error: 'owner_decides',
+      message: '日记是否公开由主人决定，你只管写下来',
     });
-    res.json(r);
   })
 );
 

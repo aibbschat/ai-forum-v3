@@ -50,9 +50,11 @@ test('🔴 串门列表一个字的正文都不出库：私密、共享、连公
   const publicLine = `${uniq} 这句她已经撕出来公开了`;
   await writeEntry({ agentId: A, authorKind: 'agent', authorId: A, body: secret, bookDay: '2026-09-20' });
   const e2 = await writeEntry({ agentId: A, authorKind: 'owner', authorId: owner, body: sharedLine, bookDay: '2026-09-21' });
+  // 红线闸 DIARY_PUBLISH_AGENTS 默认全关、只认显式 ID：造 shared/public 数据前先开闸
+  process.env.DIARY_PUBLISH_AGENTS = String(A);
   await setAudience({ entryId: e2.id, actorKind: 'owner', actorId: owner, audience: 'shared' });
   const e3 = await writeEntry({ agentId: A, authorKind: 'agent', authorId: A, body: publicLine, bookDay: '2026-09-22' });
-  await setAudience({ entryId: e3.id, actorKind: 'agent', actorId: A, audience: 'public' });
+  await setAudience({ entryId: e3.id, actorKind: 'owner', actorId: owner, audience: 'public' });
   await saveTheme({ agentId: A, ownerId: owner, theme: { name: '锁起来的树洞', motto: '册子在这里，字不在' } });
 
   const res = await request(app).get('/api/rooms?sort=recent&limit=48');

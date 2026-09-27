@@ -17,6 +17,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import {
   getAgentCard, getRoom, getRoomMeta, ownerWriteEntry, ownerReplyEntry,
   issueReadingKey, listReadingKeys, revokeReadingKey, deleteDiaryEntry, getDiaryProof,
+  setDiaryAudience,
 } from '../api';
 import type { AgentCard, DiaryLine, DiaryProof, RoomTheme, RoomView } from '../api';
 import Nav from '../components/Nav';
@@ -56,6 +57,8 @@ export default function Room() {
   const [proof, setProof] = useState<DiaryProof | null>(null);
   const [proofOpen, setProofOpen] = useState(false);
   const [deleting, setDeleting] = useState(0);
+  // 正在改某一条的公开状态（逐条，改完 reload）——公开与否只能由主人定（2026-09-28 裁定）
+  const [sharing, setSharing] = useState(0);
   const [keys, setKeys] = useState<{ id: number; label: string | null; lastSeenAt: string | null; revokedAt: string | null }[]>([]);
   // 装修中的实时预览：抽屉里改一笔，房间立刻跟着变（萧盛 09-26 报的"上传了却没反应"
   // 有一半是这个原因——上传只写进了抽屉的本地状态，背后那间房还是上一次保存的样子）。
@@ -126,6 +129,17 @@ export default function Room() {
     try { await deleteDiaryEntry(entryId); await reload(); }
     catch (e) { setErr((e as Error).message || '没删掉'); }
     finally { setDeleting(0); }
+  }
+  /**
+   * 逐条决定这一行给不给外人看。**只有主人有这个口**（Agent 侧恒 403），
+   * 且撤回来永远可行、公开则可能被红线闸挡（403 的文案直接透出，不吞）。
+   * 公开是可逆的，所以不套 window.confirm——分享一条可爱的日记不该有摩擦。
+   */
+  async function shareEntry(entryId: number, next: 'private' | 'public') {
+    setSharing(entryId); setErr('');
+    try { await setDiaryAudience(entryId, next); await reload(); }
+    catch (e) { setErr((e as Error).message || '没改成功'); }
+    finally { setSharing(0); }
   }
   async function toggleProof() {
     const next = !proofOpen; setProofOpen(next);
@@ -284,6 +298,12 @@ export default function Room() {
                     <button type="button" className="rm-link rm-del" disabled={deleting === e.id}
                       onClick={() => dropEntry(e.id)}>
                       {deleting === e.id ? '删掉…' : '🗑 删掉这一行'}
+                    </button>
+                    {/* 逐条公开/收回（2026-09-28 裁定：公开与否、公开哪条只能由主人定）。
+                        Agent 侧恒 403，所以这一段只在主人视角出现。 */}
+                    <button type="button" className="rm-link" disabled={sharing === e.id}
+                      onClick={() => shareEntry(e.id, e.audience === 'private' ? 'public' : 'private')}>
+                      {sharing === e.id ? '改…' : (e.audience === 'private' ? '🌐 公开这一行' : '🔓 收回私密')}
                     </button>
                   </div>
                 )}

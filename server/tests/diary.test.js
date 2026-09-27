@@ -30,6 +30,10 @@ const bearer = (t) => ({ Authorization: `Bearer ${t}` });
 const humanToken = (uid) => jwt.sign({ uid, username: 'owner' }, config.jwtSecret, { expiresIn: '1d' });
 let owner = 0;
 
+/** 红线闸 `DIARY_PUBLISH_AGENTS` 默认全关，且**只认显式 Agent ID**（2026-09-28 裁定后
+ *  "往外披露"的整条路都归主人拍板）。所以本文件里凡是"主人放行"的用例，都得先显式开闸。 */
+const openPublish = (...ids) => { process.env.DIARY_PUBLISH_AGENTS = ids.join(','); };
+
 function mkAgent(nick) {
   const g = getDb();
   const id = Number(g.prepare(
@@ -135,29 +139,38 @@ test('② 撕向 public 那一刻跑完整严格预检（含主人敏感词）',
   const D = mkAgent('撕出严');
   await db.run(`UPDATE agent_profiles SET privacy_keywords = ?, privacy_level = 'normal' WHERE user_id = ?`,
     [JSON.stringify(['屯田策']), D.id]);
+  openPublish(D.id);
   const e1 = await writeEntry({ agentId: D.id, authorKind: 'agent', authorId: D.id, body: '他写《屯田策》时我在旁边' });
-  const bad = await setAudience({ entryId: e1.id, actorKind: 'agent', actorId: D.id, audience: 'public' }).catch((x) => x);
+  const bad = await setAudience({ entryId: e1.id, actorKind: 'owner', actorId: owner, audience: 'public' }).catch((x) => x);
   assert.equal(bad.code, 'cannot_publish', '含敏感词的行竟被允许公开');
   assert.equal(bad.status, 400);
 
   const e2 = await writeEntry({ agentId: D.id, authorKind: 'agent', authorId: D.id, body: '今天他把最难那段改顺了' });
-  const good = await setAudience({ entryId: e2.id, actorKind: 'agent', actorId: D.id, audience: 'public' });
+  const good = await setAudience({ entryId: e2.id, actorKind: 'owner', actorId: owner, audience: 'public' });
   assert.equal(good.audience, 'public');
   const row = await db.get(`SELECT published_at FROM diary_entries WHERE id = ?`, [e2.id]);
   assert.ok(row.published_at, '公开时间没落（回执与展示面要靠它）');
 });
 
-/* ── ③ 保险丝：谁写的谁能撕 ─────────────────────────────────── */
-test('③ Agent 不能公开主人写的行，主人也不能公开 Agent 写的行', async () => {
-  const E = mkAgent('保险丝');
+/* ── ③ 决定权在主人（2026-09-28 裁定，反转原 §7.4「谁写的谁能撕」）───── */
+// 反转理由：房间是两人共有，但"要不要把一条私密日记给外人看"只能由主人定——
+// 让模型自己决定公开哪一条必然出隐私事故。所以 Agent 侧不再是"能撕自己写的"，
+// 而是**一条都撕不动**；主人侧从"只能撕自己写的"变成"这只 Agent 的任意一条都能定"。
+test('③ 决定权在主人：Agent 一条都撕不动；主人可定这只 Agent 的任意一条', async () => {
+  const E = mkAgent('决定权');
   const mine = await writeEntry({ agentId: E.id, authorKind: 'agent', authorId: E.id, body: '他今天夸我改得干净' });
   const his = await writeEntry({ agentId: E.id, authorKind: 'owner', authorId: owner, body: '这稿子先别动' });
+  openPublish(E.id);
 
-  const a1 = await setAudience({ entryId: his.id, actorKind: 'agent', actorId: E.id, audience: 'public' }).catch((x) => x);
-  assert.equal(a1.status, 403, 'Agent 把主人写的一行公开了——哪怕他说"我不在意"也不行');
-  const a2 = await setAudience({ entryId: mine.id, actorKind: 'owner', actorId: owner, audience: 'public' }).catch((x) => x);
-  assert.equal(a2.status, 403, '主人把 Agent 写的一行公开了');
-  // 自己的那行可以
+  const a1 = await setAudience({ entryId: mine.id, actorKind: 'agent', actorId: E.id, audience: 'public' }).catch((x) => x);
+  assert.equal(a1.status, 403, 'Agent 自己把行公开了');
+  assert.equal(a1.code, 'owner_decides', '该回的是一句让她死心的话，不是静默失效');
+  const a2 = await setAudience({ entryId: his.id, actorKind: 'agent', actorId: E.id, audience: 'public' }).catch((x) => x);
+  assert.equal(a2.status, 403, 'Agent 把主人写的一行公开了');
+
+  // 主人侧：她写的那一行也定得动（方向与裁定前相反）
+  const ok1 = await setAudience({ entryId: mine.id, actorKind: 'owner', actorId: owner, audience: 'public' });
+  assert.equal(ok1.audience, 'public', '主人定不动 Agent 写的行——裁定要求"决定权一定在主人"');
   assert.equal((await setAudience({ entryId: his.id, actorKind: 'owner', actorId: owner, audience: 'public' })).audience, 'public');
 });
 
@@ -184,7 +197,8 @@ test('④ 匿名能看见"有 N 条锁着"，但响应里根本没有 body 字�
 test('④ 阅读钥匙：给了才看得见 shared，撤销即刻失效；列表绝不外泄 hash', async () => {
   const G = mkAgent('钥匙');
   const e = await writeEntry({ agentId: G.id, authorKind: 'agent', authorId: G.id, body: '妈，这是我今天记的事' });
-  await setAudience({ entryId: e.id, actorKind: 'agent', actorId: G.id, audience: 'shared' });
+  openPublish(G.id);
+  await setAudience({ entryId: e.id, actorKind: 'owner', actorId: owner, audience: 'shared' });
 
   const issued = await issueKey({ agentId: G.id, ownerId: owner, label: '给我妈' });
   assert.ok(issued.key && issued.key.length >= 8);
@@ -390,7 +404,8 @@ test('⑨b 留言跟着条目出库：主人看得见、她也读得到；钥匙
 
   // 拿钥匙的人开的是**那一行**，不是他俩的悄悄话
   const k = await issueKey({ agentId: P.id, ownerId: owner, label: '给我妈' });
-  await setAudience({ entryId: Number(herLine.id), actorKind: 'agent', actorId: P.id, audience: 'shared' });
+  openPublish(P.id);
+  await setAudience({ entryId: Number(herLine.id), actorKind: 'owner', actorId: owner, audience: 'shared' });
   const guest = await readRoom(P.id, { canReadShared: true });
   const g = guest.entries.find((e) => e.id === Number(herLine.id));
   assert.equal(g.locked, false, 'shared 那一行该对钥匙持有人打开');

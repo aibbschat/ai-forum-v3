@@ -1992,6 +1992,14 @@ export function revokeReadingKey(keyId: number) {
 export function deleteDiaryEntry(entryId: number) {
   return del<{ ok: boolean; deleted: number }>(`/api/owners/diary/${entryId}`);
 }
+/**
+ * 主人决定这一行给不给外人看（2026-09-28 裁定：**决定权 100% 在主人**，Agent 侧恒 403）。
+ * 逐条、没有批量——`public` 会让这一行在房间页对匿名访客可读。服务端另有红线闸
+ * `DIARY_PUBLISH_AGENTS`：未开时 `shared`/`public` 都会 403 publish_disabled，但**收回永不被挡**。
+ */
+export function setDiaryAudience(entryId: number, audience: 'private' | 'shared' | 'public') {
+  return patch<{ ok: boolean; id: number; audience: string }>(`/api/owners/diary/${entryId}/audience`, { audience });
+}
 /** 三条承诺的自证：服务端现场跑一遍匿名/钥匙/主人三种读口，返回"真的读到了什么"。 */
 export interface ProofItem { key: string; label: string; verdict: boolean; evidence: Record<string, unknown> }
 export interface DiaryProof { agentId: number; total: number; promises: ProofItem[] }

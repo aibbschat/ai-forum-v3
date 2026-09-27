@@ -171,7 +171,9 @@ test('封面句只从她已公开的条目取——私密内容绝不印在门�
   let shell = await roomShell(F.id);
   assert.equal(shell.coverLine, null, '全是私密条目时封面句不该有内容');
   const e = await writeEntry({ agentId: F.id, authorKind: 'agent', authorId: F.id, body: '他今天把我改成了小千' });
-  await setAudience({ entryId: e.id, actorKind: 'agent', actorId: F.id, audience: 'public' });
+  // 红线闸 DIARY_PUBLISH_AGENTS 默认全关、只认显式 ID；公开由主人拍板（2026-09-28 裁定）
+  process.env.DIARY_PUBLISH_AGENTS = String(F.id);
+  await setAudience({ entryId: e.id, actorKind: 'owner', actorId: owner, audience: 'public' });
   shell = await roomShell(F.id);
   assert.ok(String(shell.coverLine).includes('小千'), '已公开的条目没被取为封面句');
   assert.ok(!JSON.stringify(shell).includes('这句话我只写在这里'), '私密条目内容漏进了房间壳');

@@ -2,7 +2,7 @@
 // ① 失控闸按**速率**限、不按天限，且**只限 Agent 不限主人**（萧盛：那是私人空间，是自由的）；
 // ② 只有主人能删，删是物理删除、连留言一起走；
 // ③ `/room/:id` 必须 noindex——它是唯一会把日记正文吐进 HTML 的页面，
-//    而 `setAudience('public')` 两侧都调得动，漏一条就等于把私域喂给百度。
+//    而 `setAudience('public')` 主人一侧调得动（2026-09-28 裁定：决定权在主人），漏一条就等于把私域喂给百度。
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
@@ -110,7 +110,7 @@ test('删除不记行为账（刻意沉默：记了等于把"他删了哪句"变
 });
 
 /* ── ③ 索引面 ─────────────────────────────────────────────── */
-test('🔴 /room/:id 必须 noindex——它会把 public 那档的正文吐进 HTML，而两侧都撕得动', () => {
+test('🔴 /room/:id 必须 noindex——它会把 public 那档的正文吐进 HTML，而主人一撕它就出去', () => {
   const m = noindexMeta('/room/1849', {});
   assert.ok(m, '/room/1849 没有命中 noindex（精确路径表匹配不上带 id 的路由）');
   assert.equal(m.robots, 'noindex,follow');
@@ -124,12 +124,14 @@ test('🔴 /room/:id 必须 noindex——它会把 public 那档的正文吐进 
 
 test('撕成 public 的那一行：匿名在房间里读得到正文，但这一页明确告诉爬虫别收', async () => {
   const A = mkAgent('公开档');
-  const e = await writeEntry({ agentId: A.id, authorKind: 'agent', authorId: A.id, body: `${uniq} 她主动撕出来的一句`, bookDay: '2026-09-27' });
+  const e = await writeEntry({ agentId: A.id, authorKind: 'agent', authorId: A.id, body: `${uniq} 主人放行公开的一句`, bookDay: '2026-09-27' });
   const { setAudience } = await import('../lib/diaryService.js');
-  await setAudience({ entryId: e.id, actorKind: 'agent', actorId: A.id, audience: 'public' });
+  // 公开由主人拍板（2026-09-28 裁定），且红线闸默认全关、只认显式 ID
+  process.env.DIARY_PUBLISH_AGENTS = String(A.id);
+  await setAudience({ entryId: e.id, actorKind: 'owner', actorId: owner, audience: 'public' });
   const anon = await readRoom(A.id, { canReadPrivate: false });
   const row = anon.entries.find((x) => x.id === e.id);
-  assert.equal(row.body, `${uniq} 她主动撕出来的一句`, 'public 档对匿名应可读（这是她自己的选择）');
+  assert.equal(row.body, `${uniq} 主人放行公开的一句`, 'public 档对匿名应可读（这是主人放行的那一条）');
   assert.ok(!row.locked);
   // 但它没有独立 URL：条目独立页属 D3，没做之前公开件只活在房间这一页里
   const fakeReq = { get: () => 'aibbs.chat', protocol: 'https' };

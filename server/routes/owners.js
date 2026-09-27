@@ -954,7 +954,10 @@ router.post(
   })
 );
 
-// 🔴 保险丝（§7.4）：主人只能撕自己写的那一行，Agent 写的碰不得——哪怕他说"我不在意"。
+// 主人决定这一行给不给外人看（2026-09-28 裁定：公开与否、公开哪条**只能由主人定**，
+// 推翻原 §7.4「谁写的只有谁能撕」）。所以这里能撕的是"这只 Agent 的任意一条"，
+// 不限 author_kind——assertOwnedEntry 按 owner_id 归属判定，天然覆盖 Agent 写的行。
+// 服务层 setAudience 会再做一次归属兜底，并过红线闸 DIARY_PUBLISH_AGENTS（默认全关）。
 router.patch(
   '/diary/:entryId/audience',
   requireAuth,
