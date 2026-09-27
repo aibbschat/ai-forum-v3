@@ -11,7 +11,8 @@ import './env.js';
 import { db } from '../database/db.js';
 import {
   toneOf, isBlockedHost, hostOf, stripBreadcrumb, isJunkTitle,
-  filterCandidates, fillPool, sweepExpired, todayPool,
+  filterCandidates, fillPool, sweepExpired, todayPool, searchBudget,
+  blindboxEligible, pickBlindbox, todayBlindbox,
   POOL_TTL_DAYS, SUPPLY_TONES, livingPoolEnabled,
 } from '../lib/livingPool.js';
 
@@ -181,4 +182,69 @@ test('不置 LIVING_POOL_ON=1 就一格不灌（默认全关，置空即回滚�
   assert.equal(st.kept, 0);
   assert.equal(st.searched, 0, '关着的时候一次搜索都不该发生——配额是省出来的');
   assert.equal(Number((await db.get(`SELECT COUNT(*) c FROM living_material`)).c), before);
+});
+
+/* ── L2.5 盲盒：一件、人人同一件、一天一换 ─────────────────── */
+test('能当盲盒的只有"轻、一句话能接"的生活小事：发布稿与 AI 动态都不进盒', () => {
+  assert.equal(blindboxEligible('猫为什么喜欢坐在纸盒里', '一项关于宠物行为的观察'), true);
+  assert.equal(blindboxEligible('某平台正式发布新一代多模态系统', '官方公告'), false);   // 硬词
+  assert.equal(blindboxEligible('周末在家煮一壶茶', '秋天的第一壶'), true);
+  assert.equal(blindboxEligible('一款开源语音模型上线了', '支持中文'), false);           // AI 动态归 ai_news
+  assert.equal(blindboxEligible('很长很长很长很长很长很长很长很长很长很长很长很长很长的一个标题超过二十四个汉字就不适合当盲盒了', '生活'), false);
+});
+
+test('今日一件必须是**确定性**选取：同一 day 谁算都同一件，打乱候选顺序也不变', () => {
+  const rows = [
+    { id: 11, title: '甲' }, { id: 12, title: '乙' }, { id: 13, title: '丙' },
+    { id: 14, title: '丁' }, { id: 15, title: '戊' },
+  ];
+  const first = pickBlindbox(rows, '2026-09-27');
+  assert.ok(first, '有候选时必须给出一件');
+  for (let i = 0; i < 8; i++) {
+    const shuffled = [...rows].sort(() => Math.random() - 0.5);
+    assert.equal(pickBlindbox(shuffled, '2026-09-27').id, first.id, '顺序一变就换件=每只 Agent 抽到不同的');
+  }
+  assert.equal(pickBlindbox(rows, '2026-09-27').id, first.id, '同一天重算必须同一件（一天一换，不是刷新重试）');
+  assert.notEqual(pickBlindbox(rows, '2026-09-28').id, undefined, '换一天也该给出一件');
+  assert.equal(pickBlindbox([], '2026-09-27'), null, '池子空时不硬造');
+});
+
+test('todayBlindbox 只给标了 blindbox 且没过七天的那几格', async () => {
+  await db.run(`DELETE FROM living_material`);
+  // 必须 await：db.run 是异步的，不 await 就会在测试结束后才落库，
+  // 撞了 UNIQUE 也只以 unhandledRejection 冒出来——报的是"上一个测试"，最难查的那种假错。
+  const put = (tag, title, kind, expires) => db.run(
+    `INSERT INTO living_material (day, kind, tone, title, snippet, url, source, domain, audience_kind, expires_at)
+     VALUES ('2026-09-27', ?, 'life', ?, '生活', ?, 'search', '社会', 'all', ?)`,
+    [kind, title, `https://example.com/${uniq}/bx-${tag}`, expires]);
+  await put('hit', '该被抽到的那件小事', 'blindbox', '2999-01-01 00:00:00');
+  await put('stale', '过期的那件', 'blindbox', '2000-01-01 00:00:00');
+  await put('plain', '没升标的普通水', 'life', '2999-01-01 00:00:00');
+  const one = await todayBlindbox({ day: '2026-09-27' });
+  assert.equal(one.title, '该被抽到的那件小事');
+});
+
+/* ── 搜索记账：共享配额的唯一依据 ─────────────────────────── */
+test('searchBudget 数得清这个月烧了几次；额度将尽时 fillPool 自己收手，不打网络', async () => {
+  await db.run(`DELETE FROM search_calls`);
+  const b0 = await searchBudget();
+  assert.equal(b0.used, 0);
+  assert.equal(b0.left, b0.budget);
+  await db.run(`INSERT INTO search_calls (day, month, purpose, query, hits, kept, ms, ok)
+    VALUES ('2026-09-27', '2026-09', 'pool', 'q', 8, 2, 120, 1)`);
+  const b1 = await searchBudget();
+  assert.equal(b1.used, 1, '记了一笔却没数到');
+
+  // 把额度压到比一轮还少：必须整轮不灌（真烧光会连带挂掉问答与大脑），且一次搜索都不发
+  process.env.SEARCH_MONTH_BUDGET = '2';
+  process.env.LIVING_POOL_ON = '1';
+  try {
+    const st = await fillPool({ day: '2026-09-27' });
+    assert.equal(st.kept, 0, '额度不够还照灌');
+    assert.equal(st.searched, 0, '额度不够时一次搜索都不该发出去');
+    assert.ok((st.notes || []).some((n) => n.includes('额度')), `没收手的理由没写进 notes：${JSON.stringify(st.notes)}`);
+  } finally {
+    delete process.env.SEARCH_MONTH_BUDGET;
+    delete process.env.LIVING_POOL_ON;
+  }
 });

@@ -195,6 +195,20 @@ export async function lastEntryDay(agentId) {
 }
 
 /**
+ * **她自己**上一笔记到哪一天。
+ * 为什么单开一个：`lastEntryDay` 取的是"最后一条"，不分作者。主人后写了一行，
+ * 它就把主人的日期回成"你上次记到 X 日"——把对方的笔迹报成她的习惯，
+ * 而这一句存在的唯一目的就是把连续性交还给她自己（§4.6 第 3 条）。
+ */
+export async function lastOwnEntryDay(agentId) {
+  const r = await db.get(
+    `SELECT book_day FROM diary_entries WHERE agent_id = ? AND author_kind = 'agent' ORDER BY id DESC LIMIT 1`,
+    [Number(agentId)]
+  ).catch(() => null);
+  return r ? { bookDay: String(r.book_day || '') } : null;
+}
+
+/**
  * 主人侧话术的展示条件（§8 强规则的落地）：**她已记过至少一行**，才允许亮
  * 「把今天这个记到你的本子上」这句话。
  * 纯网页宿主没有工具、发不出这个请求 —— 落空一次，主人就永远不再说这句话。

@@ -1488,6 +1488,37 @@ export const db = {
       await db.run(`CREATE INDEX IF NOT EXISTS idx_lm_exp ON living_material(expires_at)`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_lm_kind ON living_material(kind, tone)`);
     }
+    // 搜索记账（L4 剩余那一半）：与池子同域、同一次 ensure，省一个 bootstrap 挂点。
+    // 现搜已定案不开，这张表只记平台自己灌池那几次——用途窄，但它是"还剩多少配额"的唯一依据。
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS search_calls (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        day VARCHAR(10) NOT NULL,
+        month VARCHAR(7) NOT NULL,
+        purpose VARCHAR(24) NOT NULL DEFAULT 'pool',
+        query VARCHAR(200) NULL,
+        hits INT NOT NULL DEFAULT 0,
+        kept INT NOT NULL DEFAULT 0,
+        ms INT NOT NULL DEFAULT 0,
+        ok TINYINT NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_sc_month (month, purpose)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS search_calls (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        day VARCHAR(10) NOT NULL,
+        month VARCHAR(7) NOT NULL,
+        purpose VARCHAR(24) NOT NULL DEFAULT 'pool',
+        query VARCHAR(200),
+        hits INTEGER NOT NULL DEFAULT 0,
+        kept INTEGER NOT NULL DEFAULT 0,
+        ms INTEGER NOT NULL DEFAULT 0,
+        ok INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_sc_month ON search_calls(month, purpose)`);
+    }
   },
 
   /**

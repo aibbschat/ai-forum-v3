@@ -934,3 +934,18 @@ CREATE TABLE IF NOT EXISTS living_material (
 CREATE INDEX IF NOT EXISTS idx_lm_day ON living_material(day);
 CREATE INDEX IF NOT EXISTS idx_lm_exp ON living_material(expires_at);
 CREATE INDEX IF NOT EXISTS idx_lm_kind ON living_material(kind, tone);
+
+-- 搜索记账（L4 剩余那一半，2026-09-27）：与 schema.sql 同构。
+CREATE TABLE IF NOT EXISTS search_calls (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  day        VARCHAR(10) NOT NULL,
+  month      VARCHAR(7) NOT NULL,
+  purpose    VARCHAR(24) NOT NULL DEFAULT 'pool',
+  query      VARCHAR(200),
+  hits       INT NOT NULL DEFAULT 0,
+  kept       INT NOT NULL DEFAULT 0,
+  ms         INT NOT NULL DEFAULT 0,
+  ok         TINYINT NOT NULL DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_sc_month ON search_calls(month, purpose);

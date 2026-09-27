@@ -52,8 +52,8 @@ before(async () => {
   await db.ensureLivingTables();
 });
 
-test('灰度：MATERIAL_AGENTS 不设就是全关，池子有货也不递（公约：默认空＝全关，置空即回滚）', async () => {
-  delete process.env.MATERIAL_AGENTS;
+test('灰度：POOL_READ_AGENTS 不设就是全关，池子有货也不递（公约：默认空＝全关，置空即回滚）', async () => {
+  delete process.env.POOL_READ_AGENTS;
   const A = mkAgent('未开');
   putPool({ title: '猫为什么喜欢坐在纸盒里', url: `https://example.com/${uniq}/a1` });
   assert.equal(isMaterialEnabled(A.id), false);
@@ -64,14 +64,14 @@ test('灰度：MATERIAL_AGENTS 不设就是全关，池子有货也不递（公�
 test('空池不发：递一份"今天没有新话"只会训练 Agent 忽略这一类便签', async () => {
   await db.run(`DELETE FROM living_material`);   // 本文件自己的池子，测前清台
   const A = mkAgent('空池');
-  process.env.MATERIAL_AGENTS = String(A.id);
+  process.env.POOL_READ_AGENTS = String(A.id);
   try {
     const model = await buildMaterialBrief(A.id);
     assert.equal(model, null, '池子空时必须给 null');
     assert.equal(renderMaterialBrief(model), '');
     const notes = await pullNotes(A);
     assert.ok(!notes.some((n) => n.kind === MATERIAL_KIND));
-  } finally { delete process.env.MATERIAL_AGENTS; }
+  } finally { delete process.env.POOL_READ_AGENTS; }
 });
 
 test('开灰度 → 便签里三条带出处、带读口形状、并明说这不是她的经历', async () => {
@@ -79,7 +79,7 @@ test('开灰度 → 便签里三条带出处、带读口形状、并明说这不
   putPool({ title: '研究发现猫把桌上的东西推下去是在测试重力', url: `https://example.com/${uniq}/k1` });
   putPool({ title: '周末补觉并不能完全抵消熬夜的代价', url: `https://example.com/${uniq}/k2`, kind: 'life' });
   putPool({ title: '一款本地跑的开源语音模型上线', url: `https://example.com/${uniq}/k3`, kind: 'ai_news', tone: 'tech' });
-  process.env.MATERIAL_AGENTS = String(A.id);
+  process.env.POOL_READ_AGENTS = String(A.id);
   try {
     const notes = await pullNotes(A);
     const brief = notes.find((n) => n.kind === MATERIAL_KIND);
@@ -95,7 +95,7 @@ test('开灰度 → 便签里三条带出处、带读口形状、并明说这不
     // 一天一封：再拉一次不该又冒出一条同日的
     const again = await pullNotes(A);
     assert.equal(again.filter((n) => n.kind === MATERIAL_KIND).length, 0, '同一天发了第二封，素材就成了噪声');
-  } finally { delete process.env.MATERIAL_AGENTS; }
+  } finally { delete process.env.POOL_READ_AGENTS; }
 });
 
 test('取水侧只给调性对且没过七天的：heavy 与过期的一律看不见', async () => {
@@ -104,7 +104,7 @@ test('取水侧只给调性对且没过七天的：heavy 与过期的一律看�
   putPool({ title: '某市召开市委常委扩大会议', url: `https://example.com/${uniq}/pol`, tone: 'heavy' });
   putPool({ title: '上周的生活小事，已经过期', url: `https://example.com/${uniq}/old`, expires: '2000-01-01 00:00:00' });
   putPool({ title: '今天还新鲜的阳台种菜记录', url: `https://example.com/${uniq}/fresh` });
-  process.env.MATERIAL_AGENTS = String(A.id);
+  process.env.POOL_READ_AGENTS = String(A.id);
   try {
     const model = await buildMaterialBrief(A.id);
     assert.ok(model && model.items.length === 1, `只该给那一条新鲜的，实得 ${model?.items?.length}`);
@@ -112,7 +112,7 @@ test('取水侧只给调性对且没过七天的：heavy 与过期的一律看�
     const text = renderMaterialBrief(model);
     assert.ok(!text.includes('市委常委'), 'heavy 那格绝不能出现在便签里');
     assert.ok(!text.includes('已经过期'), '过期的绝不能出现——七天前的水就不该再喝');
-  } finally { delete process.env.MATERIAL_AGENTS; }
+  } finally { delete process.env.POOL_READ_AGENTS; }
 });
 
 test('REST 口 GET /api/agents/me/material/today：要登录、只给能用的、空池给空数组不是 500', async () => {

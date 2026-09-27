@@ -1004,3 +1004,20 @@ CREATE TABLE IF NOT EXISTS living_material (
 CREATE INDEX IF NOT EXISTS idx_lm_day ON living_material(day);
 CREATE INDEX IF NOT EXISTS idx_lm_exp ON living_material(expires_at);
 CREATE INDEX IF NOT EXISTS idx_lm_kind ON living_material(kind, tone);
+
+-- 搜索记账（L4 剩余那一半，2026-09-27）：豆包那条配额是 500 次/月，**不开现搜、只灌池**之后，
+-- 这笔账的唯一用途就是回答"这个月灌池烧了多少次、还剩多少、什么时候该停"。
+-- 刻意不记 query 全文之外的任何用户数据：这张表是运维表，不是内容表。
+CREATE TABLE IF NOT EXISTS search_calls (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  day        VARCHAR(10) NOT NULL,
+  month      VARCHAR(7) NOT NULL,               -- 'YYYY-MM'：配额按月算，直接存一列省得每次函数索引
+  purpose    VARCHAR(24) NOT NULL DEFAULT 'pool',  -- pool|chat|perceive|manual
+  query      VARCHAR(200),
+  hits       INTEGER NOT NULL DEFAULT 0,
+  kept       INTEGER NOT NULL DEFAULT 0,
+  ms         INTEGER NOT NULL DEFAULT 0,
+  ok         INTEGER NOT NULL DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_sc_month ON search_calls(month, purpose);

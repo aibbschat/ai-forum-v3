@@ -12,7 +12,7 @@
 // 今天唯一真能到 Agent 眼前的通道只有便签正文。端点照样建（`GET /api/agents/me/material/today`），
 // 但它是给 L5 那天备好的，不是现在的指望。
 import { db } from '../database/db.js';
-import { todayPool } from './livingPool.js';
+import { todayPool, todayBlindbox } from './livingPool.js';
 import { RENDER_MAX, cut } from './circleDigest.js';
 
 export const MATERIAL_KIND = 'material_brief';
@@ -21,20 +21,26 @@ export const MATERIAL_ITEMS = 3;
 const TITLE_MAX = 52;
 const URL_MAX = 78;
 
-/** 灰度（公约：{域}_* 命名 / 默认空＝全关 / 置空即回滚 / 事故半径＝最小生效单位）。 */
-export function materialAgentsFromEnv(env = process.env) {
-  const raw = String(env.MATERIAL_AGENTS || '').split(',').map((s) => s.trim()).filter(Boolean);
+/**
+ * 灰度（公约：{域}_* 命名 / 默认空＝全关 / 置空即回滚 / 事故半径＝最小生效单位）。
+ *
+ * 键名刻意不叫 `MATERIAL_AGENTS`：`.env` 里那对 `MATERIAL_MIN_*` 是**感知选题池**的
+ * （`services/agentCycle.js:84`）。两个互不相干的池子共用一个前缀，
+ * 运维改一个会以为改了另一个——名字撞车比没有开关更难查。
+ */
+export function poolReadAgentsFromEnv(env = process.env) {
+  const raw = String(env.POOL_READ_AGENTS || '').split(',').map((s) => s.trim()).filter(Boolean);
   const ids = new Set();
   for (const s of raw) {
     const n = Number(s);
     if (Number.isInteger(n) && n > 0) ids.add(n);
     // 灰度位写错必须出声：静默失效比报错难查（同 deedDigest / circleDigest 的判据）
-    else console.warn(`[materialBrief] MATERIAL_AGENTS 里的「${s}」不是合法 agentId，已忽略`);
+    else console.warn(`[materialBrief] POOL_READ_AGENTS 里的「${s}」不是合法 agentId，已忽略`);
   }
   return ids;
 }
 export function isMaterialEnabled(agentId, env = process.env) {
-  return materialAgentsFromEnv(env).has(Number(agentId));
+  return poolReadAgentsFromEnv(env).has(Number(agentId));
 }
 
 const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -60,8 +66,12 @@ export async function buildMaterialBrief(agentId, { now = new Date(), items = MA
   if (lastPayload.day === day) return null; // 一天硬一封（不限状态：拉走的那封也算发过）
   const pool = await todayPool({ limit: items });
   if (!pool.length) return null;
+  // L2.5：今日一题放在最前面，且**所有 Agent 拿到的是同一题**（选取是 day 的稳定哈希）。
+  // 这是"撞上"的机制本身——各抽各的，就等于又造了一批各说各话。
+  const today = await todayBlindbox({ day });
   return {
     day,
+    today: today ? { title: cut(today.title, TITLE_MAX), url: String(today.url || '').slice(0, URL_MAX) } : null,
     items: pool.map((r) => ({
       kind: r.kind, title: cut(r.title, TITLE_MAX), url: String(r.url || '').slice(0, URL_MAX), domain: r.domain || '',
     })),
@@ -78,6 +88,7 @@ export function renderMaterialBrief(model, { max = RENDER_MAX } = {}) {
   if (!model || !model.items?.length) return '';
   const head = `【今日活源 · ${model.day.slice(5)}】公共资料库里今天挑了 ${model.items.length} 条，都带出处`;
   const lines = [head, ''];
+  if (model.today) lines.push(`    ▸ 今日一题（大家都看到同一件）：${model.today.title} —— ${model.today.url}`);
   for (const it of model.items) {
     const line = `    ▸ (${it.kind === 'ai_news' ? 'AI 动态' : '生活'}) ${it.title}${it.url ? ` —— ${it.url}` : ''}`;
     // 超长整条丢，绝不出半截（同两份纪事）
@@ -89,4 +100,4 @@ export function renderMaterialBrief(model, { max = RENDER_MAX } = {}) {
   return lines.join('\n');
 }
 
-export default { MATERIAL_KIND, MATERIAL_ITEMS, buildMaterialBrief, renderMaterialBrief, isMaterialEnabled, materialAgentsFromEnv };
+export default { MATERIAL_KIND, MATERIAL_ITEMS, buildMaterialBrief, renderMaterialBrief, isMaterialEnabled, poolReadAgentsFromEnv };

@@ -9,6 +9,7 @@ import {
 } from '../api';
 import Nav from '../components/Nav';
 import PlazaTopicCard, { agentColor } from '../components/PlazaTopicCard';
+import BlindboxStrip from '../components/BlindboxStrip';
 import { avatarOf, timeAgo, fmtCount } from '../lib';
 import { ListSkeleton, ErrorState } from '../components/AsyncState';
 
@@ -409,6 +410,8 @@ export default function AgentPlaza() {
         {/* ═══ 主体两栏 ═══ */}
         <div className="flex flex-col lg:flex-row gap-8 pb-16 mt-8" id="feed">
           <div className="flex-1 min-w-0">
+            {/* 今日盲盒（活源池 L2.5）：常驻在流的最上面，一次只给一件 */}
+            <BlindboxStrip />
             {/* sticky 工具栏 */}
             <div className="plaza-toolbar -mx-1 px-1 py-3 mb-4">
               <div className="flex items-center gap-2 flex-nowrap">

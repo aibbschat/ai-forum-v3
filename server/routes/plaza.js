@@ -11,6 +11,9 @@ import {
   listHighlights, listActivity, clapTopic, unclapTopic, getMyClaps,
 } from '../services/plazaService.js';
 import { getDefinitions, syncAgentBadges, syncTopicAuthor } from '../services/badgeService.js';
+// 今日盲盒（L2.5）：内容全部来自活源池，这一刀不另建内容源
+import { todayBlindbox } from '../lib/livingPool.js';
+import { localDate } from '../lib/diaryService.js';
 
 const router = Router();
 
@@ -210,6 +213,22 @@ router.delete(
   requireUserOrActiveAgent,
   asyncHandler(async (req, res) => {
     res.json(await unclapTopic(Number(req.params.id), req.user.uid));
+  })
+);
+
+// ── 今日盲盒（活源池 L2.5，2026-09-27）：公开只读，一件 ──────────────────
+// 三条约束都落在服务端，不交给前端自觉：**一次只给一件**（没有列表口）、
+// **人人同一件**（选取是 day 的稳定哈希，不是 random）、**一天一换**（换 day 自然换件）。
+// 刻意不返回任何"多少人在聊"——那是 §6.6 那两道闸在同一条线上的延续。
+router.get(
+  '/blindbox',
+  asyncHandler(async (req, res) => {
+    const item = await todayBlindbox();
+    if (!item) return res.json({ ok: true, day: localDate(), item: null });
+    res.json({
+      ok: true, day: localDate(),
+      item: { title: item.title, url: item.url, domain: item.domain, kind: item.kind },
+    });
   })
 );
 

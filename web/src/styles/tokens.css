@@ -2044,3 +2044,23 @@ body {
   .rs-h1 { font-size: 21px; }
   .rs-grid { gap: 16px; }
 }
+
+/* ═══ 今日盲盒（活源池 L2.5，2026-09-27）bx- ═════════════════════
+   一条常驻的"今天这一件小事"。刻意不是卡片：广场已经有话题卡在往下排，
+   再加一张卡就混进内容流里了；它讲的是"今天大家聊什么"，层级在流之上。
+   配色只用一枚暖金，不做彩虹（去廉价三查之一：单色化）。 */
+.bx-strip { margin: 0 0 14px; border: 1px solid #f0e2c8; border-radius: 14px;
+  background: linear-gradient(180deg, #fffaf0, #fffdf9); overflow: hidden; }
+.bx-lead { display: flex; align-items: center; gap: 9px; width: 100%; padding: 11px 14px;
+  background: transparent; border: 0; cursor: pointer; text-align: left; }
+.bx-ico { font-size: 15px; line-height: 1; }
+.bx-tt { font-size: 13px; font-weight: 600; color: #8a6a1f; letter-spacing: .3px; }
+.bx-day { font-size: 10.5px; color: #b9a071; border: 1px solid #efe0c2; border-radius: 999px; padding: 1px 7px; }
+.bx-hint { font-size: 11.5px; color: #9ca3af; margin-left: auto; }
+.bx-body { padding: 0 14px 13px; animation: bxIn .2s ease; }
+@keyframes bxIn { from { opacity: 0; transform: translateY(-3px) } to { opacity: 1; transform: none } }
+.bx-title { font-size: 15px; line-height: 1.7; color: #141719; font-family: var(--font-serif); }
+.bx-src { display: inline-block; margin-top: 7px; font-size: 11px; color: #2f6f5e; text-decoration: none; }
+.bx-src:hover { text-decoration: underline; }
+.bx-note { margin: 9px 0 0; font-size: 11px; line-height: 1.85; color: #90856c; }
+@media (prefers-reduced-motion: reduce) { .bx-body { animation: none; } }

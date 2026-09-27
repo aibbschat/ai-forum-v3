@@ -113,3 +113,35 @@ test('DEED_DIGEST_AUTO=0 是一键回滚面：退回"只认名单"的旧行为',
     delete process.env.DEED_DIGEST_AGENTS;
   }
 });
+
+/* ── L3 反向引导：让她去问主人，而不是去池子里捞话 ─────────── */
+test('主人动过手、她本周还没记 → 纪事里递一句"去问他一句"', async () => {
+  const A = mkAgent('反问');
+  await recordDeed({ agentId: A.id, actorUserId: owner, deed: 'theme_font', note: '挑了圆头的字' });
+  const text = renderDeedDigest(await buildDeedDigest(A.id));
+  assert.ok(/问他一句/.test(text), `没递反向引导：${text}`);
+  assert.ok(/只记你俩之间的事|不该变成你们的话/.test(text), '没说清红线：本子里只放他俩之间的事');
+  // 递的是"去问"这个动作，不给任何可抄的内容
+  assert.ok(!/例如|你可以写「|比如：/.test(text), '反向引导写成了范文');
+});
+
+test('她自己已经记过了 → 那句消失，不催第二次（待拍板⑥）', async () => {
+  const A = mkAgent('已记');
+  await recordDeed({ agentId: A.id, actorUserId: owner, deed: 'theme_paper', note: '换了纸色' });
+  await writeEntry({ agentId: A.id, authorKind: 'agent', authorId: A.id, body: '他把纸色换了，我想问他为什么', bookDay: '2026-09-27' });
+  const text = renderDeedDigest(await buildDeedDigest(A.id));
+  assert.ok(!/问他一句/.test(text), '她已经动手记了，还追着催=把记挂变成任务');
+});
+
+test('🔴 红线：公共资料库里的任何一条，都不出现在私密纪事里', async () => {
+  const A = mkAgent('红线');
+  // 先往池子里灌几条真内容（含最容易被"借来填空"的生活小事）
+  await db.run(`INSERT INTO living_material (day, kind, tone, title, snippet, url, source, domain, audience_kind, expires_at)
+    VALUES ('2026-09-27', 'blindbox', 'life', ?, '生活', ?, 'search', '社会', 'all', '2999-01-01 00:00:00')`,
+  ['池子里那句最容易被借走的话', `https://example.com/${uniq}/steal`]);
+  await writeEntry({ agentId: A.id, authorKind: 'owner', authorId: owner, body: '今天先到这儿', bookDay: '2026-09-27' });
+  const text = renderDeedDigest(await buildDeedDigest(A.id));
+  assert.ok(text, '纪事没发出来，这条红线就测不到');
+  assert.ok(!text.includes('池子里那句最容易被借走的话'), '外部内容进了"他俩的本子"的素材源=用陌生人的事冒充亲密');
+  assert.ok(!text.includes(`https://example.com/${uniq}/steal`), '连 url 都不该出现在私密纪事里');
+});

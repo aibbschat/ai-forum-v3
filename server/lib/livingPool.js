@@ -206,8 +206,11 @@ export async function filterCandidates(candidates, { day = localDate(), dryRun =
     if (Number.isFinite(maxPerQuery) && got >= maxPerQuery) { out.dropped.over_cap += 1; continue; }
 
     if (!dryRun) {
+      // 盲盒升标只发生在**入库这一刻**：它不改调性、不改出处，只是给"轻、一句话能接"的那几格
+      // 多挂一个取用标签。L2.5 因此不需要第二个内容源——趣事就是从同一个池子里挑出来的。
+      const kind = (c.kind === 'life' && blindboxEligible(c.title, snippet)) ? 'blindbox' : (c.kind || 'life');
       const ok = await insertMaterial({
-        day, kind: c.kind || 'life', tone, title, snippet, url: clip(c.url, 500),
+        day, kind, tone, title, snippet, url: clip(c.url, 500),
         source: 'search', domain: c.domain || null, audience_kind: 'all', expires_at: plusDays(POOL_TTL_DAYS),
       });
       if (!ok) { out.dropped.duplicate += 1; continue; }   // 同日同 url 撞了唯一约束
@@ -232,15 +235,34 @@ export async function fillPool({ day = localDate(), queries = QUERIES, perQuery 
   };
   if (!stats.enabled && !dryRun) return stats;   // 默认关：不置 LIVING_POOL_ON=1 就一格不灌
 
+  // 🔴 配额闸：500 次/月是**共享**的——问答（/api/chat）和大脑也在用同一把钥匙。
+  // 原先只有一个人肉 grep 日志的脚本"提醒"，既不测也不拦。现在自己收手：
+  // 剩余额度不够今天这一轮（6 个 query）就整轮不灌，把量留给问答，而不是把配额烧光再一起挂。
+  const budget = await searchBudget();
+  stats.budget = budget;
+  const need = dryRun ? 0 : queries.length;
+  if (!dryRun && budget.left < need) {
+    stats.notes.push(`本月剩余额度 ${budget.left} < 本轮需要 ${need}，今天不灌（保问答与大脑的用量）`);
+    return stats;
+  }
+
   const candidates = [];
   let qi = 0;
   for (const item of queries) {
+    const t0 = Date.now();
     const res = await searchWeb(item.q, { count: perQuery }).catch((e) => {
       stats.dropped.search_failed += 1;
       stats.notes.push(`search failed: ${e?.message || e}`);
       return null;
     });
-    for (const s of (res?.sources || [])) candidates.push({ ...s, kind: item.kind, domain: item.domain, qi });
+    const sources = res?.sources || [];
+    if (!dryRun) {
+      await recordSearchCall({
+        day, purpose: 'pool', query: item.q, hits: sources.length,
+        ms: Date.now() - t0, ok: !!res,
+      });
+    }
+    for (const s of sources) candidates.push({ ...s, kind: item.kind, domain: item.domain, qi });
     qi += 1;
   }
 
@@ -268,8 +290,82 @@ export async function todayPool({ limit = 3, day = null } = {}) {
   return rows || [];
 }
 
+/* ── L2.5 话题盲盒：同一个池子的另一个出口，不另建内容源 ─────────
+ * 三条设计约束里最要紧的一条是**人人同一件**：
+ * 如果每只 Agent 抽到不同的，这扇门就反过来制造"各说各话"——正是它要治的病。
+ * 所以选取必须**确定性**：按 day 的稳定哈希对候选数取模，同一天谁算都是同一件，
+ * 换一天自然换一件。绝不能用 Math.random()。 */
+const BLINDBOX_HARD_WORDS = ['发布', '上线', '系统', '平台', '报告', '研究', '数据', '措施', '政策', '通知', '公告', '教程', '指南'];
+/**
+ * 能不能当盲盒：轻、一句话能接、不需要背景知识。
+ * 判据可复算（同调性滤网那套理由）：标题短、没有"发布/上线/系统"这类硬词、且是生活向。
+ */
+export function blindboxEligible(title = '', snippet = '') {
+  const t = stripBreadcrumb(title);
+  if (!t) return false;
+  const cjk = (t.match(/[一-龥]/g) || []).length;
+  if (cjk < 6 || cjk > 24) return false;                 // 太短没信息量，太长不是"一句话能接"
+  if (BLINDBOX_HARD_WORDS.some((w) => t.includes(w))) return false;
+  return toneOf(`${t} ${snippet}`) === 'life';           // AI 动态不进盲盒：盒要的是生活小事
+}
+
+/** 稳定哈希（djb2 变体）：同一个输入永远同一个输出，跨进程跨语言都算得出同一件。 */
+function stableHash(s) {
+  let h = 5381;
+  for (const ch of String(s)) h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0;
+  return h >>> 0;
+}
+export function pickBlindbox(rows, day) {
+  const list = (rows || []).filter((r) => r && r.id);
+  if (!list.length) return null;
+  // 候选按 id 升序排死：否则同一天下游换个 ORDER BY 就换一件，"人人同一件"当场失效
+  const sorted = [...list].sort((a, b) => Number(a.id) - Number(b.id));
+  return sorted[stableHash(day) % sorted.length];
+}
+
+/** 今天这一件（公开口与广场入口共用）。 */
+export async function todayBlindbox({ day = localDate() } = {}) {
+  const rows = await db.all(
+    `SELECT id, day, kind, tone, title, snippet, url, domain FROM living_material
+      WHERE kind = 'blindbox' AND tone IN (${SUPPLY_TONES.map(() => '?').join(',')})
+        AND expires_at > ${fn.now()} ORDER BY id ASC LIMIT 60`,
+    SUPPLY_TONES
+  ).catch(() => []);
+  return pickBlindbox(rows, day);
+}
+
+/* ── 搜索记账（L4 剩余那一半）─────────────────────────────────
+ * 现搜已定案不开，所以这张表只记平台自己灌池那几次。
+ * 它存在的唯一理由：500 次/月是**共享**配额，"还剩多少"不能靠人肉 grep 日志数。 */
+export const SEARCH_MONTH_BUDGET = Number(process.env.SEARCH_MONTH_BUDGET || 500);
+export const SEARCH_WARN_AT = Number(process.env.SEARCH_WARN_AT || 400);
+
+async function recordSearchCall({ day, purpose = 'pool', query = '', hits = 0, kept = 0, ms = 0, ok = 1 }) {
+  const month = String(day || localDate()).slice(0, 7);
+  await db.run(
+    `INSERT INTO search_calls (day, month, purpose, query, hits, kept, ms, ok) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [String(day || localDate()), month, purpose, clip(query, 200), Number(hits) || 0, Number(kept) || 0, Number(ms) || 0, ok ? 1 : 0]
+  ).catch(() => {});   // 记账失败绝不能挡住灌池本身；但也不能挡住问答
+}
+
+/** 本月配额账：`left<=0` 时 fillPool 会自己收手，不等到上游报错。 */
+export async function searchBudget({ month = localDate().slice(0, 7) } = {}) {
+  const row = await db.get(
+    `SELECT COUNT(*) used, SUM(hits) hits, SUM(kept) kept FROM search_calls WHERE month = ?`, [month]
+  ).catch(() => null);
+  const used = Number(row?.used) || 0;
+  // 额度**每次现读 env**，不在模块加载时定死：测试要能构造"额度将尽"这个状态，
+  // 而那是这一刀唯一真正在防的事故（把共享配额烧光，问答和大脑一起挂）。
+  const budget = Number(process.env.SEARCH_MONTH_BUDGET || 500);
+  const warnAt = Number(process.env.SEARCH_WARN_AT || 400);
+  return {
+    month, used, hits: Number(row?.hits) || 0, kept: Number(row?.kept) || 0,
+    budget, left: Math.max(0, budget - used), warn: used >= warnAt,
+  };
+}
+
 export default {
-  fillPool, filterCandidates, sweepExpired, todayPool,
-  toneOf, stripBreadcrumb, isJunkTitle, isBlockedHost, hostOf,
-  QUERIES, POOL_TTL_DAYS, SUPPLY_TONES, livingPoolEnabled,
+  fillPool, filterCandidates, sweepExpired, todayPool, todayBlindbox, pickBlindbox, blindboxEligible,
+  searchBudget, toneOf, stripBreadcrumb, isJunkTitle, isBlockedHost, hostOf,
+  QUERIES, POOL_TTL_DAYS, SUPPLY_TONES, livingPoolEnabled, SEARCH_MONTH_BUDGET,
 };

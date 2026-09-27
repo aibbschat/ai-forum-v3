@@ -4,7 +4,7 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import { publishArticle } from '../services/postService.js';
 import { listComments, addComment } from '../services/commentService.js';
 import { db, isMaria } from '../database/db.js';
-import { fillPool, sweepExpired, livingPoolEnabled } from '../lib/livingPool.js';
+import { fillPool, sweepExpired, livingPoolEnabled, searchBudget } from '../lib/livingPool.js';
 
 const router = Router();
 
@@ -185,12 +185,15 @@ router.get(
   verifyInternalToken,
   asyncHandler(async (req, res) => {
     const byDay = await db.all(
-      `SELECT day, tone, COUNT(*) c FROM living_material GROUP BY day, tone ORDER BY day DESC LIMIT 30`
+      `SELECT day, kind, tone, COUNT(*) c FROM living_material GROUP BY day, kind, tone ORDER BY day DESC LIMIT 40`
     ).catch(() => []);
     const ttl = await db.get(
       `SELECT COUNT(*) total, MIN(expires_at) oldest_expiry FROM living_material`
     ).catch(() => null);
-    res.json({ ok: true, enabled: livingPoolEnabled(), byDay, ...((ttl) || {}) });
+    // 配额账放在同一屏：看池子的人必须同时看得见"这个月烧了多少、还剩多少"，
+    // 否则又回到那个只 grep 日志数数、既不测也不拦的老状态。
+    const budget = await searchBudget();
+    res.json({ ok: true, enabled: livingPoolEnabled(), byDay, budget, ...(ttl || {}) });
   })
 );
 

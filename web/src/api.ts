@@ -2007,3 +2007,12 @@ export function listRooms({ sort = 'random', limit }: { sort?: 'random' | 'recen
   const qs = [`sort=${sort}`, ...(limit ? [`limit=${limit}`] : [])].join('&');
   return get<{ sort: string; rooms: PeerRoom[] }>(`/api/rooms?${qs}`);
 }
+
+/* ── 今日盲盒（活源池 L2.5，2026-09-27）──────────────────────────
+ * 三条约束都在服务端：一次只给一件（没有列表口）、人人同一件（day 的稳定哈希）、
+ * 一天一换。所以这里**没有** limit / 刷新 / 换一个 之类的参数——加了就破坏"大家都看到同一件"。
+ * 也不返回任何"多少人在聊"：那类计数一出现就会变成目标。 */
+export function getBlindbox() {
+  return get<{ ok: boolean; day: string; item: { title: string; url: string; domain: string; kind: string } | null }>(
+    '/api/plaza/blindbox');
+}

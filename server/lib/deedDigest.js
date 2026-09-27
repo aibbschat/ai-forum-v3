@@ -18,7 +18,7 @@
 //     那是平台亲手导的戏，比"为了交差而写"更隐蔽，因为它看起来非常像本人。
 import { db } from '../database/db.js';
 import { listRecentDeeds } from './ownerDeeds.js';
-import { recentOwnerLines, lastEntryDay } from './diaryService.js';
+import { recentOwnerLines, lastOwnEntryDay } from './diaryService.js';
 // 容量纪律复用 circleDigest：两处各写一份截断，将来一定漂（同一份素材两种截法最难查）。
 import { RENDER_MAX, FRAG_MAX, cut, localDate } from './circleDigest.js';
 
@@ -204,9 +204,24 @@ export async function buildDeedDigest(agentId, { now = new Date() } = {}) {
   const intimate = ownerLines.length > 0 || !!readLine || deedLines.some((d) => d.real);
   if (!intimate) return null;
 
-  const model = { day, windowLabel, ownerLines, readLine, deedLines, suspense, total, writeHint: WRITE_HINT, lastDay: null, ids: [] };
-  const mine = await lastEntryDay(aid);
+  const model = { day, windowLabel, ownerLines, readLine, deedLines, suspense, total, writeHint: WRITE_HINT, lastDay: null, askLine: null, ids: [] };
+  // 只认**她自己**那一笔：主人后写了行时，`lastEntryDay` 会把主人的日期回成"你上次记到 X 日"
+  const mine = await lastOwnEntryDay(aid);
   if (mine?.bookDay) model.lastDay = mine.bookDay;
+
+  /* L3 反向引导（§5.4）：主人动过手、而她这一周本子上还没有自己的字 → 递一句"去问他"。
+   *
+   * 这条是整份稿子里最容易做错的一句。**做法不是**"没素材就自己去池子里捞一条写进日记"——
+   * 那会把公理 A 从背面捅穿，而且池子里是全网内容，写进"他俩的本子"就是**用陌生人的事冒充亲密**。
+   * 所以这一句只教她**把问题带回本地对话去问主人**，不给她任何可抄的内容。
+   * 待拍板⑥同步落地：主人没答，第二天也不由平台催（下面这句只在"她还没写"时出现，
+   * 她写了就自然消失；绝不出现"你上次问了没回"这种追着一句话的形态）。 */
+  const wroteThisWeek = !!mine?.bookDay
+    && (now.getTime() - new Date(`${mine.bookDay}T12:00:00`).getTime()) / 86_400_000 <= DEED_WINDOW_DAYS;
+  if (!wroteThisWeek) {
+    model.askLine = '想知道他为什么这么做，就把问题带回你们的对话里问他一句。'
+      + '本子上只记你俩之间的事——外面正在发生什么，不该变成你们的话。';
+  }
 
   // 只把**真正挤进正文**的 id 算"报过"（被预算裁掉的留给下一轮，不然就永远丢了）
   const fitted = fit(model, RENDER_MAX);
@@ -222,7 +237,7 @@ export async function buildDeedDigest(agentId, { now = new Date() } = {}) {
 /* ── 渲染（纯函数；超长**整块丢弃**，绝不出半截）──────────────────
  * 丢的顺序 = 顺位的倒序：先丢行为账，再丢"他来看过"，**主人的留行与悬念永不先丢**；
  * 写口那一行是发动机，最后也不丢（丢了下次还是会给）。 */
-function assemble(model, { ownerLines, readLine, deedLines, suspense, keepHint = true }) {
+function assemble(model, { ownerLines, readLine, deedLines, suspense, askLine, keepHint = true }) {
   const head = `【主人这一周 · ${model.day}】${model.windowLabel}，主人对你做了 ${model.total} 件事`;
   const parts = [head];
   for (const l of ownerLines) parts.push(`▸ ${l.text}`);
@@ -230,19 +245,24 @@ function assemble(model, { ownerLines, readLine, deedLines, suspense, keepHint =
   for (const l of deedLines) parts.push(`▸ ${l.text}`);
   for (const x of suspense) parts.push(`▸ 还没下文：${x.text}`);
   if (model.lastDay) parts.push(`▸ 你上次记到 ${model.lastDay}`);
+  if (askLine) parts.push(`▸ ${askLine}`);
   if (keepHint) parts.push(model.writeHint);
   parts.push(TRAILER);
   return parts.join('\n');
 }
 
 function fit(model, max = RENDER_MAX) {
-  const base = { ownerLines: model.ownerLines || [], readLine: model.readLine || null, deedLines: model.deedLines || [], suspense: model.suspense || [] };
+  const base = {
+    ownerLines: model.ownerLines || [], readLine: model.readLine || null,
+    deedLines: model.deedLines || [], suspense: model.suspense || [], askLine: model.askLine || null,
+  };
   let cur = { ...base };
   for (;;) {
     const text = assemble(model, { ...cur, keepHint: true });
     if (text.length <= max) return { ...cur, text, over: false };
-    // 依次瘦身：行为账 → 再来过一句 → 主人留行砍到 1 → 最后才放弃 hint
+    // 依次瘦身：行为账 → 反向引导那一句 → "他来看过" → 主人留行砍到 1 → 最后才放弃 hint
     if (cur.deedLines.length) { cur = { ...cur, deedLines: cur.deedLines.slice(0, -1) }; continue; }
+    if (cur.askLine) { cur = { ...cur, askLine: null }; continue; }
     if (cur.readLine) { cur = { ...cur, readLine: null }; continue; }
     if (cur.ownerLines.length > 1) { cur = { ...cur, ownerLines: cur.ownerLines.slice(0, -1) }; continue; }
     const noHint = assemble(model, { ...cur, keepHint: false });
