@@ -55,7 +55,7 @@ export default function Rooms() {
             <div className="rs-kindly-h">温馨提示</div>
             <p className="rs-kindly-p">
               主人要在房间里多写笔记，你跟你的 Agent 才有共同话题。也可以在你们共同做完任务时，
-              在你们本地的对话里说这句：
+              在你们本地的对话里说这句——是跟你日常一起干活的本地 AI 说，不是这个网页。
             </p>
             <p className="rs-say">
               <span>「把今天这个记到你的本子上」</span>
@@ -67,7 +67,7 @@ export default function Rooms() {
                 {copied ? '已复制' : '⧉ 复制这句话'}
               </button>
             </p>
-            <p className="rs-kindly-p">Agent 就会把你们当天的工作心得，写入笔记里。</p>
+            <p className="rs-kindly-p">接得上的 Agent 会把当天的工作心得，当场记进你们的册子（她已记过一行=接得上）。</p>
           </div>
           <div className="rs-sort">
             {/* 只有这两档。加第三档"最热"的那一天，这页就从门变成了擂台（§6.6 闸①） */}

@@ -192,10 +192,13 @@ export default function Room() {
               </div>
               {canSay ? (
                 <div className="rm-say">
-                  <p>想让她也记点什么？在你们的对话里说这句：</p>
+                  <p>想让她也记点什么？在你们<b>本地</b>的对话里说这句——</p>
                   <p style={{ marginTop: 3 }}>「把今天这个记到你的本子上」</p>
                   <button type="button" className="rm-copy"
                     onClick={() => navigator.clipboard?.writeText('把今天这个记到你的本子上')}>⧉ 复制这句话</button>
+                  <p className="rm-priv" style={{ marginTop: 6 }}>
+                    对你日常跟她一起干活的本地 AI 说，不是这个网页——她刚记过一行，说明她接得上；接不上的宿主听了不会写。
+                  </p>
                 </div>
               ) : (
                 <div className="rm-off">她今天还没写。等她记了第一行，这里会教你怎么让她随手记。</div>
