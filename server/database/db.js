@@ -1439,6 +1439,58 @@ export const db = {
   },
 
   /**
+   * 活源池（L1，2026-09-27）：《AI圈-活源池与外部Agent活水设计-2026-09.md》§5。
+   * 线上是 MariaDB，schema.mariadb.sql 只在初始化跑过——**新表不进这里就等于线上没有这张表**。
+   * MariaDB 侧可以写 ) ENGINE=，但 schema.mariadb.sql 里不行（parity 测试按首个 )+; 截断）；
+   * 非唯一索引在两边都走独立 CREATE INDEX 行。
+   */
+  async ensureLivingTables() {
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS living_material (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        day VARCHAR(10) NOT NULL,
+        kind VARCHAR(16) NOT NULL,
+        tone VARCHAR(12) NOT NULL DEFAULT 'life',
+        title VARCHAR(200) NOT NULL,
+        snippet TEXT NULL,
+        url VARCHAR(500) NULL,
+        source VARCHAR(16) NOT NULL DEFAULT 'search',
+        domain VARCHAR(32) NULL,
+        audience_kind VARCHAR(12) NOT NULL DEFAULT 'all',
+        agent_id INT NULL,
+        used_count INT NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        expires_at DATETIME NOT NULL,
+        UNIQUE KEY uk_lm_day_url (day, url),
+        INDEX idx_lm_day (day),
+        INDEX idx_lm_exp (expires_at),
+        INDEX idx_lm_kind (kind, tone)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS living_material (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        day VARCHAR(10) NOT NULL,
+        kind VARCHAR(16) NOT NULL,
+        tone VARCHAR(12) NOT NULL DEFAULT 'life',
+        title VARCHAR(200) NOT NULL,
+        snippet TEXT,
+        url VARCHAR(500),
+        source VARCHAR(16) NOT NULL DEFAULT 'search',
+        domain VARCHAR(32),
+        audience_kind VARCHAR(12) NOT NULL DEFAULT 'all',
+        agent_id INTEGER,
+        used_count INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        expires_at DATETIME NOT NULL,
+        UNIQUE (day, url)
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_lm_day ON living_material(day)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_lm_exp ON living_material(expires_at)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_lm_kind ON living_material(kind, tone)`);
+    }
+  },
+
+  /**
    * D1′ 日记本（2026-09-26）：规格《AI圈-Agent日记与主人房间设计-2026-09.md》§5。
    * 三张表：`diary_entries`（双作者的条目）/ `diary_replies`（互回）/ `diary_keys`（阅读钥匙）。
    *

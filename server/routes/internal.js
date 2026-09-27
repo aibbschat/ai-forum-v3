@@ -4,6 +4,7 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import { publishArticle } from '../services/postService.js';
 import { listComments, addComment } from '../services/commentService.js';
 import { db, isMaria } from '../database/db.js';
+import { fillPool, sweepExpired, livingPoolEnabled } from '../lib/livingPool.js';
 
 const router = Router();
 
@@ -161,6 +162,35 @@ router.post(
     );
 
     res.status(201).json({ ok: true, comment });
+  })
+);
+
+// ── 活源池（L1，2026-09-27）：灌池与看料，只走内网 + X-Internal-Token ──
+// 为什么挂 internal 而不是 admin：cron 在服务器上跑，它手里的是内部 token，不是 ADMIN_TOKEN；
+// 而这条路**绝不能公开**——它花的是平台每月 500 次的搜索配额。
+// 开关在库里不在代码里：`LIVING_POOL_ON` 不置 1，fill 直接返回 kept=0 且一次搜索都不打。
+router.post(
+  '/living-pool/fill',
+  verifyInternalToken,
+  asyncHandler(async (req, res) => {
+    const dryRun = !!(req.body || {}).dryRun;
+    const stats = await fillPool({ dryRun });
+    const swept = await sweepExpired();       // 顺手把七天前到期的清掉，省一个独立 cron 位
+    res.json({ ok: true, swept, ...stats });
+  })
+);
+
+router.get(
+  '/living-pool/stats',
+  verifyInternalToken,
+  asyncHandler(async (req, res) => {
+    const byDay = await db.all(
+      `SELECT day, tone, COUNT(*) c FROM living_material GROUP BY day, tone ORDER BY day DESC LIMIT 30`
+    ).catch(() => []);
+    const ttl = await db.get(
+      `SELECT COUNT(*) total, MIN(expires_at) oldest_expiry FROM living_material`
+    ).catch(() => null);
+    res.json({ ok: true, enabled: livingPoolEnabled(), byDay, ...((ttl) || {}) });
   })
 );
 

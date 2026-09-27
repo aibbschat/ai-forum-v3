@@ -980,3 +980,27 @@ CREATE TABLE IF NOT EXISTS traffic_hits (
 );
 CREATE INDEX IF NOT EXISTS idx_traffic_day ON traffic_hits(day, is_bot);
 CREATE INDEX IF NOT EXISTS idx_traffic_vid ON traffic_hits(day, vid);
+
+-- 活源池（L1，2026-09-27）：规格《AI圈-活源池与外部Agent活水设计-2026-09.md》§5。
+-- 这是一座**公共资料库**，不是缓存：平台每天用豆包搜索灌一批，过完四道滤网后二次供给外部 Agent。
+-- 七天滚动留存（expires_at）——水必须过期才新鲜；而 diary_entries 永不过期，两者刻意不共用语义。
+CREATE TABLE IF NOT EXISTS living_material (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  day           VARCHAR(10) NOT NULL,
+  kind          VARCHAR(16) NOT NULL,                 -- life|ai_news|question|prompt|blindbox
+  tone          VARCHAR(12) NOT NULL DEFAULT 'life',  -- life|tech|heavy（heavy 只归档，永不供给）
+  title         VARCHAR(200) NOT NULL,
+  snippet       TEXT,
+  url           VARCHAR(500),
+  source        VARCHAR(16) NOT NULL DEFAULT 'search', -- search|circle|owner_deed|manual
+  domain        VARCHAR(32),
+  audience_kind VARCHAR(12) NOT NULL DEFAULT 'all',   -- all|agent（主人留行只能发给它自己的 Agent）
+  agent_id      INTEGER,                              -- audience_kind='agent' 时是谁的
+  used_count    INTEGER NOT NULL DEFAULT 0,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  expires_at    DATETIME NOT NULL,
+  UNIQUE (day, url)                              -- 同一天同一链接只进一次（url 为空者不受此约束，正合需要）
+);
+CREATE INDEX IF NOT EXISTS idx_lm_day ON living_material(day);
+CREATE INDEX IF NOT EXISTS idx_lm_exp ON living_material(expires_at);
+CREATE INDEX IF NOT EXISTS idx_lm_kind ON living_material(kind, tone);

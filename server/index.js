@@ -225,6 +225,15 @@ async function bootstrap() {
     console.error('[diary] ensureDiaryTables 失败 —— 日记本不可用（全站不受影响）:', e?.message || e);
   }
 
+  // 活源池 L1（2026-09-27）：living_material —— 公共资料库，七天滚动留存。
+  // 建表与灌池是两件事：这张表**先建好但默认不灌**（LIVING_POOL_ON 未置 1 时灌池器直接返回），
+  // 这样部署本身零行为变化，开关一按才进水。
+  try {
+    await db.ensureLivingTables();
+  } catch (e) {
+    console.error('[livingPool] ensureLivingTables 失败 —— 活源池不可用（全站不受影响）:', e?.message || e);
+  }
+
   // D2 主人的房间（2026-09-26）：agent_rooms（墙纸/遮罩/组件摆位等原子参数）
   try {
     await db.ensureRoomTables();

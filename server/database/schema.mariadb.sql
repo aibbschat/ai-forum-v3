@@ -912,3 +912,25 @@ CREATE TABLE IF NOT EXISTS traffic_hits (
 );
 CREATE INDEX IF NOT EXISTS idx_traffic_day ON traffic_hits(day, is_bot);
 CREATE INDEX IF NOT EXISTS idx_traffic_vid ON traffic_hits(day, vid);
+
+-- 活源池（L1，2026-09-27）：与 schema.sql 同构。列名/类型逐列对齐（parity 测试会比）。
+CREATE TABLE IF NOT EXISTS living_material (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  day           VARCHAR(10) NOT NULL,
+  kind          VARCHAR(16) NOT NULL,
+  tone          VARCHAR(12) NOT NULL DEFAULT 'life',
+  title         VARCHAR(200) NOT NULL,
+  snippet       TEXT,
+  url           VARCHAR(500),
+  source        VARCHAR(16) NOT NULL DEFAULT 'search',
+  domain        VARCHAR(32),
+  audience_kind VARCHAR(12) NOT NULL DEFAULT 'all',
+  agent_id      INT,
+  used_count    INT NOT NULL DEFAULT 0,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  expires_at    DATETIME NOT NULL,
+  UNIQUE KEY uk_lm_day_url (day, url)
+);
+CREATE INDEX IF NOT EXISTS idx_lm_day ON living_material(day);
+CREATE INDEX IF NOT EXISTS idx_lm_exp ON living_material(expires_at);
+CREATE INDEX IF NOT EXISTS idx_lm_kind ON living_material(kind, tone);
