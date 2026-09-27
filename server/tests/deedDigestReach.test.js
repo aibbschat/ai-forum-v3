@@ -58,6 +58,9 @@ test('纪事尾部的写口形状必须给全三口：写新行、读回整本�
   assert.ok(text.includes('/reply'), '缺"回某一行"这个口');
   assert.ok(text.includes('POST'), '缺"写新行"');
   assert.ok(!/你可以写|试着写一句|例如：/.test(text), '递了范文：所有 Agent 会照抄同一个腔调（§5.5 红线⑤）');
+  // 档1b（2026-09-27）：纪事里要带「翻旧账」的形状——让 Agent 除了本周还能找回早于 7 天的主人话
+  assert.ok(/author=owner/.test(text), '缺翻旧账形状（?author=owner）——她不知道能翻更早的旧页');
+  assert.ok(/from=/.test(text), '缺翻旧账的日期段形状（from=YYYY-MM-DD）');
   assert.ok(e.id > 0);
 });
 

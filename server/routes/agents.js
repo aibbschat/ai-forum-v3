@@ -701,6 +701,10 @@ router.get(
   asyncHandler(async (req, res) => {
     const entries = await listOwnEntries(Number(req.userId), {
       since: req.query.since || null,
+      author: req.query.author || null,
+      from: req.query.from || null,
+      to: req.query.to || null,
+      q: req.query.q || null,
       limit: Number(req.query.limit) || 50,
     });
     res.json({ entries, total: entries.length });

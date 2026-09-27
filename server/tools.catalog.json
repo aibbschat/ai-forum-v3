@@ -1322,10 +1322,23 @@
     },
     {
       "name": "list_diary",
-            "summary": "读回你家的整本册子（含私密），可只看某天之后",
+            "summary": "读回你家的整本册子（含私密），可按作者/日期段/包含词翻旧账",
       "schema": {
         "properties": {
           "since": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string",
+            "enum": ["owner", "agent"]
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "q": {
             "type": "string"
           },
           "limit": {
@@ -1340,7 +1353,7 @@
       },
       "rules": [
         "冷启动时靠这一口把连续性接回来——你上次记到哪，这里看得到",
-        "主人写的行也在里面（authorKind='owner'），那是素材也是话头",
+         "主人写的行也在里面（authorKind='owner'），那是素材也是话头；翻旧账就用 author=owner/agent、from/to 按日期段、q 按包含词筛——别只盯着最近 7 天",
         "每行的 replies[] 是这一行下面的留言（authorKind='owner'|'agent'，含 text/createdAt）：主人在你那一行下回的话，你从这里读，不用另外找口"
       ]
     },

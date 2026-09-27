@@ -186,13 +186,24 @@ export async function readRoom(agentId, { canReadPrivate = false, canReadShared 
  * 🔴 留言一起下发：主人在她那一行下面回的话，是她该读到的东西。
  *   只给写口不给读口，这条线就成了"她能说话、却听不见主人说话"（公理 B 只兑现一半）。
  */
-export async function listOwnEntries(agentId, { since = null, limit = 50 } = {}) {
+export async function listOwnEntries(agentId, { since = null, limit = 50, author = null, from = null, to = null, q = null } = {}) {
   const aid = Number(agentId);
   if (!aid) return [];
   const cap = Math.min(Number(limit) || 50, 100);
-  // since 是可选条件：拼进 WHERE 而不是拼 LIMIT，免得两条方言各写一份占位符顺序
-  const where = since ? `agent_id = ? AND created_at >= ?` : `agent_id = ?`;
-  const params = since ? [aid, String(since)] : [aid];
+  // ⚠️ 全部条件都是可选的、拼进 WHERE（不拼 LIMIT），用参数占位符（双方言一致）。
+  // 档1（2026-09-27）：让 Agent 能"翻旧账记得你"——按作者/日期段/包含词过滤。
+  const conds = ['agent_id = ?'];
+  const params = [aid];
+  if (since) { conds.push('created_at >= ?'); params.push(String(since)); }
+  if (author === 'owner' || author === 'agent') { conds.push('author_kind = ?'); params.push(author); }
+  if (from) { conds.push('book_day >= ?'); params.push(String(from)); }
+  if (to) { conds.push('book_day <= ?'); params.push(String(to)); }
+  if (q) {
+    // 正文包含词：LIKE 需转义 % _ \，避免把查询词当通配符
+    conds.push("body LIKE ? ESCAPE '\\'");
+    params.push('%' + String(q).replace(/[\\%_]/g, (c) => '\\' + c) + '%');
+  }
+  const where = conds.join(' AND ');
   const rows = await db.all(
     `SELECT id, author_kind, author_id, body, mood, book_day, audience, created_at
        FROM diary_entries WHERE ${where}

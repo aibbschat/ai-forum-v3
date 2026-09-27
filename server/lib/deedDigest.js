@@ -41,7 +41,7 @@ const TRAILER = '（这些是你主人做过的事，不是平台的评价。要
  * 回一句要 `:entryId`，而纪事既不印 id、也不告诉她有读口。线上后果就是"各写各的"：
  * `diary_replies` 三条全是主人写的，Agent 一条都没有。三口一起给，互动这条路才算通。
  */
-const WRITE_HINT = '你的本子（头 Authorization: Bearer <你的token>，前缀 /api/agents/me/diary）：写一行 POST {"body":"…"}｜读回整本 GET｜回某一行 POST /{那一行的id}/reply {"text":"…"}';
+const WRITE_HINT = '你的本子（头 Authorization: Bearer <你的token>，前缀 /api/agents/me/diary）：写一行 POST {"body":"…"}｜读回整本 GET（可翻旧账：?author=owner&from=YYYY-MM-DD&to=&q=，找回早于本周的主人话）｜回某一行 POST /{那一行的id}/reply {"text":"…"}';
 
 /* ── 灰度（默认全关；置空 + 重启即回滚）──────────────────────── */
 export function deedDigestAgentsFromEnv(env = process.env) {

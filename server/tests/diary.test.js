@@ -375,7 +375,12 @@ test('⑨b 留言跟着条目出库：主人看得见、她也读得到；钥匙
     '主人那一行下面的留言没跟着出库（她回的 + 主人自己补的都要在）');
   assert.equal(hers.replies.length, 1, 'Agent 那一行下主人的留言没出库');
   assert.equal(hers.replies[0].authorKind, 'owner');
-  assert.ok(!JSON.stringify(mine.replies).includes(String(owner)), '留言里漏了主人账号 id');
+  // 🔴 断言改成**结构化检查**：原先用 JSON.stringify().includes(String(owner)) 做"没泄露 id"，
+  //   但 owner id 常是两位数（1-59），会撞上 createdAt 的 HH:MM 分钟位或自增 reply id——
+  //   那条断言其实一直在赌运气（靠数据分布恰好不撞才绿），不是真的检查字段。
+  //   真正的不泄露 = 每条 reply 对象里根本没有作者 id 这个键。
+  assert.ok(mine.replies.every((r) => !('authorId' in r)), '留言里漏了作者账号 id 字段');
+  assert.ok(!JSON.stringify(mine.replies).match(/\"author_id\"|\"authorId\"/), '留言结构里出现了作者 id 字段');
 
   // 她那一侧：`/me/diary` 是冷启动唯一的读口，主人的留言必须在里面
   const own = await request(app).get('/api/agents/me/diary').set(bearer(P.token)).expect(200);
@@ -392,6 +397,38 @@ test('⑨b 留言跟着条目出库：主人看得见、她也读得到；钥匙
   assert.deepEqual(g.replies, [], '钥匙持有人读到了悄悄话');
   assert.ok(!JSON.stringify(g).includes('这句我记住了'), '留言内容漏给了钥匙持有人');
   await revokeKey({ keyId: k.id, ownerId: owner });
+});
+
+/* ── 档1a：翻旧账过滤器（2026-09-27）——让 Agent 能按作者/日期段/包含词找回记忆 ── */
+test('档1a /me/diary 过滤：author/from/to/q 各生效，且只在自己的册子里翻', async () => {
+  const A = mkAgent('翻旧账');
+  const d1 = '2026-09-20';   // 主人旧留言
+  const d2 = '2026-09-25';   // 她的记录
+  const d3 = '2026-09-27';   // 主人新留言
+  await writeEntry({ agentId: A.id, authorKind: 'owner', authorId: owner, body: '别把那个项目写出去', bookDay: d1 });
+  await writeEntry({ agentId: A.id, authorKind: 'agent', authorId: A.id, body: '他说过喜欢蓝色', bookDay: d2 });
+  await writeEntry({ agentId: A.id, authorKind: 'owner', authorId: owner, body: 'C2 那章定稿了，你记得吗', bookDay: d3 });
+
+  // author 过滤：只看主人写的
+  const ownerOnly = await request(app).get('/api/agents/me/diary?author=owner').set(bearer(A.token)).expect(200);
+  assert.equal(ownerOnly.body.entries.length, 2, 'author=owner 应只回 2 条主人行');
+  assert.ok(ownerOnly.body.entries.every((e) => e.authorKind === 'owner'), '混进了别的作者');
+
+  // from/to 过滤：只看某段日期
+  const byDate = await request(app).get('/api/agents/me/diary?from=2026-09-25&to=2026-09-27').set(bearer(A.token)).expect(200);
+  assert.equal(byDate.body.entries.length, 2, 'from/to 应回 2 条（25/27）');
+  assert.ok(byDate.body.entries.every((e) => e.bookDay !== '2026-09-20'), '旧行不该出现在日期段里');
+
+  // q 过滤：正文包含词；且 '%'/'_' 会被当字面量而不是通配符
+  const byQ = await request(app).get('/api/agents/me/diary?q=蓝色').set(bearer(A.token)).expect(200);
+  assert.equal(byQ.body.entries.length, 1, 'q=蓝色 应只回 her 那条');
+  const withPct = await request(app).get('/api/agents/me/diary?q=100%25').set(bearer(A.token)).expect(200);
+  assert.equal(withPct.body.entries.length, 0, '% 该按字面量匹配，不该当通配符把库捞出来');
+
+  // 组合 + 限定自己的册子：另一只 Agent 翻不到这只的，这只也翻不到别人的
+  const B = mkAgent('外人翻阅');
+  const cross = await request(app).get(`/api/agents/me/diary?q=${encodeURIComponent('定稿')}`).set(bearer(B.token)).expect(200);
+  assert.equal(cross.body.entries.length, 0, '别人的 Agent 翻到了这家册子的行（只允许翻自己家的）');
 });
 
 /* ── ⑩ 红线③：不给主人镜像读口 ─────────────────────────────── */
