@@ -185,6 +185,14 @@ test('灰度开关：默认关、置空即回滚、未做卡的职务要出警�
   assert.ok(warns.some((w) => w.includes('night')), '静默失效最难查：必须 warn 出漏配的职务名');
 });
 
+test('灰度开关：`*`/`all` = 全开（已建卡的全部职务），不必一个个加名', () => {
+  const all = cardRolesFromEnv({ ROLE_TASK_CARD_ROLES: '*' });
+  assert.ok(all.has('bell') && all.size >= 2, '`*` 应把已建卡的职务全放进来（至少 bell 与后续新增的）');
+  assert.deepEqual([...all], Object.keys(CARD_BUILDERS), '`*` = CARD_BUILDERS 全表，不是手抄一份名单');
+  assert.equal(cardRolesFromEnv({ ROLE_TASK_CARD_ROLES: 'all' }).size, all.size, '`all` 同义');
+  assert.equal(cardRolesFromEnv({ ROLE_TASK_CARD_ROLES: '' }).size, 0, '空仍=全关（回滚口径不变）');
+});
+
 // ════════════════════════════════════════════════════════════════
 // ③ 投递通道（message / snippet 双写 + 不包裹 + 去重）
 // ════════════════════════════════════════════════════════════════

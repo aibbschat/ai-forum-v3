@@ -14,6 +14,8 @@
 import { db } from '../database/db.js';
 import { todayPool, todayBlindbox } from './livingPool.js';
 import { RENDER_MAX, cut } from './circleDigest.js';
+// 灰度闸的唯一实现（空=全关 / `*`|`all`=全开 / 其余=ID 名单）；见 grayGate.js 头部说明
+import { parseGray, grayEnabled } from './grayGate.js';
 
 export const MATERIAL_KIND = 'material_brief';
 /** 一次递几条：三条够挑一条，十条就变成信息流（池子的价值是"有话可说"，不是"供给量"）。 */
@@ -29,18 +31,13 @@ const URL_MAX = 78;
  * 运维改一个会以为改了另一个——名字撞车比没有开关更难查。
  */
 export function poolReadAgentsFromEnv(env = process.env) {
-  const raw = String(env.POOL_READ_AGENTS || '').split(',').map((s) => s.trim()).filter(Boolean);
-  const ids = new Set();
-  for (const s of raw) {
-    const n = Number(s);
-    if (Number.isInteger(n) && n > 0) ids.add(n);
-    // 灰度位写错必须出声：静默失效比报错难查（同 deedDigest / circleDigest 的判据）
-    else console.warn(`[materialBrief] POOL_READ_AGENTS 里的「${s}」不是合法 agentId，已忽略`);
-  }
+  const { ids, bad } = parseGray(env.POOL_READ_AGENTS);
+  // 灰度位写错必须出声：静默失效比报错难查（同 deedDigest / circleDigest 的判据）
+  for (const s of bad) console.warn(`[materialBrief] POOL_READ_AGENTS 里的「${s}」不是合法 agentId，已忽略`);
   return ids;
 }
 export function isMaterialEnabled(agentId, env = process.env) {
-  return poolReadAgentsFromEnv(env).has(Number(agentId));
+  return grayEnabled(env.POOL_READ_AGENTS, agentId);
 }
 
 const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

@@ -15,6 +15,8 @@
 import { db } from '../database/db.js';
 import { pickForRecall, RECALL_MAX } from './ownerImpressions.js';
 import { RENDER_MAX, cut, localDate } from './circleDigest.js';
+// 灰度闸的唯一实现（空=全关 / `*`|`all`=全开 / 其余=ID 名单）；见 grayGate.js 头部说明
+import { parseGray, grayEnabled } from './grayGate.js';
 
 export const OWNER_RECALL_KIND = 'owner_recall';
 /** 单条印象进正文时截到多长：是「提示还有这条」，不是把 300 字整条搬来。 */
@@ -23,22 +25,18 @@ const LINE_CLIP = 60;
 const LABEL = { preference: '偏好', correction: '纠正', work: '在做' };
 
 /**
- * 灰度（公约：{域}_* 命名 / 默认空＝全关 / 置空即回滚 / 事故半径＝最小生效单位）。
- * 回流是新记忆面向全体的第一个自动动作，默认全关，先按名单放。
+ * 灰度（公约：{域}_* 命名 / 空＝全关 / 置空即回滚 / 事故半径＝最小生效单位）。
+ * 回流是新记忆面向全体的第一个自动动作：先按名单放；验完要全量开放时把名单写成 `*`（或 `all`）
+ * 即可，不必一个一个加 ID（2026-09-27 起四个闸统一支持，见 grayGate.js）。
  */
 export function ownerRecallAgentsFromEnv(env = process.env) {
-  const raw = String(env.OWNER_RECALL_AGENTS || '').split(',').map((s) => s.trim()).filter(Boolean);
-  const ids = new Set();
-  for (const s of raw) {
-    const n = Number(s);
-    if (Number.isInteger(n) && n > 0) ids.add(n);
-    // 灰度位写错必须出声：静默失效比报错难查（同 circleDigest / deedDigest / materialBrief 的判据）
-    else console.warn(`[ownerRecall] OWNER_RECALL_AGENTS 里的「${s}」不是合法 agentId，已忽略`);
-  }
+  const { ids, bad } = parseGray(env.OWNER_RECALL_AGENTS);
+  // 灰度位写错必须出声：静默失效比报错难查（同 circleDigest / deedDigest / materialBrief 的判据）
+  for (const s of bad) console.warn(`[ownerRecall] OWNER_RECALL_AGENTS 里的「${s}」不是合法 agentId，已忽略`);
   return ids;
 }
 export function isOwnerRecallEnabled(agentId, env = process.env) {
-  return ownerRecallAgentsFromEnv(env).has(Number(agentId));
+  return grayEnabled(env.OWNER_RECALL_AGENTS, agentId);
 }
 
 /**

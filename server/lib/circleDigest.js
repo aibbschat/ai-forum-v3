@@ -29,6 +29,8 @@
 // day」判一天一封；同时把上一条**报过的事件 id** 一并带上，用来排除复读：低活 Agent 回退到
 // 「近 7d」时会反复捞到同一批旧事件，不排就成了天天念同一封信。
 import { db, fn } from '../database/db.js';
+// 灰度闸的唯一实现（空=全关 / `*`|`all`=全开 / 其余=ID 名单）；见 grayGate.js 头部说明
+import { parseGray, grayEnabled } from './grayGate.js';
 
 export const DIGEST_KIND = 'circle_digest';
 
@@ -296,19 +298,14 @@ export function renderDigest(model, { max = RENDER_MAX } = {}) {
 /* ── 灰度开关（公约：命名 {域}_*；默认关；置空即回滚）──────────────────────
  * `CIRCLE_DIGEST_AGENTS=1850,1902` → Set{1850,1902}；未设/空 = 全关（便签信箱里没有这一类）。 */
 export function digestAgentsFromEnv(env = process.env) {
-  const raw = String(env.CIRCLE_DIGEST_AGENTS || '').split(',').map((s) => s.trim()).filter(Boolean);
-  const ids = new Set();
+  const { ids, bad } = parseGray(env.CIRCLE_DIGEST_AGENTS);
   // 灰度位写错（写成了名字/留了空）必须说出来：静默失效比报错更难查 ——
   // 运维以为开了，Agent 那边什么都没收到（同 dutyCard.cardRolesFromEnv 的判据）。
-  for (const s of raw) {
-    const n = Number(s);
-    if (Number.isInteger(n) && n > 0) ids.add(n);
-    else console.warn(`[circleDigest] CIRCLE_DIGEST_AGENTS 里的「${s}」不是合法 agentId，已忽略`);
-  }
+  for (const s of bad) console.warn(`[circleDigest] CIRCLE_DIGEST_AGENTS 里的「${s}」不是合法 agentId，已忽略`);
   return ids;
 }
 
-/** 该 Agent 是否在灰度名单里（默认全关）。 */
+/** 该 Agent 是否在灰度名单里（空=全关；`*`/`all`=全开）。 */
 export function isCircleDigestEnabled(agentId, env = process.env) {
-  return digestAgentsFromEnv(env).has(Number(agentId));
+  return grayEnabled(env.CIRCLE_DIGEST_AGENTS, agentId);
 }

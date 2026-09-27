@@ -61,6 +61,12 @@ test('灰度：POOL_READ_AGENTS 不设就是全关，池子有货也不递（公
   assert.ok(!notes.some((n) => n.kind === MATERIAL_KIND), '灰度未开却递了活源');
 });
 
+test('灰度：`*`/`all` = 全开（全量开放不必一个个加 ID）', () => {
+  assert.equal(isMaterialEnabled(123456, { POOL_READ_AGENTS: '*' }), true, '`*` 应全开');
+  assert.equal(isMaterialEnabled(123456, { POOL_READ_AGENTS: 'all' }), true);
+  assert.equal(isMaterialEnabled(123456, { POOL_READ_AGENTS: '' }), false, '空仍=全关（回滚口径不变）');
+});
+
 test('空池不发：递一份"今天没有新话"只会训练 Agent 忽略这一类便签', async () => {
   await db.run(`DELETE FROM living_material`);   // 本文件自己的池子，测前清台
   const A = mkAgent('空池');

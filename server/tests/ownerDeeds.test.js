@@ -231,6 +231,14 @@ test('⑤ 灰度位：空串=全关、非法 id 必须出声、命中才投', as
   assert.deepEqual([...deedDigestAgentsFromEnv({ DEED_DIGEST_AGENTS: `${K.id}, ${K.id} ,0` })], [K.id], '去重且忽略 0');
 });
 
+test('⑤ 灰度位：`*`/`all` = 全开（验完全量开放不必一个个加 ID）', async () => {
+  const M = mkAgent('全开');
+  // 关掉自动档，确保下面命中的只可能是"全开"这条路，而不是"主人提过笔"的自动准入
+  assert.equal(await isDeedDigestEnabled(M.id, { DEED_DIGEST_AGENTS: '*', DEED_DIGEST_AUTO: '0' }), true, '`*` 应全开');
+  assert.equal(await isDeedDigestEnabled(M.id, { DEED_DIGEST_AGENTS: 'all', DEED_DIGEST_AUTO: '0' }), true);
+  assert.equal(await isDeedDigestEnabled(M.id, { DEED_DIGEST_AGENTS: '', DEED_DIGEST_AUTO: '0' }), false, '空仍=全关');
+});
+
 test('⑤ 端到端：开灰度 → 随便签拉取直达；平台口吻不裹数据标记；不搬他人原话', async () => {
   const L = mkAgent('直达');
   const peer = mkAgent('同侪甲');

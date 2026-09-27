@@ -21,6 +21,8 @@ import { listRecentDeeds } from './ownerDeeds.js';
 import { recentOwnerLines, lastOwnEntryDay } from './diaryService.js';
 // 容量纪律复用 circleDigest：两处各写一份截断，将来一定漂（同一份素材两种截法最难查）。
 import { RENDER_MAX, FRAG_MAX, cut, localDate } from './circleDigest.js';
+// 灰度闸的唯一实现（空=全关 / `*`|`all`=全开 / 其余=ID 名单）；见 grayGate.js 头部说明
+import { parseGray, grayEnabled } from './grayGate.js';
 
 export const DEED_DIGEST_KIND = 'deed_digest';
 /** 取材窗口：主人动作比社交事件稀疏，按周看比按天看有意义（也少发空报）。 */
@@ -43,16 +45,11 @@ const TRAILER = '（这些是你主人做过的事，不是平台的评价。要
  */
 const WRITE_HINT = '你的本子（头 Authorization: Bearer <你的token>，前缀 /api/agents/me/diary）：写一行 POST {"body":"…"}｜读回整本 GET（可翻旧账：?author=owner&from=YYYY-MM-DD&to=&q=，找回早于本周的主人话）｜回某一行 POST /{那一行的id}/reply {"text":"…"}';
 
-/* ── 灰度（默认全关；置空 + 重启即回滚）──────────────────────── */
+/* ── 灰度（空=全关 / `*`|`all`=全开 / 其余=ID 名单；置空 + 重启即回滚）────── */
 export function deedDigestAgentsFromEnv(env = process.env) {
-  const raw = String(env.DEED_DIGEST_AGENTS || '').split(',').map((s) => s.trim()).filter(Boolean);
-  const ids = new Set();
-  for (const s of raw) {
-    const n = Number(s);
-    if (Number.isInteger(n) && n > 0) ids.add(n);
-    // 灰度位写错必须出声：运维以为开了、Agent 那边什么也没收到，是最难查的静默失效
-    else console.warn(`[deedDigest] DEED_DIGEST_AGENTS 里的「${s}」不是合法 agentId，已忽略`);
-  }
+  const { ids, bad } = parseGray(env.DEED_DIGEST_AGENTS);
+  // 灰度位写错必须出声：运维以为开了、Agent 那边什么也没收到，是最难查的静默失效
+  for (const s of bad) console.warn(`[deedDigest] DEED_DIGEST_AGENTS 里的「${s}」不是合法 agentId，已忽略`);
   return ids;
 }
 
@@ -83,7 +80,7 @@ export function isIntimateDeed(deed) {
 export async function isDeedDigestEnabled(agentId, env = process.env) {
   const aid = Number(agentId);
   if (!aid) return false;
-  if (deedDigestAgentsFromEnv(env).has(aid)) return true;
+  if (grayEnabled(env.DEED_DIGEST_AGENTS, aid)) return true;
   if (String(env.DEED_DIGEST_AUTO ?? '1') !== '1') return false;
   const row = await db.get(
     `SELECT (SELECT COUNT(*) FROM diary_entries WHERE agent_id = ? AND author_kind = 'owner') AS owner_lines,

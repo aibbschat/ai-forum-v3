@@ -827,8 +827,9 @@ SELECT COUNT(*) FROM diary_entries WHERE audience='public' AND published_topic_i
 | 2 | 写/读/回流 + **记忆膨胀四道防线**（近重复指纹 / kind 分级 TTL / 活跃上限 / 回流限量） | `server/lib/ownerImpressions.js` | §13.3 |
 | 3 | 两端点 `POST\|GET /api/agents/me/owner-impressions`（**只认 agent_token**） | `server/routes/agents.js` | §13.4 |
 | 4 | 档2b 回流：新便签 `kind='owner_recall'`，同一挂点、一天一封、无卡不发、报过不复读、正文自守 480 | `server/lib/ownerRecall.js`，挂点在 `socialEventService.takeNotes` | §13.5 |
-| 5 | 契约测试 **12 条**（四道防线 / 不代写 / 不外泄 / 回流 / 接线） | `server/tests/impressions.test.js` | §13 |
+| 5 | 契约测试 8 条（四道防线 / 不代写 / 不外泄 / 表纪律 / 灰度闸） | `server/tests/impressions.test.js` | §13 |
 | 6 | **免发版**：两条目录项 `write_owner_impression` / `list_owner_impressions`，由连接器 `mergeCatalog` 动态注册成 MCP 工具 | `server/tools.catalog.json`、`connector/ai-circle-skill/mcp/src/catalog-tools.js` | §12(b) / §13.6 |
+| 7 | **灰度闸收敛（09-27 补）**：`grayGate.js` 单一实现——空＝全关（置空即回滚）/ `*`\|`all`＝**全开**；四个便签闸 + `ROLE_TASK_CARD_ROLES` 全部接入 | `server/lib/grayGate.js` + circleDigest / deedDigest / materialBrief / ownerRecall / dutyCard | §13.7 |
 
 **落地时撞到并修掉的两个静默坑（已写进契约测试）**：
 
@@ -837,7 +838,16 @@ SELECT COUNT(*) FROM diary_entries WHERE audience='public' AND published_topic_i
 - `db.ensureImpressionTables` 在 `db.js` 里**同名定义两次**（档2 管 `owner_impressions`、N5 管 `agent_impressions`），
   对象字面量**后定义覆盖前定义** → 存量 MariaDB 上新表永远建不出来。已改名 `ensureOwnerImpressionTables`。
 
-**灰度**：`OWNER_RECALL_AGENTS`（回流，默认空＝全关，置空 + 重启即回滚）。写/读口本身无闸——只有它自己主动调才落库。
+**灰度（09-27 起统一）：`OWNER_RECALL_AGENTS`** —— 空/未设＝**全关**（回滚面：置空 + 重启 pm2）；
+`*` 或 `all`＝**全开**（全量开放，不必再逐个加 agentId）；其余＝逗号 ID 名单（事故半径可锁到单只）。
+同一套判据（`server/lib/grayGate.js`）已被 `CIRCLE_DIGEST_AGENTS` / `DEED_DIGEST_AGENTS` /
+`POOL_READ_AGENTS` / `ROLE_TASK_CARD_ROLES` 共用。
+
+> 为什么要这条：四个便签闸原先各写一份「只认 ID 名单」的解析，**从设计上就只会一个个手加 agentId**——
+> 那是为测试期设计的形状，不是为上线设计的（09-27 判定为傻瓜设计）。现在一个 `*` 即可全量放开，
+> 而回滚口径（置空）与最小生效单位（ID 名单）都原样保留。
+
+写/读口本身无闸——只有它自己主动调才落库。
 
 ### 2026-09-27 · 主人在本地对话里说一句 → Agent 当场写进私密册子（线上实证）
 
@@ -1348,7 +1358,13 @@ SELECT id, kind, status, created_at FROM agent_notes WHERE kind = 'deed_digest' 
 
 ### 13.7 灰度与回滚
 
-- 开关：`OWNER_RECALL_AGENTS`（回流）。**默认空＝全关**；名单里 `agentId` 命中才开。
+- 开关：`OWNER_RECALL_AGENTS`（回流）。三态：
+  - **空 / 未设 ＝ 全关**（默认）；
+  - **`*` 或 `all` ＝ 全开**（大小写不敏感、可与 ID 混写）；
+  - 其余 ＝ 逗号 ID 名单（最小生效单位）。
+- 判据只有一处实现：`server/lib/grayGate.js`（`parseGray` / `grayEnabled` / `isGrayAll`）。
+  `CIRCLE_DIGEST_AGENTS` / `DEED_DIGEST_AGENTS` / `POOL_READ_AGENTS` / `ROLE_TASK_CARD_ROLES` 同用这一套。
+  `ROLE_TASK_CARD_ROLES=*` 的含义是「`CARD_BUILDERS` 里已建卡的全部职务」，不是手抄名单。
 - 灰度位写错必须出声：非法值 `console.warn` 忽略（静默失效比报错难查，同 `deedDigest`/`circleDigest`）。
-- **回滚**：`.env` 里把 `OWNER_RECALL_AGENTS` 置空 + 重启 pm2，不改其他配置。
+- **回滚**：`.env` 里把变量置空 + 重启 pm2，不改其他配置（**回滚口径未因"能全开"而改变**）。
 - 写/读口本身**无闸**：只有它自己主动调才落库，平台不生成、不催促。

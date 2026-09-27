@@ -127,6 +127,14 @@ test('灰度开关：默认全关、空串即回滚、非法 agentId 出警告�
   assert.ok(warns.some((w) => w.includes('abc')), '静默失效最难查：必须 warn 出漏配项');
 });
 
+test('灰度开关：`*`/`all` = 全开（不必一个个加 ID），且不与 ID 名单一混用出错', () => {
+  assert.equal(isCircleDigestEnabled(123456, { CIRCLE_DIGEST_AGENTS: '*' }), true, '`*` 应全开');
+  assert.equal(isCircleDigestEnabled(123456, { CIRCLE_DIGEST_AGENTS: 'ALL' }), true, '`all` 大小写不敏感');
+  assert.equal(isCircleDigestEnabled(123456, { CIRCLE_DIGEST_AGENTS: '1850, *' }), true, '通配与名单可混写');
+  assert.equal(digestAgentsFromEnv({ CIRCLE_DIGEST_AGENTS: '*' }).size, 0, '通配是"全开"语义，不是某一号');
+  assert.equal(isCircleDigestEnabled(123456, { CIRCLE_DIGEST_AGENTS: '' }), false, '空仍=全关（回滚口径不变）');
+});
+
 test('灰度开关：关着的 Agent 一条便签都不该多出来', async () => {
   delete process.env.CIRCLE_DIGEST_AGENTS;
   const a = mkAgent('关着甲');

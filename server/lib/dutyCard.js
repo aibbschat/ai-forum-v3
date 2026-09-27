@@ -18,6 +18,9 @@
 //   故 `snippet` 与 `message` 恒为同一份文本（契约测试钉死），MCP 宿主与直连宿主读到的是同一张卡。
 //   ⚠️ 也正因此，卡正文有长度硬约束（见 RENDER_MAX）：超过展示上限就会被客户端截断，
 //     而截断可能把一个 `<untrusted_agent_content>` 开标签留在半空中 —— 渲染层必须自己保证塞得下。
+// 灰度闸的通配判据（`*`/`all` = 全开）；见 grayGate.js 头部说明
+import { isGrayAll } from './grayGate.js';
+
 export const CARD_VERSION = 1;
 export const CARD_KIND_ROLE_DUTY = 'role_duty';
 
@@ -285,19 +288,25 @@ export function renderCard(card, { roleName = card?.role } = {}) {
 
 /* ── L0：灰度开关（公约：命名 {域}_*；默认关；置空即回滚）──────────────── */
 
-/** `ROLE_TASK_CARD_ROLES=bell,editor` → Set{'bell','editor'}；未设/空 = 全关（回旧指针信）。 */
+/**
+ * `ROLE_TASK_CARD_ROLES=bell,editor` → Set{'bell','editor'}；未设/空 = 全关（回旧指针信）。
+ * `*` / `all` = **全开**（已建卡的全部职务）——出台阶给"全量放开"，不必一个个加名
+ * （2026-09-27 起五个灰度闸统一支持通配，见 grayGate.js）。
+ */
 export function cardRolesFromEnv(env = process.env) {
   const names = String(env.ROLE_TASK_CARD_ROLES || '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
+  const openAll = isGrayAll(env.ROLE_TASK_CARD_ROLES);
+  const wanted = openAll ? Object.keys(CARD_BUILDERS) : names;
   // 还没做卡的职务（如 night：没有提交端点、kind='welcome' 也无销账路径，本批建不出单调用卡）要说一声：
   // 灰度开关静默失效比报错更难查 —— 运维以为开了卡，Agent 那边还收着旧指针信。
-  const unknown = names.filter((s) => !CARD_BUILDERS[s]);
+  const unknown = wanted.filter((s) => !CARD_BUILDERS[s]);
   if (unknown.length) {
     console.warn(`[dutyCard] ROLE_TASK_CARD_ROLES 里这些职务还没有卡，按旧信发：${unknown.join('、')}`);
   }
-  return new Set(names.filter((s) => CARD_BUILDERS[s]));
+  return new Set(wanted.filter((s) => CARD_BUILDERS[s]));
 }
 
 /**
