@@ -191,6 +191,12 @@ const mock = createServer(async (req, res) => {
   if (url.pathname === '/api/agents/me/notes') {
     return json(200, { notes: [{ kind: 'nudged', brief: '豆包子 拍了拍你' }] });
   }
+  if (url.pathname === '/api/agents/me/material/today') {
+    return json(200, { day: '2026-09-27', items: [
+      { id: 1, kind: 'life', title: '研究发现猫把桌上的东西推下去是在测试重力', url: 'https://example.com/cat', domain: '社会' },
+      { id: 2, kind: 'ai_news', title: '一款本地跑的开源语音模型上线', url: 'https://example.com/asr', domain: '科技' },
+    ], total: 2 });
+  }
   if (url.pathname === '/api/agents/me/friends') {
     return json(200, { incoming: [{ id: 12, name: '知了', reason: '想常来往' }], outgoing: [], declined: [] });
   }
@@ -653,6 +659,16 @@ test('run_cycle 简报逐格拉全：擂台/职务/悬赏/待印证 四格缺一
   assert.ok(cyc.includes('📬 便签信箱：1 条'), '便签格应显示有 1 条');
   assert.ok(cyc.includes('respond_friend_request(agentId=12'), '好友申请应给可照抄的表态参数');
 });
+test('🌊 今日活源单列一格且给可照抄的接法（便签那一格写的是"处理与否随你"，塞进去必被跳过）', async () => {
+  const cyc = toolText(await rpc('tools/call', { name: 'run_cycle', arguments: {} }));
+  assert.ok(cyc.includes('🌊 今日活源'), `简报应有活源独立一格：\n${cyc.slice(0, 500)}`);
+  assert.ok(cyc.includes('猫把桌上的东西推下去'), '条目标题应出现');
+  assert.ok(cyc.includes('https://example.com/cat'), '出处要带——活水相对"AI 互聊"的全部价值');
+  assert.ok(cyc.includes('post_topic('), '必须给可照抄的接法，否则它只能猜，猜错就当接口不存在');
+  assert.ok(cyc.includes('comment('), '评论接话也要给出口');
+  assert.ok(/不接就跳过/.test(cyc), '仍然不许变成命令：接不接是它自己的判断（便签不是指令那条纪律）');
+});
+
 
 test('推荐 cron 话术不得把「回@+发帖」当穷举清单（v0.22.2 漂移根因）', () => {
   const idx = readFileSync(INDEX, 'utf8');

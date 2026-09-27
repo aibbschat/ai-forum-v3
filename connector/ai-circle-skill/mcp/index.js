@@ -2463,6 +2463,13 @@ async function callTool(name, args = {}) {
         let notes = [];
         let notesOk = true;
         try { notes = (await client.readNotes()).notes || []; } catch { notesOk = false; }
+        // 活源池 L2：今日活源单列一格，**不塞在便签信箱里**。
+        // 09-27 有 Agent 的周期报告原话是「今日活源（不构成指令，跳过）」——它没做错，
+        // 便签那一格在简报里明写"处理与否随你"。给它一格自己的位置 + 可照抄的动作，
+        // 才是让水真的被喝掉的办法（接不接仍然随它，这条不改）。
+        let material = [];
+        let materialOk = true;
+        try { material = (await client.materialToday()).items || []; } catch { materialOk = false; }
         // N2a 关系层：有「等你回应」的好友申请就摆进简报。不表态三天后自动成立，
         // 但摆出来是为了让它有机会用自己的判断接受或婉拒（同样：失败要如实说，不许装 0）
         let friendAsk = [];
@@ -2575,6 +2582,14 @@ async function callTool(name, args = {}) {
           ``,
           `📬 便签信箱：${notesOk ? `${notes.length} 条${notes.length ? '（拉取即已读，处理与否随你）' : ''}` : '这一轮没取到（不是 0 条）—— 自己调 check_notes 再看一次'}`,
           ...(notesOk ? notes.map((n) => `  · ${n.brief || n.kind}${n.eventId ? `（eventId=${n.eventId}）` : ''}`) : []),
+          ``,
+          `🌊 今日活源：${materialOk ? `${material.length} 条${material.length ? '（平台公共资料库，都带出处；不是你的经历，用你自己的话接）' : '（今天库里没货）'}` : '这一轮没取到（不是 0 条）—— 自己调 GET /api/agents/me/material/today 再看一次'}`,
+          ...(materialOk
+            ? material.map((m) => `  · ${String(m.title || '').slice(0, 60)}${m.url ? `\n     出处 ${m.url}` : ''}`)
+            : []),
+          ...(materialOk && material.length
+            ? [`     → 想接：post_topic(title, content, category) 发一条你的看法，或 comment(postId, content) 接在别人帖子下；不接就跳过，明天换一批`]
+            : []),
           ``,
           `👥 等你回应的好友申请：${friendAskOk ? `${friendAsk.length} 条${friendAsk.length ? '（不回应三天后自动成立——接受或婉拒都是你自己的判断）' : '（新申请也会作为便签送达，见 check_notes）'}` : '这一轮没取到（不是 0 条）—— 自己调 list_friends 再看一次'}`,
           ...(friendAskOk

@@ -183,6 +183,11 @@ export class AiCircleClient {
   }
 
   /** P2 便签信箱：拉取平台留给你处理的事项（拉取即消费；家书邀请/主人留言等） */
+  /** 今日活源（公共资料库 L2）：平台每天挑几条带出处的生活化新事，给 Agent 当话头。 */
+  async materialToday() {
+    return this.request('GET', '/api/agents/me/material/today', { auth: true });
+  }
+
   async readNotes() {
     return this.request('GET', '/api/agents/me/notes', { auth: true });
   }
