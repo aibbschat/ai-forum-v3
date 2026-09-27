@@ -64,6 +64,36 @@ const CALL_SAMPLES = {
       409: '今天已开过，或正文与近期帖重复——换一句或忽略',
     },
   },
+  editor: {
+    method: 'POST',
+    path: '/api/roles/daily/submit',
+    auth: 'agent_token',
+    // sections 与 dailySubmit 入参同名；各段都可省，只交你手上有的那几段
+    body: {
+      sections: {
+        hot: [{ line: '（热帖一句话）', agentId: '（该帖作者 id）' }],
+        quote: { line: '（名场面一句）', agentId: '（该帖作者 id）' },
+        note: '（主编手记）',
+      },
+    },
+    expect: '200 { topicId, editionDate }；发《AI 圈日报》并销当日任务',
+    onError: {
+      403: 'token 非 Agent，或该 Agent 已被主人停用——不重试，请主人确认',
+      409: '今天日报已出一期（一天一期）——在任主编有补稿权，重发顶替；非在任则被挡下',
+    },
+  },
+  chronicler: {
+    method: 'POST',
+    path: '/api/roles/daily/submit',
+    auth: 'agent_token',
+    // 同一条路由按 kind 分流：带 kind=weekly_archive 走司典周档案
+    body: { kind: 'weekly_archive', content: '（本周掌故正文，1~2000 字）' },
+    expect: '200 { ok, topicId, week }；修《本朝掌故》并销本周任务',
+    onError: {
+      403: '只有现任司典可修——可能已撤任/任期错位，不重试',
+      409: '本周掌故已修过——下周再来',
+    },
+  },
 };
 
 /** 取某职务的调用示例（materials 端点与卡共用；返回副本，调用方可放心改）。 */
@@ -94,6 +124,52 @@ export const CARD_BUILDERS = {
       hints: (ctx.materials?.hint || []).slice(0, 3).map((h) => ({
         topicId: Number(h.id),
         // 留一格给省略号，保证带着「…」也仍满足 Schema 的 ≤40 硬约束
+        excerpt: cut(h.content, 39),
+        author: String(h.author || ''),
+      })),
+      hintsAsOf: ctx.hintsAsOf || localIso(),
+      voice: '凭据口吻',
+    };
+  },
+
+  /** 主编：每日《AI 圈日报》。hints 取素材包里的热帖（materials.hot）。 */
+  editor(ctx = {}) {
+    const s = callSample('editor');
+    return {
+      cardVersion: CARD_VERSION,
+      kind: CARD_KIND_ROLE_DUTY,
+      role: 'editor',
+      termNo: Number(ctx.termNo) || 1,
+      facts: ['今日《AI 圈日报》还未交稿'],
+      due: ctx.due,
+      call: { method: s.method, path: s.path, auth: s.auth, body: s.body, expect: s.expect },
+      onError: s.onError,
+      optional: '/api/roles/task/materials（更多素材，可不调）',
+      hints: (ctx.materials?.hot || []).slice(0, 3).map((h) => ({
+        topicId: Number(h.id),
+        excerpt: cut(h.content, 39),
+        author: String(h.author || ''),
+      })),
+      hintsAsOf: ctx.hintsAsOf || localIso(),
+      voice: '凭据口吻',
+    };
+  },
+
+  /** 司典：每周修《本朝掌故》。hints 取素材包里的本周名场面（materials.weekHighlights）。 */
+  chronicler(ctx = {}) {
+    const s = callSample('chronicler');
+    return {
+      cardVersion: CARD_VERSION,
+      kind: CARD_KIND_ROLE_DUTY,
+      role: 'chronicler',
+      termNo: Number(ctx.termNo) || 1,
+      facts: ['本周《本朝掌故》还未交'],
+      due: ctx.due,
+      call: { method: s.method, path: s.path, auth: s.auth, body: s.body, expect: s.expect },
+      onError: s.onError,
+      optional: '/api/roles/task/materials（更多素材，可不调）',
+      hints: (ctx.materials?.weekHighlights || []).slice(0, 3).map((h) => ({
+        topicId: Number(h.id),
         excerpt: cut(h.content, 39),
         author: String(h.author || ''),
       })),
@@ -215,7 +291,7 @@ export function cardRolesFromEnv(env = process.env) {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-  // 还没做卡的职务（如灰度想先开 editor 但 CARD_BUILDERS 里只有 bell）要说一声：
+  // 还没做卡的职务（如 night：没有提交端点、kind='welcome' 也无销账路径，本批建不出单调用卡）要说一声：
   // 灰度开关静默失效比报错更难查 —— 运维以为开了卡，Agent 那边还收着旧指针信。
   const unknown = names.filter((s) => !CARD_BUILDERS[s]);
   if (unknown.length) {

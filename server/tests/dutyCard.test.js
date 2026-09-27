@@ -51,9 +51,11 @@ const worstHints = [0, 1, 2].map((i) => ({ id: 100 + i, content: `线索${i} ${'
 
 /** 组一张真实卡（走注册表 + 校验，与运行期同一条路）。 */
 function realCard(roleId) {
+  // 每个 builder 的 hints 源不同（bell=hint / editor=hot / chronicler=weekHighlights），
+  // 一律喂最差输入，让「渲染不越额度」这条判据对全体生效而不是空转。
   return buildDutyCard(roleId, {
     termNo: 3, due: '2026-09-25T23:59:59', hintsAsOf: '2026-09-25T09:30:00',
-    materials: { hint: worstHints },
+    materials: { hint: worstHints, hot: worstHints, weekHighlights: worstHints },
   });
 }
 
@@ -83,7 +85,7 @@ before(async () => {
 
 test('全表遍历 CARD_BUILDERS：schema 合法 + 单调用红线 + 403/409 + 可照抄要素 + 不越额度', () => {
   const roleIds = Object.keys(CARD_BUILDERS);
-  assert.ok(roleIds.length >= 1, '注册表至少有一格（本批只有 bell）');
+  assert.ok(roleIds.length >= 3, '注册表至少三格（B2：bell / editor / chronicler；night 无提交端点，建不出卡）');
   for (const roleId of roleIds) {
     const card = realCard(roleId);
     assert.ok(card, `${roleId}：注册表命中就必须组得出合法卡（组不出说明 schema 失守）`);
@@ -170,8 +172,8 @@ test('灰度开关：默认关、置空即回滚、未做卡的职务要出警�
   assert.equal(cardRolesFromEnv({}).size, 0, '未设 = 全关');
   assert.equal(cardRolesFromEnv({ ROLE_TASK_CARD_ROLES: '   ' }).size, 0, '空串 = 全关');
   assert.deepEqual([...cardRolesFromEnv({ ROLE_TASK_CARD_ROLES: 'bell, ,bell' })], ['bell'], '去重且忽略空项');
-  // 还没有卡的职务（editor 尚未建档）→ 不生效（回旧信），且必须留下痕迹
-  const env = { ROLE_TASK_CARD_ROLES: 'editor' };
+  // 还没有卡的职务（night 无提交端点、kind='welcome' 无销账路径，本批不建卡）→ 不生效（回旧信），且必须留下痕迹
+  const env = { ROLE_TASK_CARD_ROLES: 'night' };
   const warns = [];
   const orig = console.warn;
   console.warn = (m) => warns.push(String(m));
@@ -180,7 +182,7 @@ test('灰度开关：默认关、置空即回滚、未做卡的职务要出警�
   } finally {
     console.warn = orig;
   }
-  assert.ok(warns.some((w) => w.includes('editor')), '静默失效最难查：必须 warn 出漏配的职务名');
+  assert.ok(warns.some((w) => w.includes('night')), '静默失效最难查：必须 warn 出漏配的职务名');
 });
 
 // ════════════════════════════════════════════════════════════════
