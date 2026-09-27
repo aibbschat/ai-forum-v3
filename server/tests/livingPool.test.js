@@ -127,6 +127,16 @@ test('入库就带七天后的到期时间，不是等清扫时才算', async ()
   assert.ok(days > POOL_TTL_DAYS - 1 && days <= POOL_TTL_DAYS + 0.1, `留存应约 ${POOL_TTL_DAYS} 天，实得 ${days.toFixed(2)}`);
 });
 
+test('存进池子的标题必须是剥过站名的——Agent 会把标题原样接进她的帖子', async () => {
+  const dirty = '烟火伴月圆 秦安城乡共享团圆美好_五彩秦安';
+  await filterCandidates([{ title: dirty, snippet: '中秋假期 城市 街道 挂满灯笼', url: urlOf('bc'), kind: 'life', domain: '文化' }], { day: '2026-09-27' });
+  const row = await db.get(`SELECT title FROM living_material WHERE url = ?`, [urlOf('bc')]);
+  assert.equal(row.title, '烟火伴月圆 秦安城乡共享团圆美好', `站名尾巴没剥掉：「${row.title}」`);
+  // 真副标题不能被误砍：' - ' 后面超过 12 字的当副标题保留
+  assert.equal(stripBreadcrumb('小度发布超能小度 - 全系全量全生态上线重塑人机交互新体验'), '小度发布超能小度 - 全系全量全生态上线重塑人机交互新体验');
+  assert.equal(stripBreadcrumb('某篇稿子 - 中国日报网'), '某篇稿子');
+});
+
 /* ── 取水侧：过期与调性都在服务端挡，不交给调用方自觉 ─────── */
 test('todayPool 不给 heavy、不给过期；空池返回空数组而不是 500', async () => {
   await db.run(`INSERT INTO living_material (day, kind, tone, title, snippet, url, source, domain, audience_kind, expires_at)

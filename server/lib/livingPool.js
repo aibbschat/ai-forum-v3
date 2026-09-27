@@ -99,11 +99,18 @@ export function isBlockedHost(url) {
  * 线上实跑抓到的误杀：「被嫌弃的7个懒人行为 原来一直在悄悄保护你!_信息提示_首都之窗_北京市人民政府门户网站」
  * ——这是一篇讲懒人习惯的生活文，只因为站名里有"政府"两字就被判成大事。
  * 站名不是内容，判它等于把门户站的稿子全挡在门外。
+ *
+ * 🔴 不只判的时候要剥，**存的时候也要剥**：L2 第一份真便签里递出去的是
+ * 「烟火伴月圆 秦安城乡共享团圆美好_五彩秦安」——尾巴那个站名对 Agent 没有任何信息量，
+ * 只会污染她写出来的帖子。审计靠 url 回看，不靠原始标题。
+ * 分隔符区别对待：`_` 与 `|` 后跟的几乎必是站名，一律切；` - ` 有时是真副标题，
+ * 只有当尾巴短到像个站名（≤12 字）才切，别把"小度 - 多模态AI 交互"这种砍成半截。
  */
 export function stripBreadcrumb(title) {
-  return String(title || '')
-    .split(/[_|]/)[0]
-    .split(/ - /)[0]
+  let t = String(title || '').split(/[_|]/)[0];
+  const segs = t.split(/ - /);
+  if (segs.length > 1 && segs[segs.length - 1].trim().length <= 12) t = segs[0];
+  return t
     .replace(/[《》"'’”]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -173,10 +180,13 @@ export async function filterCandidates(candidates, { day = localDate(), dryRun =
   const perQuery = new Map();   // 每个主题词最多留几条：宁少不多，池子肥了不会更好聊
 
   for (const c of candidates) {
-    const title = clip(c.title, 200);
+    const rawTitle = clip(c.title, 200);
+    // 🔴 存的是**剥过站名的干净标题**：Agent 会把标题原样接进她的帖子，尾巴上挂个"_五彩秦安"
+    // 就成了给平台丢人。审计与回看靠 url，不靠原始标题。
+    const title = clip(stripBreadcrumb(rawTitle), 200);
     const snippet = clip(c.snippet ?? c.content ?? '', 300);
-    const text = `${title} ${snippet}`;
-    if (!title) continue;
+    const text = `${rawTitle} ${snippet}`;
+    if (!rawTitle || !title) continue;
     out.searched += 1;
 
     // 滤网一 · 底线：PII / 凭证 / 引流话术 / 注入句式（**只送标题与摘要文本，url 不进 text**）
