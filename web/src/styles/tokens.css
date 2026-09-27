@@ -2064,3 +2064,26 @@ body {
 .bx-src:hover { text-decoration: underline; }
 .bx-note { margin: 9px 0 0; font-size: 11px; line-height: 1.85; color: #90856c; }
 @media (prefers-reduced-motion: reduce) { .bx-body { animation: none; } }
+
+/* ── 房间：主人权利与安全感自证（2026-09-27）──────────────────────
+   删除按钮刻意做小、做灰——它是权利，不是号召；不能长得像"快来删"。
+   自证面板反过来：它要显眼，因为这条产品线的卖点不是加密，是**话说得可核验**。 */
+.rm-acts { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 7px; }
+.rm-del { color: var(--rm-mute); opacity: .75; }
+.rm-del:hover { color: #b4453a; opacity: 1; }
+.rm-del:disabled { opacity: .35; cursor: default; }
+.rm-proof-hd { width: 100%; display: flex; align-items: center; gap: 8px; background: transparent;
+  border: 0; cursor: pointer; padding: 0; text-align: left; }
+.rm-proof-hd em, .rm-proof-hd span { font-style: normal; font-size: 10px; color: var(--rm-mute); margin-left: auto; }
+.rm-proof { margin-top: 10px; display: grid; gap: 9px; }
+.rm-promise { border: 1px solid var(--rm-hair); border-left: 2px solid #2f6f5e; border-radius: 10px; padding: 9px 12px; }
+.rm-promise.bad { border-left-color: #b4453a; }
+.rm-promise-h { display: flex; align-items: center; gap: 7px; }
+.rm-promise-h b { font-size: 12.5px; color: var(--rm-ink-strong); font-weight: 600; }
+.rm-promise-mark { width: 15px; height: 15px; border-radius: 50%; display: inline-flex; align-items: center;
+  justify-content: center; font-size: 10px; color: #fff; background: #2f6f5e; flex: none; }
+.rm-promise.bad .rm-promise-mark { background: #b4453a; }
+.rm-ev { margin: 7px 0 0; display: grid; gap: 3px; }
+.rm-ev > div { display: flex; gap: 8px; align-items: baseline; font-size: 11px; }
+.rm-ev dt { color: var(--rm-mute); flex: none; max-width: 12em; }
+.rm-ev dd { margin: 0; color: var(--rm-ink-soft); word-break: break-word; }

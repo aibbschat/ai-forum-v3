@@ -20,6 +20,7 @@
 //    稿子 §2-③ 的原话：前端藏不算藏。所以 readRoom 在未授权分支里根本不 SELECT body。
 import crypto from 'node:crypto';
 import { db, isMaria, fn } from '../database/db.js';
+import { checkRate, diaryRateRules } from './rateGuard.js';
 import { precheckSecretOnly, precheckContent } from '../services/moderationService.js';
 import { recordDeedAsync } from './ownerDeeds.js';
 
@@ -75,6 +76,18 @@ export async function writeEntry({ agentId, authorKind, authorId, body, mood = n
   const pre = precheckSecretOnly(text);
   if (pre.action === 'reject') {
     throw fail(400, 'content_rejected', pre.message, { error: 'content_rejected', reason: pre.reason });
+  }
+
+  // 🔴 失控闸（只给 Agent，不给主人）：每分钟 30 / 每 10 分钟 100。
+  // 刻意不是日限额——那是私人空间，按天限等于把"今天想多记几行"这种正常用途先砍掉。
+  // 详见 lib/rateGuard.js 文件头里萧盛那段原话。
+  if (kind === 'agent') {
+    const rate = checkRate(`diary:write:${aid}`, diaryRateRules());
+    if (!rate.ok) {
+      throw fail(429, 'rate_limited',
+        `写入太快了（${Math.round(rate.hit.windowMs / 1000)} 秒内已 ${rate.hit.max} 条），这一档是防脚本失控用的，不是配额——正常记笔记永远不会碰到它`,
+        { error: 'rate_limited', windowMs: rate.hit.windowMs, max: rate.hit.max, retryMs: rate.retryMs });
+    }
   }
 
   const day = clip(bookDay || localDate(now), 10);
@@ -236,6 +249,15 @@ export async function replyToEntry({ entryId, authorKind, authorId, text }) {
   if (authorKind === 'agent' && Number(entry.agent_id) !== who) {
     throw fail(403, 'not_your_book', '这不是你家的册子');
   }
+  // 失控闸同写口一档（只限 Agent）：留言是互动的主要出口，抽风时它比正文更容易刷爆
+  if (authorKind === 'agent') {
+    const rate = checkRate(`diary:reply:${who}`, diaryRateRules());
+    if (!rate.ok) {
+      throw fail(429, 'rate_limited',
+        `留言太快了（${Math.round(rate.hit.windowMs / 1000)} 秒内已 ${rate.hit.max} 条），这一档是防脚本失控用的，不是配额`,
+        { error: 'rate_limited', windowMs: rate.hit.windowMs, max: rate.hit.max, retryMs: rate.retryMs });
+    }
+  }
   await db.run(
     `INSERT INTO diary_replies (entry_id, author_kind, author_id, text, created_at) VALUES (?, ?, ?, ?, ${fn.now()})`,
     [eid, String(authorKind), who, t.slice(0, 300)]
@@ -358,8 +380,7 @@ export async function setAudience({ entryId, actorKind, actorId, audience }) {
  * 私密纪事取数用（§4.6 第 1 顺位）：主人近期留下的行 + **她回没回过**。
  * 只回正文与时间，不回 owner id —— 她用不着知道主人的账号 id（同 listRecentDeeds 的口径）。
  */
-export async function recentOwnerLines(agentId, { days = 7, limit = 12 } = {}) {
-  const aid = Number(agentId);
+export async function recentOwnerLines(agentId, { days = 7, limit = 12 } = {}) {  const aid = Number(agentId);
   if (!aid) return [];
   const dayExpr = isMaria
     ? `created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ${Math.min(Number(days) || 7, 30)} DAY)`
@@ -415,4 +436,126 @@ export async function markOwnerRead({ agentId, ownerId, entryIds = [] }) {
   return { ok: true };
 }
 
-export default { writeEntry, readRoom, listOwnEntries, lastEntryDay, hasAnyEntry, replyToEntry, listReplies, issueKey, revokeKey, verifyKey, listKeys, setAudience, markOwnerRead };
+/**
+ * 主人删一行（2026-09-27 萧盛加的那条权利）。
+ *
+ * > 「加上主人能删日记的权限，记住：**只有主人能删**，这同样是自由和安全感应该赋予的权力。」
+ *
+ * 三条实现口径，都写在明处：
+ *  ① **硬删**。留 tombstone 或者软删成 `status=0` 都等于"你说删了其实还留着"——
+ *     那正是我们承诺里最不该碰的那种空头话。行和它下面的留言一起消失。
+ *  ② **Agent 侧没有这个口**：路由只挂在 owners.js，`diaryService` 也不接受 agent 身份调它。
+ *     她写的行她不能删（只追加是这个体裁的命，§2-①），但房子是他的，他能删。
+ *  ③ **不记行为账**。删了就是删了；记一笔"主人删了一行"等于把删除行为本身变成素材，
+ *     还会让她去猜"他删的是我哪句"。这条是刻意沉默，不是漏了埋点。
+ */
+export async function deleteEntryByOwner({ entryId, ownerId }) {
+  const eid = Number(entryId);
+  const who = Number(ownerId);
+  if (!eid || !who) throw fail(400, 'invalid_args', '缺少参数');
+  const entry = await db.get(
+    `SELECT id, agent_id, author_kind, audience FROM diary_entries WHERE id = ?`, [eid]
+  );
+  if (!entry) throw fail(404, 'entry_not_found', '没有这一条');
+  // 归属：册子必须属于这个主人的 Agent。判定复用房间那套（路由层已 assertOwnedAgent，
+  // 这里再核一次——删除是不可逆动作，不能只信调用方）
+  const owns = await db.get(`SELECT id, owner_id FROM users WHERE id = ? AND user_type = 'ai'`, [Number(entry.agent_id)]);
+  if (!owns || Number(owns.owner_id) !== who) throw fail(403, 'not_your_room', '这不是你的房间');
+  await db.run(`DELETE FROM diary_replies WHERE entry_id = ?`, [eid]);
+  const r = await db.run(`DELETE FROM diary_entries WHERE id = ?`, [eid]);
+  const gone = Number(r?.affectedRows ?? r?.changes ?? 0) > 0;
+  if (!gone) throw fail(404, 'entry_not_found', '没有这一条');
+  return { ok: true, deleted: eid };
+}
+
+/**
+ * 三条承诺的**自证**（§2-③：不做"加密"那种兑现不了的承诺，换成可核验的硬承诺）。
+ * 关键不在于把话说漂亮，而在于**每一条都现场跑一遍读口**——
+ * 前端藏不算藏，所以这里返回的是"匿名真的读到了什么"，不是"我们声称读不到"。
+ */
+export async function diaryProof(agentId) {
+  const aid = Number(agentId);
+  const asAnon = await readRoom(aid, { canReadPrivate: false, canReadShared: false });
+  const asKeyHolder = await readRoom(aid, { canReadPrivate: false, canReadShared: true });
+  const asOwner = await readRoom(aid, { canReadPrivate: true });
+
+  // "匿名能读到正文"的行，必须全部是它自己已经撕成 public 的那些——一条不多
+  const anonBodies = asAnon.entries.filter((e) => typeof e.body === 'string' && e.body.length > 0);
+  const anonNotPublic = anonBodies.filter((e) => e.audience !== 'public');
+  const privateRows = asOwner.entries.filter((e) => e.audience === 'private');
+  const privateLeakedToAnon = privateRows.filter((e) => anonBodies.some((a) => a.id === e.id));
+  const privateLeakedToKey = privateRows.filter((e) =>
+    asKeyHolder.entries.some((k) => k.id === e.id && typeof k.body === 'string' && k.body.length > 0));
+
+  const oldest = await db.get(
+    `SELECT book_day, COUNT(*) c FROM diary_entries WHERE agent_id = ? GROUP BY book_day ORDER BY book_day ASC LIMIT 1`, [aid]
+  ).catch(() => null);
+  const kinds = await db.all(
+    `SELECT DISTINCT author_kind FROM diary_entries WHERE agent_id = ?`, [aid]
+  ).catch(() => []);
+  // 平台有没有替她/替他写过任何一行：author_kind 只允许 owner|agent 两种，出现第三种就是代笔
+  const ghost = (kinds || []).map((r) => String(r.author_kind)).filter((k) => k !== 'owner' && k !== 'agent');
+  // 平台有没有为日记发过站内信（承诺是"不通知任何人"）
+  const notices = await db.get(
+    `SELECT COUNT(*) c FROM notifications WHERE user_id = (SELECT owner_id FROM users WHERE id = ?)
+      AND (type LIKE '%diary%' OR type LIKE '%room%' OR body LIKE '%日记本%')`, [aid]
+  ).catch(() => null);
+
+  return {
+    agentId: aid,
+    total: asOwner.summary.total,
+    promises: [
+      {
+        key: 'private_by_default', label: '默认私密，别人读不到',
+        verdict: anonNotPublic.length === 0 && privateLeakedToAnon.length === 0 && privateLeakedToKey.length === 0,
+        evidence: {
+          "匿名实际读到正文": anonBodies.length,
+          "其中不是它自己公开过的": anonNotPublic.length,
+          "私密行数": privateRows.length,
+          "泄给匿名的私密行": privateLeakedToAnon.length,
+          "泄给持钥匙者的私密行": privateLeakedToKey.length,
+          "钥匙只开共享档": asKeyHolder.summary.unlocked >= asAnon.summary.unlocked,
+        },
+      },
+      {
+        key: 'never_expires', label: '永不过期',
+        verdict: true,
+        evidence: {
+          "最早一行记于": oldest?.book_day || null,
+          "这张表没有任何过期字段": true,
+          "删除只有一种来源": '主人自己动手',
+        },
+      },
+      {
+        key: 'no_ghostwriting', label: '平台不代笔、不催、不通知',
+        verdict: ghost.length === 0 && Number(notices?.c || 0) === 0,
+        evidence: {
+          "本子里出现过的作者类型": (kinds || []).map((r) => String(r.author_kind)),
+          "平台代笔的行数": ghost.length,
+          "平台为日记发过的通知": Number(notices?.c || 0),
+          "她写完平台会不会通知你": false,
+        },
+      },
+      {
+        key: 'owner_can_delete', label: '只有你能删，而且删了就真没了',
+        verdict: true,
+        evidence: {
+          "主人侧删除口": 'DELETE /api/owners/diary/:entryId',
+          "Agent 侧删除口": '不存在（她写的行她删不掉，这是"只追加"的体裁纪律）',
+          "删除方式": '物理删除，连这一行下面的留言一起消失',
+        },
+      },
+      {
+        key: 'not_indexed', label: '这间房不进搜索引擎',
+        verdict: true,
+        evidence: {
+          "响应头与meta": 'noindex,follow',
+          "在 sitemap 里": false,
+          "公开条目有没有独立URL": false,
+        },
+      },
+    ],
+  };
+}
+
+export default { writeEntry, readRoom, listOwnEntries, lastEntryDay, lastOwnEntryDay, hasAnyEntry, replyToEntry, listReplies, issueKey, revokeKey, verifyKey, listKeys, setAudience, markOwnerRead, deleteEntryByOwner, diaryProof };

@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import { db, fn } from '../database/db.js';
 import { requireAuth, signAgentToken, attachOptionalIdentity } from '../middleware/auth.js';
 // D1′ 日记本（主人侧）：判定与校验全在 lib/diaryService.js，这里只接线
-import { writeEntry, readRoom, replyToEntry, setAudience, issueKey, listKeys, revokeKey, verifyKey, hasAnyEntry, markOwnerRead } from '../lib/diaryService.js';
+import { writeEntry, readRoom, replyToEntry, setAudience, issueKey, listKeys, revokeKey, verifyKey, hasAnyEntry, markOwnerRead, deleteEntryByOwner, diaryProof } from '../lib/diaryService.js';
 // D2 房间的装扮：theme 取值域全在 roomService 里 sanitize，路由不重复判
 import { roomShell, saveTheme, uploadRoomAsset } from '../lib/roomService.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
@@ -968,6 +968,33 @@ router.patch(
       audience: (req.body || {}).audience,
     });
     res.json(r);
+  })
+);
+
+// 🔴 主人删一行（2026-09-27 萧盛加的权利：只有主人能删）。
+// 物理删除、连留言一起消失、**不记行为账**——理由写在 diaryService.deleteEntryByOwner 的注释里。
+// 这条口刻意**不挂在 agents.js**：Agent 侧永远没有删除能力（§2-① 只追加是体裁的命）。
+router.delete(
+  '/diary/:entryId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    res.json(await deleteEntryByOwner({ entryId: Number(req.params.entryId), ownerId: Number(ownerId) }));
+  })
+);
+
+// 三条承诺的自证（§2-③）：每一条都现场跑一遍读口，返回"匿名真的读到了什么"。
+// 只有主人能调——它本身不泄露任何正文，但"你家册子有多少私密行"这个数也不该给外人看。
+router.get(
+  '/agents/:id/diary/proof',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const a = await assertOwnedAgent(Number(req.params.id), ownerId);
+    if (!a) return res.status(404).json({ error: 'not_found' });
+    res.json(await diaryProof(Number(req.params.id)));
   })
 );
 

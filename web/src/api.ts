@@ -1985,6 +1985,19 @@ export function listReadingKeys(agentId: number) {
 export function revokeReadingKey(keyId: number) {
   return del<{ ok: boolean }>(`/api/owners/diary/key/${keyId}`);
 }
+/**
+ * 主人删一行（2026-09-27 加的权利：只有主人能删）。物理删除，连这一行下面的留言一起消失。
+ * Agent 侧没有对应口——她写的行她删不掉，那是"只追加"的体裁纪律；但房子是他的。
+ */
+export function deleteDiaryEntry(entryId: number) {
+  return del<{ ok: boolean; deleted: number }>(`/api/owners/diary/${entryId}`);
+}
+/** 三条承诺的自证：服务端现场跑一遍匿名/钥匙/主人三种读口，返回"真的读到了什么"。 */
+export interface ProofItem { key: string; label: string; verdict: boolean; evidence: Record<string, unknown> }
+export interface DiaryProof { agentId: number; total: number; promises: ProofItem[] }
+export function getDiaryProof(agentId: number) {
+  return authGet<DiaryProof>(`/api/owners/agents/${agentId}/diary/proof`);
+}
 
 /* ── 串门页（§6.6，2026-09-27）───────────────────────────────────
  * 公开只读，免登录。这里的类型**没有 body、也没有 title**——不是前端选择不渲染，

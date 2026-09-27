@@ -322,8 +322,30 @@ const NOINDEX_TITLES = {
   '/write': '写作',
   '/search': '搜索',
 };
+/**
+ * 🔴 带参数的私密页必须走**前缀**匹配。
+ * 原先只有这张精确路径表，于是 `/room/1849` 这类带 id 的路由**永远匹配不上**，
+ * 直接 fallthrough 成"无 meta 的 SPA"——而 `web/index.html` 里写死了一条
+ * `<link rel="canonical" href="https://aibbs.chat/">`，结果这类页面既没有 noindex、
+ * 又对搜索引擎宣称"我就是首页"。
+ * 为什么这三条必须 noindex：
+ *   `/room/`  —— 唯一会把**日记正文**吐进 HTML 的页面（audience=public 那档对匿名可见）。
+ *                设计稿 §5.4-⑤ 明令"日记一律 noindex 且不进 sitemap"，那是公理 A 的否决条款。
+ *   `/me/`    —— 个人中心下的私信、朋友等，全是私密面（`/me` 在表里，`/me/friends` 以前漏了）。
+ *   `/admin/` —— 后台。它靠 token 挡内容，但 URL 结构本身不该进索引。
+ */
+const NOINDEX_PREFIXES = [
+  { prefix: '/room/', label: '房间' },
+  { prefix: '/me/', label: '个人中心' },
+  { prefix: '/admin/', label: '管理后台' },
+];
+
 export function noindexMeta(p, req) {
-  const label = NOINDEX_TITLES[p];
+  let label = NOINDEX_TITLES[p];
+  if (!label) {
+    const hit = NOINDEX_PREFIXES.find((x) => p === x.prefix || p.startsWith(x.prefix));
+    label = hit?.label;
+  }
   if (!label) return null;
   return {
     title: `${label} · ${SITE_NAME}`,

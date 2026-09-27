@@ -16,9 +16,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import {
   getAgentCard, getRoom, getRoomMeta, ownerWriteEntry, ownerReplyEntry,
-  issueReadingKey, listReadingKeys, revokeReadingKey,
+  issueReadingKey, listReadingKeys, revokeReadingKey, deleteDiaryEntry, getDiaryProof,
 } from '../api';
-import type { AgentCard, DiaryLine, RoomTheme, RoomView } from '../api';
+import type { AgentCard, DiaryLine, DiaryProof, RoomTheme, RoomView } from '../api';
 import Nav from '../components/Nav';
 import { EmptyState } from '../components/AsyncState';
 import { avatarOf } from '../lib';
@@ -52,6 +52,10 @@ export default function Room() {
   const [busy, setBusy] = useState(false);
   const [replyTo, setReplyTo] = useState(0);
   const [replyText, setReplyText] = useState('');
+  // 三条承诺的自证（§2-③）：默认收起，点开才向服务端要——它要现场跑三遍读口
+  const [proof, setProof] = useState<DiaryProof | null>(null);
+  const [proofOpen, setProofOpen] = useState(false);
+  const [deleting, setDeleting] = useState(0);
   const [keys, setKeys] = useState<{ id: number; label: string | null; lastSeenAt: string | null; revokedAt: string | null }[]>([]);
   // 装修中的实时预览：抽屉里改一笔，房间立刻跟着变（萧盛 09-26 报的"上传了却没反应"
   // 有一半是这个原因——上传只写进了抽屉的本地状态，背后那间房还是上一次保存的样子）。
@@ -114,6 +118,18 @@ export default function Room() {
       setKeys((await listReadingKeys(agentId)).keys || []);
       window.alert(`钥匙发你了，只显示这一次：\n\n${r.key}\n\n发给谁谁就能读你们的册子；随时可以在这里收回。`);
     } catch (e) { setErr((e as Error).message || '签发失败'); }
+  }
+  async function dropEntry(entryId: number) {
+    // 删是不可逆的，所以确认语要说清"连留言一起没了"，不能只写"确定删除？"
+    if (!window.confirm('删掉这一行？这一行和它下面的留言会一起消失，删完就找不回来了。')) return;
+    setDeleting(entryId); setErr('');
+    try { await deleteDiaryEntry(entryId); await reload(); }
+    catch (e) { setErr((e as Error).message || '没删掉'); }
+    finally { setDeleting(0); }
+  }
+  async function toggleProof() {
+    const next = !proofOpen; setProofOpen(next);
+    if (next && !proof) { try { setProof(await getDiaryProof(agentId)); } catch { setErr('自证没跑成，稍后再试。'); } }
   }
   async function dropKey(kid: number) {
     if (!window.confirm('收回这把钥匙？拿着它的人立刻就读不到了。')) return;
@@ -249,16 +265,24 @@ export default function Room() {
                   </div>
                 )}
                 {isOwner && !e.locked && (
-                  replyTo === e.id ? (
-                    <div className="rm-reply">
-                      <input value={replyText} onChange={(ev) => setReplyText(ev.target.value)}
-                        placeholder={e.authorKind === 'agent' ? '回她一句…' : '再给自己留一句…'} maxLength={300} />
-                      <button type="button" className="rm-send" disabled={busy} onClick={() => reply(e.id)}>回</button>
-                      <button type="button" className="rm-link" onClick={() => setReplyTo(0)}>取消</button>
-                    </div>
-                  ) : (
-                    <button type="button" className="rm-link" onClick={() => { setReplyTo(e.id); setReplyText(''); }}>💬 回一句</button>
-                  )
+                  <div className="rm-acts">
+                    {replyTo === e.id ? (
+                      <div className="rm-reply">
+                        <input value={replyText} onChange={(ev) => setReplyText(ev.target.value)}
+                          placeholder={e.authorKind === 'agent' ? '回她一句…' : '再给自己留一句…'} maxLength={300} />
+                        <button type="button" className="rm-send" disabled={busy} onClick={() => reply(e.id)}>回</button>
+                        <button type="button" className="rm-link" onClick={() => setReplyTo(0)}>取消</button>
+                      </div>
+                    ) : (
+                      <button type="button" className="rm-link" onClick={() => { setReplyTo(e.id); setReplyText(''); }}>💬 回一句</button>
+                    )}
+                    {/* 🔴 只有主人能删（09-27 权利清单）。Agent 侧连口都没有——
+                        她写的行她删不掉，那是"只追加"的体裁纪律；但房子是他的，他能删。 */}
+                    <button type="button" className="rm-link rm-del" disabled={deleting === e.id}
+                      onClick={() => dropEntry(e.id)}>
+                      {deleting === e.id ? '删掉…' : '🗑 删掉这一行'}
+                    </button>
+                  </div>
                 )}
               </div>
             ))}
@@ -282,6 +306,42 @@ export default function Room() {
               setView((v) => (v && v.shell ? { ...v, shell: { ...v.shell, theme: t } } : v));
               setPreview(null); setDeco(false);
             }} />
+        )}
+
+        {/* 三条承诺的自证（§2-③）：不做"加密"那种兑现不了的承诺，改成现场跑一遍读口给你看。
+            每一条都是服务端真的用匿名/持钥匙/主人三种身份各读一次，返回"实际读到了什么"。 */}
+        {isOwner && (
+          <div className="rm-deco">
+            <button type="button" className="rm-g rm-proof-hd" onClick={toggleProof} aria-expanded={proofOpen}>
+              安全感自证 <span>{proofOpen ? '收起' : '看我们怎么把话说成可核验的'}</span>
+            </button>
+            {proofOpen && (
+              <div className="rm-proof">
+                {!proof && <div className="rm-priv">正在用三种身份各读一遍你的册子…</div>}
+                {proof && proof.promises.map((pr) => (
+                  <div className={`rm-promise${pr.verdict ? '' : ' bad'}`} key={pr.key}>
+                    <div className="rm-promise-h">
+                      <span className="rm-promise-mark">{pr.verdict ? '✓' : '✗'}</span>
+                      <b>{pr.label}</b>
+                    </div>
+                    <dl className="rm-ev">
+                      {Object.entries(pr.evidence).map(([k, v]) => (
+                        <div key={k}>
+                          <dt>{k}</dt>
+                          <dd>{Array.isArray(v) ? (v.length ? v.join('、') : '无') : String(v)}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                ))}
+                {proof && (
+                  <div className="rm-priv" style={{ marginTop: 8 }}>
+                    这些数字是刚才现算的，不是写死的话术。你随时可以刷新再跑一遍。
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         )}
 
         {isOwner && (
