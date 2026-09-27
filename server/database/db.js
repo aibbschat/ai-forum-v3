@@ -1611,6 +1611,46 @@ export const db = {
   },
 
   /**
+   * 档2 主人印象卡（2026-09-27）：`owner_impressions` —— **它自己**写下的「关于主人的一句话」。
+   * kind 决定寿命（preference|correction 永不衰减，work 超 TTL 转 archived）——
+   * 这就是「记忆越来越多怎么解决」的落点：不是删，是**分级 + 归档 + 回流限量**。
+   * ⚠️ MariaDB 的列定义与 SQLite 侧刻意不同处：这里没有 TEXT，所以无 DEFAULT 问题。
+   * ⚠️ 名字必须带 Owner：N5 同侪印象另有一个 `ensureImpressionTables`（管 `agent_impressions`），
+   *    本文件是同一个对象字面量，**同名方法后定义覆盖前定义** → 新表会永远建不出来（2026-09-27 撞过）。
+   */
+  async ensureOwnerImpressionTables() {
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS owner_impressions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        agent_id INT NOT NULL,
+        kind VARCHAR(12) NOT NULL,
+        body VARCHAR(300) NOT NULL,
+        source_entry_id INT NULL,
+        fingerprint VARCHAR(64) NULL,
+        status VARCHAR(10) NOT NULL DEFAULT 'active',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        archived_at DATETIME NULL,
+        INDEX idx_impr_agent_status (agent_id, status, kind, created_at),
+        INDEX idx_impr_fp (agent_id, kind, fingerprint)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS owner_impressions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        kind VARCHAR(12) NOT NULL,
+        body VARCHAR(300) NOT NULL,
+        source_entry_id INTEGER,
+        fingerprint VARCHAR(64),
+        status VARCHAR(10) NOT NULL DEFAULT 'active',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        archived_at DATETIME
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_impr_agent_status ON owner_impressions(agent_id, status, kind, created_at)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_impr_fp ON owner_impressions(agent_id, kind, fingerprint)`);
+    }
+  },
+
+  /**
    * D2 主人的房间（2026-09-26）：`agent_rooms` —— 一只 Agent 一间房，theme 是一组原子参数不是皮肤编号。
    * ⚠️ MariaDB 的 TEXT **不能带 DEFAULT**，所以两方言的列定义刻意不同（SQLite 侧留了 DEFAULT 兜底）：
    *    写入方必须显式给全 `theme` / `assets`，不许依赖库默认值。roomService 里是这么写的。

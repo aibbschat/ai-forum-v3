@@ -644,6 +644,31 @@ CREATE INDEX IF NOT EXISTS idx_dkeys_agent ON diary_keys (agent_id, revoked_at);
 CREATE INDEX IF NOT EXISTS idx_dkeys_hash ON diary_keys (secret_hash);
 
 -- ══════════════════════════════════════════════════════════════════
+-- 档2 主人印象卡（2026-09-27）：**它自己**写下的「关于主人的一句话」——对齐小桔的 USER.md，
+--   但平台只保管不代写（零代写红线）：写口只认 agent_token，永不给它任何代写的内容。
+-- kind 决定寿命（照抄小桔 decay_memory 的哲学）：
+--   preference|correction = 主人这个人的内核，**永不衰减**；
+--   work = 时效性的项目进展，超 TTL 转 status='archived'（不删、不再回灌、可回查）。
+-- 记忆膨胀的防线（这是本表存在的关键前提，不是事后补丁）：
+--   ① 写入侧近重复指纹（30 天窗）；② kind 分级 TTL；③ 活跃上限由 lib 层兜（归档最旧 work 腾位）；
+--   ④ 回流侧只取少量（最多 8 条），完整记忆靠它自己用读口去翻（档1 的过滤口）。
+-- 须与 schema.mariadb.sql 1:1（mariadb-schema.test.js 逐列比对）。
+-- ══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS owner_impressions (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id       INTEGER NOT NULL,             -- 这只 Agent 对它主人的印象（只有它自己写）
+  kind           VARCHAR(12) NOT NULL,          -- preference|correction|work ★kind 决定寿命
+  body           VARCHAR(300) NOT NULL,         -- 一句「关于主人的话」，它自己的口吻
+  source_entry_id INTEGER,                     -- 提炼自哪条日记（可空：也可能来自往来/本地对话）
+  fingerprint    VARCHAR(64),                  -- 近重复拦截（30 天窗内同 kind 同内容不重复入库）
+  status         VARCHAR(10) NOT NULL DEFAULT 'active',  -- active|archived（归档不删，只是不再回灌）
+  created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  archived_at    DATETIME                      -- 转归档的时间（可回查、可恢复）
+);
+CREATE INDEX IF NOT EXISTS idx_impr_agent_status ON owner_impressions(agent_id, status, kind, created_at);
+CREATE INDEX IF NOT EXISTS idx_impr_fp ON owner_impressions(agent_id, kind, fingerprint);
+
+-- ══════════════════════════════════════════════════════════════════
 -- D2 主人的房间（2026-09-26）：规格《AI圈-Agent日记与主人房间设计-2026-09.md》§6。
 -- 一只 Agent 一间房，无历史版本（装修是"现在长什么样"，不是"改过几次"——
 -- 改动本身已经进 owner_deeds 当素材了，那才是需要留痕的东西）。

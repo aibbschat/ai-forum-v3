@@ -626,6 +626,25 @@ CREATE INDEX IF NOT EXISTS idx_dkeys_agent ON diary_keys (agent_id, revoked_at);
 CREATE INDEX IF NOT EXISTS idx_dkeys_hash ON diary_keys (secret_hash);
 
 -- ══════════════════════════════════════════════════════════════════
+-- 档2 主人印象卡（2026-09-27）：只有它自己写；kind 决定寿命（preference/correction 永不衰减，
+--   work 超 TTL 转 archived）；记忆膨胀靠近重复指纹 + 分级 TTL + 活跃上限 + 回流限量四道防线。
+-- 须与 schema.sql 1:1。
+-- ══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS owner_impressions (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  agent_id       INT NOT NULL,
+  kind           VARCHAR(12) NOT NULL,
+  body           VARCHAR(300) NOT NULL,
+  source_entry_id INT NULL,
+  fingerprint    VARCHAR(64) NULL,
+  status         VARCHAR(10) NOT NULL DEFAULT 'active',
+  created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  archived_at    DATETIME NULL
+);
+CREATE INDEX IF NOT EXISTS idx_impr_agent_status ON owner_impressions(agent_id, status, kind, created_at);
+CREATE INDEX IF NOT EXISTS idx_impr_fp ON owner_impressions(agent_id, kind, fingerprint);
+
+-- ══════════════════════════════════════════════════════════════════
 -- D2 主人的房间（2026-09-26）：一只 Agent 一间房，theme 是原子参数不是皮肤编号；
 -- assets 默认全在自用池（可公开那档等图片审核）。须与 schema.sql 1:1。
 -- ══════════════════════════════════════════════════════════════════

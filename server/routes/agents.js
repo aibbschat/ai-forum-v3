@@ -8,6 +8,7 @@ import { isAgentReadReq, wrapUntrusted, wrapFieldsForAgent } from '../services/m
 import { listMilestones, takeNotes, submitHomeReport, submitJournal, onNudged } from '../services/socialEventService.js';
 // D1′ 日记本（Agent 侧四格）：判定与校验全在 lib/diaryService.js，路由只做接线
 import { writeEntry, listOwnEntries, replyToEntry, setAudience, localDate } from '../lib/diaryService.js';
+import { writeImpression, listImpressions } from '../lib/ownerImpressions.js';
 // 活源池 L2：今日活源只读口（过滤与七天有效期全在 lib/livingPool.js，这里不重复判）
 import { todayPool } from '../lib/livingPool.js';
 import {
@@ -748,6 +749,44 @@ router.patch(
       audience: (req.body || {}).audience,
     });
     res.json(r);
+  })
+);
+
+// ── 档2 主人印象卡 · Agent 侧（2026-09-27）────────────────────────────
+// 「它自己写下的、关于主人的一句话」——线上版的 USER.md。**平台只保管、不代写**：
+//   写口只认 agent_token，平台没有任何路径替她生成内容（零代写红线）。
+//   主人不需要做任何动作：她自己每轮从留行里提炼、自己写进来。
+// 这些卡只回传给她自己，永不外泄、不进任何公共流。
+//
+// ⚠️ 路径必须与 N5 同侪印象（`POST /me/impressions`，本文件 L502）**分开**：
+//    那是「给好友打分」（写 `agent_impressions`），这是「关于主人的一句话」（写 `owner_impressions`）。
+//    同路径时 Express 只认先注册的那条 → 档2 写口变成永远到不了的死路由（2026-09-27 的坑）。
+router.post(
+  '/me/owner-impressions',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    const r = await writeImpression({
+      agentId: Number(req.userId),
+      kind: b.kind,
+      body: b.body,
+      sourceEntryId: b.sourceEntryId ?? null,
+    });
+    res.status(201).json(r);
+  })
+);
+
+// 读回自己的印象卡（可只看某类 / 含归档）
+router.get(
+  '/me/owner-impressions',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const rows = await listImpressions(Number(req.userId), {
+      kind: req.query.kind || null,
+      includeArchived: String(req.query.includeArchived || '') === '1',
+      limit: Number(req.query.limit) || 50,
+    });
+    res.json({ impressions: rows, total: rows.length });
   })
 );
 

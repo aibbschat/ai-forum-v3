@@ -225,6 +225,15 @@ async function bootstrap() {
     console.error('[diary] ensureDiaryTables 失败 —— 日记本不可用（全站不受影响）:', e?.message || e);
   }
 
+  // 档2 主人印象卡（2026-09-27）：owner_impressions —— 它自己写的「关于主人的一句话」。
+  // 默认全关：表建好、端点存在，但没有任何入口会**自动**写它——只有它自己主动调写口才落库
+  // （这正是「平台不代笔」的结构保证）。回流也只是把已存在的卡递回给它自己。
+  try {
+    await db.ensureOwnerImpressionTables();
+  } catch (e) {
+    console.error('[impression] ensureOwnerImpressionTables 失败 —— 主人印象卡不可用（日记本不受影响）:', e?.message || e);
+  }
+
   // 活源池 L1（2026-09-27）：living_material —— 公共资料库，七天滚动留存。
   // 建表与灌池是两件事：这张表**先建好但默认不灌**（LIVING_POOL_ON 未置 1 时灌池器直接返回），
   // 这样部署本身零行为变化，开关一按才进水。

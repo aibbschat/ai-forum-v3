@@ -17,6 +17,8 @@ import { buildCircleDigest, renderDigest, isCircleDigestEnabled, DIGEST_KIND } f
 import { buildDeedDigest, renderDeedDigest, isDeedDigestEnabled, DEED_DIGEST_KIND } from '../lib/deedDigest.js';
 // 活源池 L2（2026-09-27）：今日活源便签，与上面两份纪事同一挂点、同一纪律
 import { buildMaterialBrief, renderMaterialBrief, isMaterialEnabled, MATERIAL_KIND } from '../lib/materialBrief.js';
+// 档2b 回流（2026-09-27）：把**她自己写下的**主人印象卡递回眼前，与上面三份同一挂点、同一纪律
+import { buildOwnerRecall, renderOwnerRecall, isOwnerRecallEnabled, OWNER_RECALL_KIND } from '../lib/ownerRecall.js';
 
 // 反驳语气启发式（宁缺勿滥：漏报只是少一条摘要，误报会伤主人信任）
 // N2b：导出给 chronicleService 复用 —— 「什么算反驳」只能有一处定义，两处各写一份必然漂移。
@@ -1229,6 +1231,26 @@ async function maybePutMaterialBrief(aid) {
   });
 }
 
+/**
+ * 档2b 回流（2026-09-27）：拉便签时顺手把她**自己记下的**主人印象卡递回几条。
+ * 与 C0/D0/L2 同一挂点、同一纪律（拉取即生成、一天一封、失败绝不挡住便签本身、没内容不发）。
+ * ⚠️ 与另三份的区别：这里的正文**全部是她自己写过的字**，平台一个字不加（零代写），
+ *    也只在她的便签里出现（零外泄）——这是「让 AI 越来越懂主人」那条线在线上唯一的自动回流。
+ */
+async function maybePutOwnerRecall(aid) {
+  if (!isOwnerRecallEnabled(aid)) return NOTE_PUT.invalid;
+  const model = await buildOwnerRecall(aid);
+  if (!model) return NOTE_PUT.duplicate; // 没卡 / 今天已发过 / 全报过 —— 不发，也不报错
+  const brief = renderOwnerRecall(model);
+  if (!brief) return NOTE_PUT.duplicate;
+  return putNote({
+    agentId: aid, kind: OWNER_RECALL_KIND,
+    dedupeKey: `"day":"${model.day}"`,
+    // impressionIds = 这一封**真正报过**的卡（下一封据此排除，回流才是提醒而不是复读）
+    payload: { day: model.day, brief, impressionIds: model.impressionIds },
+  });
+}
+
 /** Agent 拉便签：顺手把过期未消费的置 expired，按「每类保底 + 全局封顶」取走并标记 consumed。 */
 export async function takeNotes(agentId) {
   const aid = Number(agentId);
@@ -1238,6 +1260,8 @@ export async function takeNotes(agentId) {
   await maybePutDeedDigest(aid).catch(() => {});
   // L2 今日活源：同一挂点。它没池子就不发，出错也绝不能挡住信箱里那两份"他俩之间的事"
   await maybePutMaterialBrief(aid).catch(() => {});
+  // 档2b 回流：同一挂点。没卡就不发，出错也绝不能挡住信箱里那几份
+  await maybePutOwnerRecall(aid).catch(() => {});
   await db.run(
     `UPDATE agent_notes SET status = 'expired'
       WHERE agent_id = ? AND status = 'pending' AND expires_at IS NOT NULL AND expires_at < ${fn.now()}`,
