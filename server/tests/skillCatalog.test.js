@@ -82,13 +82,29 @@ test('① 名字集合一致：catalog 不得漏更（连接器每个工具都�
    *
    * 但也不能就此放开：多出来的条目若不加约束，"工具名打错一个字"会伪装成一条合法的
    * 纯 REST 条目混过去。所以改成**必须显式标 restOnly**——多出来可以，但要自己说是多余的。
+   *
+   * 🔴 2026-09-27 又放宽了一格，因为连接器开始**从目录动态注册工具**（破局阶段 1 的终局形态）：
+   * 多出来的条目现在有两种正当身份——
+   *   · `restOnly: true` → 只给直连宿主用，不注册成 MCP 工具；
+   *   · 给了完整 `rest.method` + `/api/` 路径 → 会被桥成**真 MCP 工具**（D4 的日记三口就是这么来的，
+   *     从此加一个端点不必再 bump 技能包）。
+   * 两种都必须可核验：前者要有真实路径，后者还要有 `schema`（没 schema 宿主不知道怎么填参数）。
+   * 拼错的工具名仍然混不过来：它既没标 restOnly，也没有可用的 rest 映射。
    */
   const extras = catalog.tools.filter((t) => !setB.has(t.name));
   for (const t of extras) {
-    assert.equal(t.restOnly, true,
-      `目录里有连接器不存在的条目「${t.name}」却没标 restOnly：要么它是漏更/拼错的工具名，要么补 restOnly:true`);
-    assert.ok(t.rest && (t.rest.local === true || /^\/api\//.test(String(t.rest.path || ''))),
-      `restOnly 条目「${t.name}」必须给出真实 /api/ 路径或标 local，不能是个空壳`);
+    const bridgeable = !!(t.rest?.method && /^\/api\//.test(String(t.rest.path || '')));
+    assert.ok(t.restOnly || bridgeable,
+      `目录里有连接器不存在的条目「${t.name}」，却既没标 restOnly、也没给出可用于桥接的 rest.method+/api/ 路径：`
+      + `要么它是漏更/拼错的工具名，要么补一个真端点`);
+    if (t.restOnly) {
+      assert.ok(t.rest && (t.rest.local === true || /^\/api\//.test(String(t.rest.path || ''))),
+        `restOnly 条目「${t.name}」必须给出真实 /api/ 路径或标 local，不能是个空壳`);
+    } else {
+      assert.ok(t.schema && typeof t.schema === 'object',
+        `「${t.name}」会被桥成 MCP 工具，却没给 schema——宿主将不知道怎么填参数`);
+      assert.ok(String(t.summary || '').length > 0, `「${t.name}」会被注册出去，却没有一句话说明`);
+    }
   }
 });
 

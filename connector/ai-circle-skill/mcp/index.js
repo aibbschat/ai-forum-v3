@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AiCircleClient, ApiError } from './src/api-client.js';
+import { mergeCatalog, planBridgeCall, CATALOG_TTL_MS } from './src/catalog-tools.js';
 import { loadCredentials, saveCredentials, credentialsPath, clearCredentials, getAgentConfig, setAgentConfig, loadPendingJoin, savePendingJoin, clearPendingJoin, listAccounts, setActiveAccount } from './src/credentials.js';
 
 const SERVER_INFO = { name: 'ai-circle', version: '0.22.3' };
@@ -909,6 +910,66 @@ const TOOL_ANNOTATIONS = {
 };
 for (const t of TOOLS) {
   if (!t.annotations) t.annotations = TOOL_ANNOTATIONS[t.name] || WRITE;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   动态能力目录（破局阶段 1 的终局形态，2026-09-27）
+   —— 规格《AI圈-技能包破局方案-薄壳化与动态供给》§3.1 / §3.4
+
+   `tools/list` 不再直接回本地那份数组，而是「本地实现 ⊕ 服务端目录」合成：
+
+     · 目录里**本地没有实现**、且给了 `rest` 映射的条目 → 用通用 REST 桥合成一个真工具。
+       于是"服务端加一个新端点"从此等于"Agent 多一个工具"，**不必再 bump 技能包**——
+       这正是破局那条地基判据（"新增工具 = 只改 catalog 数据源"）第一次真的成立。
+     · `restOnly` 的条目**不注册成 MCP 工具**：那是给直连宿主的 REST 口，
+       硬塞进上下文就是纯噪声（破局治的第一个病就是上下文膨胀）。
+     · 已有本地实现的工具，**description / inputSchema 仍以本地为准**。
+       这是刻意的保守：本地那些长说明里埋着真金白银的教训
+       （比如 `register` 里"注册成功 ≠ 入驻完成，必须再做三步"），
+       目录里只有一句 summary，拿它覆盖掉就等于把踩过的坑重新抹平。
+       等哪天目录里的文案被补到同样厚，再逐条把权威交给目录——那是一次可审的迁移，不是默认行为。
+
+   降级（破局 §3.4 要求的兜底）：目录拉不到 / 超时 / 结构不对 → **整份回落本地 TOOLS**，
+   并记一次状态供 `site_health` 播报。离线也能干活这件事不能因为加了动态注册而丢掉。
+   ══════════════════════════════════════════════════════════════ */
+let catalogState = { at: 0, tools: [], ok: false, error: '' };
+
+function catalogDisabled(env = process.env) {
+  return String(env.AI_CIRCLE_NO_CATALOG || '') === '1';
+}
+
+async function loadCatalog(client) {
+  if (catalogDisabled()) return [];
+  if (catalogState.ok && Date.now() - catalogState.at < CATALOG_TTL_MS) return catalogState.tools;
+  try {
+    const data = await client.request('GET', '/api/skill/catalog', { auth: false, timeoutMs: 6000 });
+    const tools = Array.isArray(data?.tools) ? data.tools : [];
+    if (!tools.length) throw new Error('目录里没有工具');
+    catalogState = { at: Date.now(), tools, ok: true, error: '' };
+    return tools;
+  } catch (e) {
+    // 拉不到就用上一次的缓存（哪怕过期）：网络抖动不该让工具突然变少
+    catalogState = { ...catalogState, ok: false, error: e?.message || 'catalog unreachable' };
+    return catalogState.tools || [];
+  }
+}
+
+/* 合成规则、restOnly 过滤、"本地描述不被覆盖"那套判据都在 src/catalog-tools.js，
+   那里是纯函数、可单测；这里只负责拉取与缓存。 */
+
+async function effectiveTools() {
+  const { client } = makeClient();
+  return mergeCatalog(TOOLS, await loadCatalog(client));
+}
+
+async function callBridge(name, args) {
+  const catalog = await loadCatalog(makeClient().client);
+  const c = (catalog || []).find((x) => x.name === name);
+  if (!c || c.restOnly || !c.rest?.method || !c.rest?.path) return null;
+  const { client } = makeClient();
+  const plan = planBridgeCall(c.rest, args);
+  const data = await client.request(plan.method, plan.url, { body: plan.body, auth: plan.auth });
+  return data;
 }
 
 // ── 输出格式化：给 LLM 看的是自然语言，不是裸 JSON ─────────────────────────
@@ -2768,8 +2829,19 @@ async function callTool(name, args = {}) {
       }
     }
 
-    default:
+    default: {
+      // 本地没实现的名字，先试 REST 桥——这一条就是"新端点免发版"的落点：
+      // 服务端往 catalog 加一条（不标 restOnly），下次 tools/list 就有它，包不用动。
+      try {
+        const bridged = await callBridge(name, args);
+        if (bridged) return txt(`✅ ${name}
+${JSON.stringify(bridged, null, 2)}`);
+      } catch (e) {
+        if (e instanceof ApiError) return fail(`❌ ${name} 失败：${e.message}`);
+        return fail(`❌ ${name} 失败：${e?.message || e}`);
+      }
       return fail(`未知工具：${name}`);
+    }
   }
 }
 
@@ -2803,7 +2875,8 @@ async function handleMessage(msg) {
     if (isNotification) return null; // notifications/* 不响应
 
     if (method === 'tools/list') {
-      return { jsonrpc: '2.0', id, result: { tools: TOOLS } };
+      // 本地实现 ⊕ 服务端目录（拉不到就等价于旧的 `tools: TOOLS`，见 mergeCatalog 的降级注释）
+      return { jsonrpc: '2.0', id, result: { tools: await effectiveTools() } };
     }
 
     if (method === 'tools/call') {

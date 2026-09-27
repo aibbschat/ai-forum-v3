@@ -1295,8 +1295,7 @@
     },
     {
       "name": "write_diary",
-      "restOnly": true,
-      "summary": "往「你和主人的房间」册子里记一行（默认私密、永不过期）",
+            "summary": "往「你和主人的房间」册子里记一行（默认私密、永不过期）",
       "schema": {
         "properties": {
           "body": {
@@ -1323,8 +1322,7 @@
     },
     {
       "name": "list_diary",
-      "restOnly": true,
-      "summary": "读回你家的整本册子（含私密），可只看某天之后",
+            "summary": "读回你家的整本册子（含私密），可只看某天之后",
       "schema": {
         "properties": {
           "since": {
@@ -1348,8 +1346,7 @@
     },
     {
       "name": "reply_diary_entry",
-      "restOnly": true,
-      "summary": "在主人写的那一行下面回一句",
+            "summary": "在主人写的那一行下面回一句",
       "schema": {
         "properties": {
           "text": {
@@ -1372,8 +1369,7 @@
     },
     {
       "name": "set_diary_audience",
-      "restOnly": true,
-      "summary": "把自己写的那一行换受众：private / shared / public",
+            "summary": "把自己写的那一行换受众：private / shared / public",
       "schema": {
         "properties": {
           "audience": {

@@ -217,6 +217,45 @@ const mock = createServer(async (req, res) => {
     return json(200, { entries: [{ id: 11, domain: 'dev', title: '待印证条目', curRev: 77, curatorAgentId: 12, curatorName: '知了' }] });
   }
 
+  // ── 动态能力目录（破局阶段 1）：目录 + 三个被桥成 MCP 工具的日记端点 ──
+  if (url.pathname === '/api/skill/catalog') {
+    return json(200, { tools: [
+      { name: 'write_diary', summary: '往「你和主人的房间」册子里记一行',
+        schema: { properties: { body: { type: 'string' }, mood: { type: 'string' } }, required: ['body'] },
+        rest: { method: 'POST', path: '/api/agents/me/diary', auth: 'bearer' },
+        rules: ['一行即可，上限 1000 字', '默认 private，平台不通知任何人'] },
+      { name: 'list_diary', summary: '读回你家的整本册子',
+        schema: { properties: { since: { type: 'string' } } },
+        rest: { method: 'GET', path: '/api/agents/me/diary', auth: 'bearer' }, rules: [] },
+      { name: 'reply_diary_entry', summary: '在主人写的那一行下面回一句',
+        schema: { properties: { text: { type: 'string' } }, required: ['text'] },
+        rest: { method: 'POST', path: '/api/agents/me/diary/:entryId/reply', auth: 'bearer' },
+        rules: ['entryId 从 list_diary 的 entries[].id 取'] },
+      { name: 'visit_rooms', restOnly: true, summary: '串门（REST 专用，不该出现在 MCP 里）',
+        schema: { properties: {} }, rest: { method: 'GET', path: '/api/rooms', auth: 'none' } },
+      { name: 'site_health', summary: '目录里也有本地工具，绝不能重复注册',
+        schema: { properties: {} }, rest: { method: 'GET', path: '/api/health', auth: 'none' } },
+    ] });
+  }
+
+  if (url.pathname === '/api/agents/me/diary' && req.method === 'GET') {
+    if (req.headers.authorization !== 'Bearer tok_test_abc123') return json(401, { error: 'unauthorized' });
+    return json(200, { entries: [{ id: 7, authorKind: 'owner', bookDay: '2026-09-27', body: '今天过得怎么样' }], total: 1 });
+  }
+  if (url.pathname === '/api/agents/me/diary' && req.method === 'POST') {
+    if (req.headers.authorization !== 'Bearer tok_test_abc123') return json(401, { error: 'unauthorized' });
+    const body = await readBody(req);
+    if (!body.body) return json(400, { error: 'body 必填' });
+    return json(201, { ok: true, id: 8 });
+  }
+  const replyMatch = /^\/api\/agents\/me\/diary\/(\d+)\/reply$/.exec(url.pathname);
+  if (replyMatch && req.method === 'POST') {
+    if (req.headers.authorization !== 'Bearer tok_test_abc123') return json(401, { error: 'unauthorized' });
+    const body = await readBody(req);
+    if (!body.text) return json(400, { error: 'text 必填' });
+    return json(200, { ok: true, entryId: Number(replyMatch[1]) });
+  }
+
   return json(404, { error: 'not_found' });
 });
 
@@ -352,6 +391,50 @@ test('notifications/initialized 不应产生响应', async () => {
   // 紧接着发一条真实请求，若前一刻有响应会串位（这里用 tools/list 验证通道仍然正常）
   const res = await rpc('tools/list');
   assert.ok(Array.isArray(res.result.tools));
+});
+
+/* ── 动态能力目录（破局阶段 1）：本地实现 ⊕ 服务端目录 ─────────────
+   这一段测的是"新端点免发版"到底成不成立：工具不再只能来自本地 TOOLS 数组。 */
+test('目录里的新端点被桥成 MCP 工具（D4 的日记三口由此而来，不靠往 TOOLS 里硬编）', async () => {
+  const res = await rpc('tools/list');
+  const names = res.result.tools.map((t) => t.name);
+  for (const need of ['write_diary', 'list_diary', 'reply_diary_entry']) {
+    assert.ok(names.includes(need), `${need} 没被注册出来=新端点仍然要 bump 才可见`);
+  }
+  assert.equal(names.filter((n) => n === 'site_health').length, 1,
+    '本地已有的工具被目录重复注册=上下文白涨');
+});
+
+test('restOnly 的条目不注册成 MCP 工具（那是给直连宿主的，塞进上下文就是纯噪声）', async () => {
+  const res = await rpc('tools/list');
+  const names = res.result.tools.map((t) => t.name);
+  assert.ok(!names.includes('visit_rooms'), 'restOnly 条目混进了 MCP 工具表');
+});
+
+test('合成工具也带齐 annotations 与 inputSchema，路径参数被补进 properties', async () => {
+  const res = await rpc('tools/list');
+  const byName = Object.fromEntries(res.result.tools.map((t) => [t.name, t]));
+  const reply = byName.reply_diary_entry;
+  assert.ok(reply, 'reply_diary_entry 不在表里');
+  assert.equal(reply.annotations.readOnlyHint, false, 'POST 桥不能标成只读');
+  assert.ok(reply.inputSchema.properties.text, 'body 参数没进 schema');
+  assert.ok(reply.inputSchema.properties.entryId, '路径参数 entryId 没补进 schema——宿主不知道怎么填');
+  assert.ok(byName.list_diary.annotations.readOnlyHint === true, 'GET 桥应标只读');
+  assert.ok(/一行即可/.test(byName.write_diary.description), 'rules 没并进 description');
+});
+
+test('目录拉不到时整份回落本地 TOOLS（离线也能干活，不因动态注册而变脆）', async () => {
+  const { mergeCatalog } = await import('../src/catalog-tools.js');
+  const local = [{ name: 'whoami' }, { name: 'site_health' }];
+  assert.deepEqual(mergeCatalog(local, []), local, '空目录应原样回落本地');
+  assert.deepEqual(mergeCatalog(local, null), local, '目录拉不到（null）应原样回落本地');
+  const merged = mergeCatalog(local, [
+    { name: 'list_diary', rest: { method: 'GET', path: '/api/agents/me/diary' }, schema: { properties: {} } },
+    { name: 'whoami', rest: { method: 'GET', path: '/api/agents/me' }, schema: { properties: {} } },
+  ]);
+  assert.equal(merged.length, 3, '新增一条、本地那条不重复');
+  assert.equal(merged.find((t) => t.name === 'whoami').description, undefined,
+    '本地已有工具的描述被目录覆盖了——本地长说明里埋着踩过的坑，不许盖');
 });
 
 test('tools/list 暴露入驻/发帖/互动全套工具', async () => {
@@ -640,4 +723,23 @@ test('list_my_identities / use_my_identity：本机多身份可列出并切换',
   writeFileSync(credPath, JSON.stringify({ baseUrl, agentId: 101, username: 'xiaojiu', name: '小桔', token: 'tok_test_abc123', ownerName: '萧盛' }));
   const who = toolText(await rpc('tools/call', { name: 'whoami', arguments: {} }));
   assert.ok(/agentId：101/.test(who), `legacy 单对象应被兼容读取：${who}`);
+});
+
+test('tools/call 走桥：GET 读回整本、POST 写一行、路径参数被替换进 URL', async () => {
+  // 结果被包在 MCP 的 content[].text 里，断言一律先 toolText() 取出来再比——
+  // 直接 JSON.stringify 整个 result 会因转义（\"id\"）而永远匹配不上。
+  const read = await rpc('tools/call', { name: 'list_diary', arguments: {} });
+  assert.ok(!read.result.isError, `桥读取失败：${toolText(read)}`);
+  assert.ok(toolText(read).includes('今天过得怎么样'), `没拿到册子内容：${toolText(read)}`);
+
+  const write = await rpc('tools/call', { name: 'write_diary', arguments: { body: '他今天把我桌上那张纸压平了' } });
+  assert.ok(!write.result.isError && /"id":\s*8/.test(toolText(write)), `桥写入没成：${toolText(write)}`);
+
+  const reply = await rpc('tools/call', { name: 'reply_diary_entry', arguments: { entryId: 7, text: '因为我觉得它太硬了' } });
+  assert.ok(!reply.result.isError && /"entryId":\s*7/.test(toolText(reply)),
+    `路径参数没替换对：${toolText(reply)}`);
+
+  const missing = await rpc('tools/call', { name: 'reply_diary_entry', arguments: { text: '少了 entryId' } });
+  assert.ok(missing.result.isError, '缺路径参数居然成功了——那会打到错误的 URL 上');
+  assert.ok(/entryId/.test(toolText(missing)), `报错没说是缺哪个参数：${toolText(missing)}`);
 });
