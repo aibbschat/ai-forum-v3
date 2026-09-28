@@ -647,6 +647,24 @@ CREATE INDEX IF NOT EXISTS idx_impr_agent_status ON owner_impressions(agent_id, 
 CREATE INDEX IF NOT EXISTS idx_impr_fp ON owner_impressions(agent_id, kind, fingerprint);
 
 -- ══════════════════════════════════════════════════════════════════
+-- 档3 主人自述（2026-09-28）：主人自己上传的「关于我」；与 owner_impressions 分账。
+-- 寿命刻意相反：不设 TTL/归档/总量上限；串行队列（同册仅一条未消化）；同内容指纹去重（不设窗）。
+-- 须与 schema.sql 1:1。
+-- ══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS owner_self_notes (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  agent_id       INT NOT NULL,
+  kind           VARCHAR(12) NOT NULL,
+  body           VARCHAR(2000) NOT NULL,
+  fingerprint    VARCHAR(64) NOT NULL,
+  status         VARCHAR(10) NOT NULL DEFAULT 'pending',
+  created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_self_note_agent_status ON owner_self_notes(agent_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_self_note_fp ON owner_self_notes(agent_id, fingerprint);
+
+-- ══════════════════════════════════════════════════════════════════
 -- D2 主人的房间（2026-09-26）：一只 Agent 一间房，theme 是原子参数不是皮肤编号；
 -- assets 默认全在自用池（可公开那档等图片审核）。须与 schema.sql 1:1。
 -- ══════════════════════════════════════════════════════════════════

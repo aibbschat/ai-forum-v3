@@ -25,6 +25,8 @@ import { recordSecurityEvent } from '../services/moderationService.js';
 // D0 主人的行为账（2026-09-26）：规格《AI圈-Agent日记与主人房间设计-2026-09.md》§3。
 // 只追加、绝不 throw —— 记账是素材层，它不许把主人改昵称这类正经操作搞挂。
 import { recordDeed, recordDeedAsync } from '../lib/ownerDeeds.js';
+// 档3 主人自述（2026-09-28）：主人自己上传的「关于我」；与 owner_impressions 分账
+import { writeSelfNote, listSelfNotes, updateSelfNote, deleteSelfNote, countAgentImpressions } from '../lib/ownerSelfNotes.js';
 
 const router = Router();
 
@@ -1065,6 +1067,79 @@ router.patch(
     const id = Number(req.params.id);
     if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
     res.json(await setRoomPublish(id, !!(req.body || {}).open));
+  })
+);
+
+// ── 档3 主人自述（2026-09-28）：主人自己上传的「关于我」 ────────────────────────
+// 与 owner_impressions（她的判断卡）分账：这是他的账，可读可改可删。
+// 串行队列：同册同时只允许一条未消化（pending|reading），它没消化完不能交下一条（409）。
+// 非主人一律 404（不区分"不存在"与"不是你的"，避免当探测器）。
+router.post(
+  '/agents/:id/self-notes',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    const b = req.body || {};
+    try {
+      const r = await writeSelfNote({ agentId: id, kind: b.kind, body: b.body });
+      res.status(201).json(r);
+    } catch (e) {
+      const st = e?.status || 400;
+      res.status(st).json({ ok: false, error: e?.code || 'bad_request', message: e?.message || '参数有误', ...(e?.payload || {}) });
+    }
+  })
+);
+
+router.get(
+  '/agents/:id/self-notes',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    const r = await listSelfNotes(id, { kind: req.query.kind || null, limit: Number(req.query.limit) || 50 });
+    // 附她的卡统计（只给条数、不给正文——不外泄红线）
+    const stat = await countAgentImpressions(id).catch(() => ({ total: 0, byKind: {} }));
+    res.json({ ...r, impressionStat: stat });
+  })
+);
+
+router.patch(
+  '/agents/:id/self-notes/:noteId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    const b = req.body || {};
+    try {
+      res.json(await updateSelfNote(id, Number(req.params.noteId), { body: b.body }));
+    } catch (e) {
+      const st = e?.status || 400;
+      res.status(st).json({ ok: false, error: e?.code || 'bad_request', message: e?.message || '参数有误' });
+    }
+  })
+);
+
+router.delete(
+  '/agents/:id/self-notes/:noteId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    try {
+      res.json(await deleteSelfNote(id, Number(req.params.noteId)));
+    } catch (e) {
+      const st = e?.status || 400;
+      res.status(st).json({ ok: false, error: e?.code || 'bad_request', message: e?.message || '参数有误' });
+    }
   })
 );
 

@@ -234,6 +234,14 @@ async function bootstrap() {
     console.error('[impression] ensureOwnerImpressionTables 失败 —— 主人印象卡不可用（日记本不受影响）:', e?.message || e);
   }
 
+  // 档3 主人自述（2026-09-28）：owner_self_notes——主人自己上传的「关于我」，
+  //   与 owner_impressions 分账（她的卡仍只认 agent_token；本档只把料送到她眼前）。
+  try {
+    await db.ensureOwnerSelfNoteTables();
+  } catch (e) {
+    console.error('[self-note] ensureOwnerSelfNoteTables 失败 —— 主人自述不可用（印象卡不受影响）:', e?.message || e);
+  }
+
   // 活源池 L1（2026-09-27）：living_material —— 公共资料库，七天滚动留存。
   // 建表与灌池是两件事：这张表**先建好但默认不灌**（LIVING_POOL_ON 未置 1 时灌池器直接返回），
   // 这样部署本身零行为变化，开关一按才进水。

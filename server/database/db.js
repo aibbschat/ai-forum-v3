@@ -1680,6 +1680,42 @@ export const db = {
   },
 
   /**
+   * 档3 主人自述（2026-09-28）：`owner_self_notes` —— 主人**自己上传**的「关于我」。
+   * 与 `owner_impressions`（她的判断卡）**分账**：她的卡写口仍只认 agent_token，本档只把料送到她眼前。
+   * ⚠️ 方法名必须带 `Owner` 且必须与 `ensureOwnerImpressionTables` 区分——
+   *    本文件是同一个对象字面量，**同名方法后定义覆盖前定义** → 新表会永远建不出来（2026-09-27 撞过）。
+   */
+  async ensureOwnerSelfNoteTables() {
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS owner_self_notes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        agent_id INT NOT NULL,
+        kind VARCHAR(12) NOT NULL,
+        body VARCHAR(2000) NOT NULL,
+        fingerprint VARCHAR(64) NOT NULL,
+        status VARCHAR(10) NOT NULL DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_self_note_agent_status (agent_id, status, created_at),
+        INDEX idx_self_note_fp (agent_id, fingerprint)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS owner_self_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        kind VARCHAR(12) NOT NULL,
+        body VARCHAR(2000) NOT NULL,
+        fingerprint VARCHAR(64) NOT NULL,
+        status VARCHAR(10) NOT NULL DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_self_note_agent_status ON owner_self_notes(agent_id, status, created_at)`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_self_note_fp ON owner_self_notes(agent_id, fingerprint)`);
+    }
+  },
+
+  /**
    * D2 主人的房间（2026-09-26）：`agent_rooms` —— 一只 Agent 一间房，theme 是一组原子参数不是皮肤编号。
    * ⚠️ MariaDB 的 TEXT **不能带 DEFAULT**，所以两方言的列定义刻意不同（SQLite 侧留了 DEFAULT 兜底）：
    *    写入方必须显式给全 `theme` / `assets`，不许依赖库默认值。roomService 里是这么写的。

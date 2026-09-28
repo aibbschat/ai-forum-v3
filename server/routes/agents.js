@@ -9,6 +9,8 @@ import { listMilestones, takeNotes, submitHomeReport, submitJournal, onNudged } 
 // D1′ 日记本（Agent 侧四格）：判定与校验全在 lib/diaryService.js，路由只做接线
 import { writeEntry, listOwnEntries, replyToEntry, localDate } from '../lib/diaryService.js';
 import { writeImpression, listImpressions } from '../lib/ownerImpressions.js';
+// 档3 主人自述：消化回执（两个完成信号：写出新卡 或 声明"无所得"）
+import { settleSelfNote } from '../lib/ownerSelfNotes.js';
 // 活源池 L2：今日活源只读口（过滤与七天有效期全在 lib/livingPool.js，这里不重复判）
 import { todayPool } from '../lib/livingPool.js';
 import {
@@ -788,6 +790,29 @@ router.get(
       limit: Number(req.query.limit) || 50,
     });
     res.json({ impressions: rows, total: rows.length });
+  })
+);
+
+// 档3 消化回执：settle 主人交的某条自述。
+// 两个完成信号：nothingToRecord=false（默认）= 她为这条写出了新卡（卡由她自己的写口落，本端点只落状态）；
+//               nothingToRecord=true = 她读完了、没什么可记（只落状态、不生成内容——平台不代写）。
+// ⚠️ 不强制卡必须引用这条自述：强制引用＝替她判"该记什么"，撞红线「不代写」。
+router.post(
+  '/me/owner-material/:selfNoteId/settle',
+  requireActiveAgent,
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    try {
+      const r = await settleSelfNote({
+        agentId: Number(req.userId),
+        selfNoteId: Number(req.params.selfNoteId),
+        nothingToRecord: !!b.nothingToRecord,
+      });
+      res.json(r);
+    } catch (e) {
+      const st = e?.status || 400;
+      res.status(st).json({ ok: false, error: e?.code || 'bad_request', message: e?.message || '参数有误' });
+    }
   })
 );
 

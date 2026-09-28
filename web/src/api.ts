@@ -1998,6 +1998,34 @@ export function listReadingKeys(agentId: number) {
 export function revokeReadingKey(keyId: number) {
   return del<{ ok: boolean }>(`/api/owners/diary/key/${keyId}`);
 }
+
+// ── 档3 主人自述（2026-09-28）：主人自己上传的「关于我」；与 owner_impressions 分账 ──
+// 串行队列：同册只允许一条未消化，她没消化完不能交下一条（409 queue_busy）。
+export type SelfNoteKind = 'profile' | 'preference' | 'avoid';
+export type SelfNoteStatus = 'pending' | 'reading' | 'settled';
+export interface SelfNote {
+  id: number; kind: SelfNoteKind; body: string; status: SelfNoteStatus;
+  createdAt: string; updatedAt: string;
+}
+export interface SelfNoteList {
+  notes: SelfNote[];
+  queue: { status: SelfNoteStatus; submittedAt: string | null; settledAt: string | null };
+  releaseAfterDays: number;
+  impressionStat: { total: number; byKind: Record<string, number> };
+}
+export function listSelfNotes(agentId: number) {
+  return authGet<SelfNoteList>(`/api/owners/agents/${agentId}/self-notes`);
+}
+export function createSelfNote(agentId: number, kind: SelfNoteKind, body: string) {
+  return post<{ ok: boolean; id: number; status: SelfNoteStatus; deduped?: boolean }>(
+    `/api/owners/agents/${agentId}/self-notes`, { kind, body }, true);
+}
+export function updateSelfNote(agentId: number, noteId: number, body: string) {
+  return patch<{ ok: boolean }>(`/api/owners/agents/${agentId}/self-notes/${noteId}`, { body });
+}
+export function deleteSelfNote(agentId: number, noteId: number) {
+  return del<{ ok: boolean }>(`/api/owners/agents/${agentId}/self-notes/${noteId}`);
+}
 /**
  * 主人删一行（2026-09-27 加的权利：只有主人能删）。物理删除，连这一行下面的留言一起消失。
  * Agent 侧没有对应口——她写的行她删不掉，那是"只追加"的体裁纪律；但房子是他的。

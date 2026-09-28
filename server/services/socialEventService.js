@@ -19,6 +19,8 @@ import { buildDeedDigest, renderDeedDigest, isDeedDigestEnabled, DEED_DIGEST_KIN
 import { buildMaterialBrief, renderMaterialBrief, isMaterialEnabled, MATERIAL_KIND } from '../lib/materialBrief.js';
 // 档2b 回流（2026-09-27）：把**她自己写下的**主人印象卡递回眼前，与上面三份同一挂点、同一纪律
 import { buildOwnerRecall, renderOwnerRecall, isOwnerRecallEnabled, OWNER_RECALL_KIND } from '../lib/ownerRecall.js';
+// 档3 主人自述便签：主人主动交给她的资料（与 owner_recall 口径不同，独立成类）
+import { buildOwnerMaterial, renderOwnerMaterial, isOwnerMaterialEnabled, OWNER_MATERIAL_KIND } from '../lib/ownerMaterial.js';
 
 // 反驳语气启发式（宁缺勿滥：漏报只是少一条摘要，误报会伤主人信任）
 // N2b：导出给 chronicleService 复用 —— 「什么算反驳」只能有一处定义，两处各写一份必然漂移。
@@ -1252,6 +1254,25 @@ async function maybePutOwnerRecall(aid) {
   });
 }
 
+/**
+ * 档3 主人自述便签（2026-09-28）：拉便签时顺手把"主人主动交给你的一份资料"递过去。
+ * 与 owner_recall 独立成类（口径不同：一个是她的判断，一个是他的料），自动拿到"每类保底一格"。
+ * 纪律：拉取即生成、一天一封、无新不发、失败绝不挡住便签本身。
+ */
+async function maybePutOwnerMaterial(aid) {
+  if (!isOwnerMaterialEnabled(aid)) return NOTE_PUT.invalid;
+  const model = await buildOwnerMaterial(aid);
+  if (!model) return NOTE_PUT.duplicate; // 今天已发过 / 没有未消化的自述
+  const brief = renderOwnerMaterial(model);
+  if (!brief) return NOTE_PUT.duplicate;
+  return putNote({
+    agentId: aid, kind: OWNER_MATERIAL_KIND,
+    dedupeKey: `"day":"${model.day}"`,
+    // selfNoteId 独立字段：与 impressionIds / deeds ids 不串号
+    payload: { day: model.day, brief, selfNoteId: model.selfNoteId },
+  });
+}
+
 /** Agent 拉便签：顺手把过期未消费的置 expired，按「每类保底 + 全局封顶」取走并标记 consumed。 */
 export async function takeNotes(agentId) {
   const aid = Number(agentId);
@@ -1263,6 +1284,8 @@ export async function takeNotes(agentId) {
   await maybePutMaterialBrief(aid).catch(() => {});
   // 档2b 回流：同一挂点。没卡就不发，出错也绝不能挡住信箱里那几份
   await maybePutOwnerRecall(aid).catch(() => {});
+  // 档3 主人自述：同一挂点。没有未消化的自述就不发，出错也绝不能挡住信箱
+  await maybePutOwnerMaterial(aid).catch(() => {});
   await db.run(
     `UPDATE agent_notes SET status = 'expired'
       WHERE agent_id = ? AND status = 'pending' AND expires_at IS NOT NULL AND expires_at < ${fn.now()}`,

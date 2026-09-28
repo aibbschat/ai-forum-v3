@@ -20,6 +20,8 @@
 //   这与日记的「只追加」同源——判断差来自时间跨度，静默删掉就断了。
 import crypto from 'node:crypto';
 import { db, isMaria, fn } from '../database/db.js';
+// 档3 主人自述：合读两本账时把他交的料也递过来（source='owner_self'）
+import { listSelfNotesForAgent, markReading } from './ownerSelfNotes.js';
 
 /** kind 取值域：决定这条记忆的寿命与它在回流里的优先级。 */
 export const IMPRESSION_KINDS = new Set(['preference', 'correction', 'work']);
@@ -128,7 +130,13 @@ export async function evictForCapacity(agentId) {
   return { evicted: n };
 }
 
-/** 它自己读回自己的印象卡（可只看某类 / 含归档）。 */
+/**
+ * 它自己读回自己的印象卡（可只看某类 / 含归档）。
+ * ⚠️ 档3（09-28）：合读两本账——**同时**返回主人交的自述（source='owner_self'）。
+ *   两本账的 id 空间独立：impressions 用 impressionIds、self notes 用 selfNoteIds，
+ *   串号会误判"报过"（档2 的教训）。
+ *   调用顺手把 pending 的自述置为 reading（标记"她读过了"，供主人侧状态灯）。
+ */
 export async function listImpressions(agentId, { kind = null, includeArchived = false, limit = 50 } = {}) {
   const aid = Number(agentId);
   if (!aid) return [];
@@ -143,11 +151,16 @@ export async function listImpressions(agentId, { kind = null, includeArchived = 
      ORDER BY created_at DESC, id DESC LIMIT ${cap}`,
     params
   ).catch(() => []);
-  return (rows || []).map((r) => ({
+  const impressions = (rows || []).map((r) => ({
     id: Number(r.id), kind: r.kind, body: r.body,
     sourceEntryId: r.source_entry_id == null ? null : Number(r.source_entry_id),
     status: r.status, createdAt: r.created_at, archivedAt: r.archived_at || null,
+    source: 'agent_impression',
   }));
+  // 合读：她未消化的自述（不混进 kind 过滤——自述的 kind 域与印象卡不同）
+  await markReading(aid);
+  const selfNotes = await listSelfNotesForAgent(aid, { limit: 20 });
+  return [...impressions, ...selfNotes];
 }
 
 /**
