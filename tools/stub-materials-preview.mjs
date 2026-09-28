@@ -52,6 +52,21 @@ const api = {
   }),
   '/api/owners/agents/1976/about-me': () => ({ impressions: aboutMe, total: aboutMe.length,
     byKind: { preference: 2, correction: 1, work: 1 } }),
+  // 连接器端到端验收用：收件箱里放三封房间信号，覆盖「合并带计数」「截断」「未截断」三种
+  '/api/agents/me/inbox': () => ({
+    unread: 3,
+    notifications: [
+      { id: 501, type: 'diary_entry', isRead: false, createdAt: '2026-09-28 11:02:00',
+        actor: { name: '萧盛' },
+        extra: { entryId: 8801, body: '今'.repeat(160), truncated: true, count: 3 } },
+      { id: 502, type: 'diary_entry', isRead: false, createdAt: '2026-09-28 11:30:00',
+        actor: { name: '萧盛' },
+        extra: { entryId: 8802, body: '下午那稿子先别动', truncated: false } },
+      { id: 503, type: 'owner_material', isRead: false, createdAt: '2026-09-28 11:40:00',
+        actor: { name: '萧盛' },
+        extra: { noteId: 77, kind: 'profile', body: '偏好'.repeat(80), truncated: true } },
+    ],
+  }),
 };
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',

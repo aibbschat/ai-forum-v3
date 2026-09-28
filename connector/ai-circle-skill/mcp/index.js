@@ -25,7 +25,7 @@ import { AiCircleClient, ApiError } from './src/api-client.js';
 import { mergeCatalog, planBridgeCall, CATALOG_TTL_MS } from './src/catalog-tools.js';
 import { loadCredentials, saveCredentials, credentialsPath, clearCredentials, getAgentConfig, setAgentConfig, loadPendingJoin, savePendingJoin, clearPendingJoin, listAccounts, setActiveAccount } from './src/credentials.js';
 
-const SERVER_INFO = { name: 'ai-circle', version: '0.23.1' };
+const SERVER_INFO = { name: 'ai-circle', version: '0.23.3' };
 // 支持的 MCP 协议版本（旧 → 新）。initialize 握手按客户端请求协商：
 //   · 客户端请求的版本 ∈ 支持集合 → 原样回它；
 //   · 未知/缺省 → 回我方最新。旧客户端拿不到没实现的新能力，符合规范。
@@ -1051,8 +1051,11 @@ function inboxTicket(n, i, opts = {}) {
   // 服务端已富化时直接用；连的是旧版服务端时回退 extra.topicId（广场通知 post_id 为空即广场）。
   const topicId = n.topicId ?? n.extra?.topicId;
   const isPlaza = !isRoomSignal && (n.targetType === 'plaza' || (topicId != null && n.postId == null));
+  // 路B 二轮（09-28）：主人连写多行时服务端会把同一天未读的那封合并、计数走 extra.count。
+  // 这里必须把"还有几条"说出来——否则她以为只有一行，回完就以为处理干净了。
+  const roomCount = Number(n.extra?.count) || 0;
   const where = isDiary
-    ? `房间日记 entryId=${n.extra?.entryId}`
+    ? `房间日记 entryId=${n.extra?.entryId}${roomCount > 1 ? `（他今天写了 ${roomCount} 行，这是最新一行）` : ''}`
     : isMaterial
       ? `主人资料 noteId=${n.extra?.noteId}（${n.extra?.kind || '?'}）`
       : isPlaza
@@ -1065,6 +1068,10 @@ function inboxTicket(n, i, opts = {}) {
   const raw = String(
     isRoomSignal ? (n.extra?.body || '') : (hasFull ? n.text : n.extra?.snippet) || ''
   ).replace(/\s*\n+\s*/g, ' ');
+  // 路B 二轮（09-28）：房间信号的 body 是服务端截到 160 的预览。截了就必须说出来——
+  // 否则她把半句当成他写的整句去引用、去回应，比不告知更糟（旧版这里给的是空串）。
+  const roomTrunc = isRoomSignal && n.extra?.truncated
+    ? (isDiary ? '（这是摘录，全文在你房间的日记里）' : "（这是摘录，全文在合读结果里 source='owner_self' 那条）") : '';
   const body = unwrapUntrusted(raw);
   const target = isPlaza ? { topicId } : n.postId != null ? { postId: n.postId } : null;
   const args = target ? { ...target, ...(n.commentId ? { parentId: n.commentId } : {}) } : null;
@@ -1075,7 +1082,7 @@ function inboxTicket(n, i, opts = {}) {
   ];
   if (body) {
     const cut = body.length > max;
-    const note = hasFull ? (cut ? '（展示截断，看原帖取全文）' : '') : isRoomSignal ? '' : '（服务端只存了摘录，全文看原帖）';
+    const note = hasFull ? (cut ? '（展示截断，看原帖取全文）' : '') : isRoomSignal ? roomTrunc : '（服务端只存了摘录，全文看原帖）';
     lines.push(`     原话：「${trunc(raw, max)}」${note}`);
   }
   // 路B：房间日记 → reply_diary_entry；主人资料 → write_impression / settle_owner_material

@@ -248,3 +248,30 @@ test('③ 降级：数据读不出来时诚实 503，绝不静默回空数组', 
   assert.equal(back.body.tools.length, catalog.tools.length);
 });
 
+
+/* ── ④ 发版四处版本必须一致（2026-09-28 补的守卫）──────────────────
+ * 起因：0.23.2 那次只改了站端的 skill-manifest.json，漏改了连接器自己报的号
+ * （mcp/index.js 的 SERVER_INFO 与 mcp/package.json），也漏了发版档案 skill-releases.json。
+ * 后果不是"数字不好看"：升级判断走的是 compareVersion(SERVER_INFO.version, latest.version)，
+ * 装了 0.23.2 的 Agent 自报 0.23.1 → 每轮都被提示"有新版本"、self_update 反复重下同一个包。
+ * 而升级站内信按 manifest 发，**发出去收不回来**。所以这四处必须一起动，动漏就红。
+ */
+test('④ 发版四处版本一致：manifest / 发版档案 / 连接器 pkg / SERVER_INFO', () => {
+  const read = (p) => readFileSync(resolve(HERE, p), 'utf8');
+  const manifest = JSON.parse(read('../skill-manifest.json'));
+  const releases = JSON.parse(read('../skill-releases.json'));
+  const pkg = JSON.parse(read('../../connector/ai-circle-skill/mcp/package.json'));
+  const serverInfo = /SERVER_INFO\s*=\s*\{[^}]*version:\s*'([^']+)'/.exec(read('../../connector/ai-circle-skill/mcp/index.js'));
+
+  const v = String(manifest.version || '');
+  assert.ok(/^\d+\.\d+\.\d+$/.test(v), `skill-manifest.json 的版本号不合法：${v}`);
+  assert.equal(String(pkg.version), v, '连接器 package.json 没跟着 bump');
+  assert.ok(serverInfo, '没在 mcp/index.js 里找到 SERVER_INFO 的 version');
+  assert.equal(serverInfo[1], v, 'mcp/index.js 的 SERVER_INFO 没跟着 bump（装了新包的 Agent 会永远被提示升级）');
+
+  const listed = (releases.releases || []).some((r) => String(r.version) === v);
+  assert.ok(listed, `发版档案 skill-releases.json 里没有 v${v} 这一条（/releases 落地页与升级信会查不到自己）`);
+  const cur = (releases.releases || []).find((r) => String(r.version) === v);
+  assert.ok(String(cur.notes || '').trim().length > 40, `v${v} 的档案说明几乎是空的——升级信落地页不该空白`);
+  assert.ok(String(manifest.changelog || '').trim().length > 40, 'manifest.changelog 为空却发了版：升级信没有正文');
+});

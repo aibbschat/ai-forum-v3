@@ -22,7 +22,7 @@ import {
   createOutboxEntry, listOutboxForOwner, cancelOutboxEntry,
 } from '../services/courierService.js';
 import { recordSecurityEvent } from '../services/moderationService.js';
-import { createNotification } from '../services/notificationService.js';
+import { createNotification, notifyRoomSignal } from '../services/notificationService.js';
 // D0 主人的行为账（2026-09-26）：规格《AI圈-Agent日记与主人房间设计-2026-09.md》§3。
 // 只追加、绝不 throw —— 记账是素材层，它不许把主人改昵称这类正经操作搞挂。
 import { recordDeed, recordDeedAsync } from '../lib/ownerDeeds.js';
@@ -940,12 +940,22 @@ router.post(
       agentId: id, authorKind: 'owner', authorId: Number(ownerId),
       body: b.body ?? b.text, mood: b.mood ?? null,
     });
-    // 路B（09-28）：主人写了新行 → 通知 Agent 去接话。fire-and-forget，不阻塞。
+    // 路B（09-28）：主人写了新行 → 通知 Agent 去接话。
+    // ⚠️ 必须**推迟到微任务里再调**：`.catch(()=>{})` 只兜得住 reject，兜不住同步抛
+    //   （函数没导入、参数计算炸了都会同步抛）——那样主人写一行日记会变成 500。
+    //   通知是素材层，不许把正经写入搞挂（与 recordDeed 同一条纪律）。
     // extra 带 entryId + 截断预览，Agent 调 reply_diary_entry(entryId, text) 回。
-    createNotification({
+    // ⚠️ 预览截了就必须**明说截了**：她看到的 160 字若不带标记，会被当成原话整句引用回去。
+    // 路B 收敛（09-28 二轮）：走 notifyRoomSignal——同一天她还没读过的，合并成一封带计数，不刷屏。
+    const fullLine = String((b.body ?? b.text) || '');
+    const previewLine = fullLine.slice(0, 160);
+    Promise.resolve().then(() => notifyRoomSignal({
       userId: id, actorId: Number(ownerId), type: 'diary_entry',
-      extra: { entryId: r.id, body: String((b.body ?? b.text) || '').slice(0, 160) },
-    }).catch(() => {});
+      extra: {
+        entryId: r.id, body: previewLine,
+        truncated: fullLine.length > previewLine.length,
+      },
+    })).catch(() => {});
     res.status(201).json(r);
   })
 );
@@ -1096,10 +1106,15 @@ router.post(
       const r = await writeSelfNote({ agentId: id, kind: b.kind, body: b.body });
       // 路B（09-28）：主人交了一条资料 → 通知 Agent 去消化。fire-and-forget。
       // Agent 读完写印象卡（write_impression）或 settle_owner_material 声明无所得。
-      createNotification({
+      // ⚠️ 这条**不走 notifyRoomSignal**：每份料有自己的 noteId，合并会把另一份藏起来
+      //   （读侧缺口）。而且串行队列本来就限死了同册只有一条未消化，刷不出量。
+      //   预览截了要标出来，理由同日记那条。
+      const fullNote = String(b.body || '');
+      const previewNote = fullNote.slice(0, 160);
+      Promise.resolve().then(() => createNotification({
         userId: id, actorId: Number(ownerId), type: 'owner_material',
-        extra: { noteId: r.id, kind: b.kind, body: String(b.body || '').slice(0, 160) },
-      }).catch(() => {});
+        extra: { noteId: r.id, kind: b.kind, body: previewNote, truncated: fullNote.length > previewNote.length },
+      })).catch(() => {});
       res.status(201).json(r);
     } catch (e) {
       const st = e?.status || 400;

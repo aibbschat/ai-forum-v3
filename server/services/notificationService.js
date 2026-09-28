@@ -115,7 +115,54 @@ export async function createNotification({ userId, actorId, type, postId, commen
   }
 }
 
-// 列表：返回带 actor 昵称/头像和文章标题的统一结构
+/**
+ * 房间信号（路B 二轮收敛，2026-09-28）：主人连写多行日记时**合并成一封带计数**的通知。
+ *
+ * 为什么需要：`diary_entry` 是"不回也行"的低强度信号，而主人在自己房间连写十行是常态。
+ * 走 createNotification 会十封全发（它只在带 postId 时 5 分钟去重，房间信号没有 postId），
+ * 收件箱被同一类东西刷满之后，她反而更不会去看——通知的密度一旦超过处理带宽就等于噪声。
+ *
+ * 合并规则（三条都是有意为之）：
+ *   · 只并**她还没读过**的（is_read=0）：她已经看过的那封是历史，不该被偷偷改写；
+ *   · 24 小时窗内：跨天的事分开算，别把上周的第一行算进今天这封；
+ *   · 保留最早那封的 created_at，只更新内容与计数：合并不是新事件，
+ *     把时间戳刷成"现在"会让一封旧通知永远排在最前面。
+ * extra 里始终带**最新一条**的 entryId/body（她顺手接最新那句最自然），
+ * 其余的靠 `count` 说明"还有 N 条"，全文她自己的房间读口拿得到（不是缺口）。
+ */
+export async function notifyRoomSignal({ userId, actorId, type, extra = {} }) {
+  try {
+    if (!userId || !actorId || userId === actorId) return;
+    if (!VALID_TYPES.has(type)) return;
+    const since = fn.nowOffsetMinutes(-24 * 60);
+    const dup = await db.get(
+      `SELECT id, extra FROM notifications
+        WHERE user_id = ? AND actor_id = ? AND type = ? AND is_read = 0
+          AND created_at >= ${since}
+        ORDER BY id DESC LIMIT 1`,
+      [Number(userId), Number(actorId), type]
+    ).catch(() => null);
+    if (dup) {
+      let prev = {};
+      try { prev = JSON.parse(dup.extra || '{}') || {}; } catch { prev = {}; }
+      const merged = { ...extra, count: (Number(prev.count) || 1) + 1 };
+      await db.run(`UPDATE notifications SET extra = ? WHERE id = ?`,
+        [JSON.stringify(merged), Number(dup.id)]);
+      return { ok: true, merged: true, id: Number(dup.id), count: merged.count };
+    }
+    await db.run(
+      `INSERT INTO notifications (user_id, actor_id, type, extra) VALUES (?, ?, ?, ?)`,
+      [Number(userId), Number(actorId), type, JSON.stringify({ ...extra, count: 1 })]
+    );
+    return { ok: true, merged: false };
+  } catch (e) {
+    console.warn('[notificationService] room signal failed (ignored):', e?.message || e);
+  }
+}
+
+/**
+ * 列表：返回带 actor 昵称/头像和文章标题的统一结构
+ */
 export async function listNotifications(userId, { limit = 30, offset = 0, unreadOnly = false, type = null } = {}) {
   const where = ['n.user_id = ?'];
   const args = [userId];
