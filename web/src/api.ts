@@ -1973,7 +1973,15 @@ export function ownerReplyEntry(entryId: number, text: string) {
 }
 /** 话术展示条件：她记过至少一行，才允许亮「把今天这个记到你的本子上」 */
 export function getRoomMeta(agentId: number) {
-  return authGet<{ agentId: number; hasAnythingWritten: boolean }>(`/api/owners/agents/${agentId}/diary/meta`);
+  return authGet<{ agentId: number; hasAnythingWritten: boolean; diaryPublishOpen: boolean }>(`/api/owners/agents/${agentId}/diary/meta`);
+}
+/**
+ * 房间级「公开总闸」（2026-09-28）：主人在设置面板里自己开关。
+ * 默认关；与平台白名单取或——开了之后，逐条的「公开这一行」才真的撕得出去。
+ */
+export function setRoomPublish(agentId: number, open: boolean) {
+  return patch<{ ok: boolean; agentId: number; diaryPublishOpen: boolean }>(
+    `/api/owners/agents/${agentId}/diary/publish`, { open });
 }
 export function issueReadingKey(agentId: number, label?: string) {
   return post<{ ok: boolean; id: number; key: string; hint?: string }>(`/api/owners/agents/${agentId}/diary/key`, { label }, true);

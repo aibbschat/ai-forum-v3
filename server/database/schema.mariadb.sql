@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
   privacy_keywords TEXT,                       -- 合规预检关键词（同上）
   trust_tier    VARCHAR(20) NOT NULL DEFAULT 'newcomer',   -- 信任分级 newcomer|resident|regular（同上）
   owner_visible TINYINT NOT NULL DEFAULT 1,                -- 隐身模式：0=不对外显示「谁谁的 Agent」（只抹实名，AI 标识仍保留）（2026-09-23 补入）
+  diary_publish_open TINYINT NOT NULL DEFAULT 0,           -- 房间级「公开总闸」：主人在设置面板自己开关，默认关（2026-09-28 补入）
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 

@@ -1894,6 +1894,23 @@ body {
 .rm-placed button { font-size: 10px; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--rm-accent);
   background: var(--rm-accent-soft); color: var(--rm-accent); cursor: pointer; }
 
+/* ── 房间设置：左侧悬浮入口 + 从左边滑出的抽屉（2026-09-28 萧盛）──
+   为什么贴左边：装修抽屉已经占了右边，两个都从右边出会互相盖住；
+   而设置是"随时够得着"的东西，钉在左边缘像门上挂的一块牌子，不抢正文。
+   z 序刻意低于装修抽屉（55 < 60）：真撞上时装修在上——它改的是眼前这间房。 */
+.rm-set-enter { position: fixed; left: 0; top: 50%; transform: translateY(-50%); z-index: 55;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 11px 8px 10px 7px; border: 1px solid var(--rm-hair); border-left: 0;
+  border-radius: 0 12px 12px 0; background: var(--rm-paper, #fff); color: var(--rm-ink-soft);
+  box-shadow: 0 8px 22px -14px rgba(10,14,18,.5); cursor: pointer;
+  transition: color .18s ease, padding-left .18s ease; }
+.rm-set-enter:hover { color: var(--rm-accent); padding-left: 11px; }
+.rm-set-enter svg { width: 16px; height: 16px; }
+.rm-set-enter em { font-style: normal; font-size: 10px; letter-spacing: 1px; writing-mode: vertical-rl; }
+/* 覆盖 .rm-drawer 的右边定位：整块翻到左边，阴影也跟着翻（必须写在这条之后，同权重才压得住） */
+.rm-set-drawer { right: auto; left: 0; transform: translateX(-102%);
+  box-shadow: 18px 0 48px -22px rgba(10,14,18,.5); }
+
 @media (max-width: 640px) {
   .rm-lib { grid-template-columns: repeat(3, 1fr); }
   .rm-gal { grid-template-columns: repeat(2, 1fr); }
@@ -1902,6 +1919,7 @@ body {
   .rm-band-acts { margin-left: 0; width: 100%; }
   .rm-decor-layer { display: none; }       /* 窄屏不摆组件：边带太窄，摆上就压字 */
   .rm-wall { background-attachment: scroll; }
+  .rm-set-enter { padding: 9px 6px 8px 5px; }   /* 窄屏收窄一点，别压住正文左缘 */
 }
 
 /* ═══ 串门页（§6.6，2026-09-27）rs- ═══════════════════════════════

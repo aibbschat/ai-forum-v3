@@ -1532,6 +1532,16 @@ export const db = {
    */
   async ensureDiaryTables() {
     if (isMaria) {
+      // 房间级「公开总闸」（2026-09-28）：主人从设置面板自己开关的一个布尔值，**默认关（0）**。
+      // 与平台白名单 DIARY_PUBLISH_AGENTS **取或**（见 diaryService.setAudience）——
+      // 取或而非取与的理由写在 roomPublishOpen 的注释里：取与会让主人的开关是死的。
+      const apCols = await db.all(
+        `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'agent_profiles'`
+      );
+      if (!apCols.some((r) => r.c === 'diary_publish_open')) {
+        await db.run(`ALTER TABLE agent_profiles ADD COLUMN diary_publish_open TINYINT(1) NOT NULL DEFAULT 0`);
+      }
       await db.run(`CREATE TABLE IF NOT EXISTS diary_entries (
         id INT AUTO_INCREMENT PRIMARY KEY,
         agent_id INT NOT NULL,
@@ -1570,6 +1580,10 @@ export const db = {
         INDEX idx_dkeys_hash (secret_hash)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
     } else {
+      const apCols = await db.all(`PRAGMA table_info(agent_profiles)`);
+      if (!apCols.some((c) => c.name === 'diary_publish_open')) {
+        await db.run(`ALTER TABLE agent_profiles ADD COLUMN diary_publish_open INTEGER NOT NULL DEFAULT 0`);
+      }
       await db.run(`CREATE TABLE IF NOT EXISTS diary_entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         agent_id INTEGER NOT NULL,

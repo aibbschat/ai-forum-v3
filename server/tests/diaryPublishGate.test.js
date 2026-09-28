@@ -20,7 +20,7 @@ import { db } from '../database/db.js';
 import { signAgentToken } from '../middleware/auth.js';
 import { config } from '../config/index.js';
 import {
-  writeEntry, setAudience, diaryPublishEnabled, DIARY_PUBLISH_ENV,
+  writeEntry, setAudience, diaryPublishEnabled, DIARY_PUBLISH_ENV, roomPublishOpen,
 } from '../lib/diaryService.js';
 import { isGrayAll } from '../lib/grayGate.js';
 import { flushPendingDigests } from '../services/socialEventService.js';
@@ -218,4 +218,76 @@ test('⑦ 闸只挡往外、不挡收回：public → private 在闸关时仍成
   const again = await setAudience({ entryId: e.id, actorKind: 'owner', actorId: owner, audience: 'public' }).catch((x) => x);
   assert.equal(again.status, 403);
   assert.equal(again.code, 'publish_disabled');
+});
+
+/* ── ⑧ 房间级总闸：主人在设置面板自己开关的那一个（2026-09-28）──
+ * 它与平台白名单 `DIARY_PUBLISH_AGENTS` 是**取或**，不是取与。
+ *   取与的问题：白名单还没开到这个 Agent 时，主人把开关打开也撕不出去 —— 那个开关是死的，等于白做。
+ *   所以这一条要同时钉住两件事：① 房间开关是**一条独立放行通路**（env 空也能生效）；
+ *   ② 默认必须是关（红线纪律不破）。 */
+test('⑧ 房间总闸独立放行：env 空时，开关关=403、开关开=200，且 meta 把当前态带出来', async () => {
+  const H = mkAgent('房间闸');
+  setGate('');                       // 平台白名单保持空
+  const e = await writeEntry({ agentId: H.id, authorKind: 'agent', authorId: H.id, body: `${uniq} 房间自己的闸` });
+
+  // 默认关：env 空 + 房间关 → 撕不出去（两边都关＝默认全关）
+  assert.equal(await roomPublishOpen(H.id), false, '房间总闸默认必须是关');
+  const off = await request(app)
+    .patch(`/api/owners/diary/${e.id}/audience`)
+    .set(bearer(humanToken(owner))).send({ audience: 'public' });
+  assert.equal(off.status, 403);
+
+  // 主人拨总闸：真端点 PATCH，返回值要回显新状态
+  const on = await request(app)
+    .patch(`/api/owners/agents/${H.id}/diary/publish`)
+    .set(bearer(humanToken(owner))).send({ open: true });
+  assert.equal(on.status, 200);
+  assert.equal(on.body.diaryPublishOpen, true);
+  assert.equal(await roomPublishOpen(H.id), true);
+
+  // meta 要把它带出来，前端才画得出开关的当前态（不带出来，面板一开门就永远是"关"）
+  const meta = await request(app)
+    .get(`/api/owners/agents/${H.id}/diary/meta`)
+    .set(bearer(humanToken(owner)));
+  assert.equal(meta.status, 200);
+  assert.equal(meta.body.diaryPublishOpen, true);
+
+  // env 仍为空，但房间开关开了 → 逐条公开生效
+  const yes = await request(app)
+    .patch(`/api/owners/diary/${e.id}/audience`)
+    .set(bearer(humanToken(owner))).send({ audience: 'public' });
+  assert.equal(yes.status, 200, '房间总闸开着、env 空，竟还不放行——那主人的开关就是死的');
+  assert.equal(yes.body.audience, 'public');
+
+  // 关回去：此后新的公开又被挡；而收回永远可行（与⑦同一条边界）
+  const offAgain = await request(app)
+    .patch(`/api/owners/agents/${H.id}/diary/publish`)
+    .set(bearer(humanToken(owner))).send({ open: false });
+  assert.equal(offAgain.body.diaryPublishOpen, false);
+  const back = await request(app)
+    .patch(`/api/owners/diary/${e.id}/audience`)
+    .set(bearer(humanToken(owner))).send({ audience: 'private' });
+  assert.equal(back.status, 200, '总闸不该挡住"收回"');
+  const again = await request(app)
+    .patch(`/api/owners/diary/${e.id}/audience`)
+    .set(bearer(humanToken(owner))).send({ audience: 'public' });
+  assert.equal(again.status, 403, '总闸关回去之后，新的公开必须重新被挡');
+});
+
+/* ── ⑨ 总闸只归主人 + 取或的另外半边 ──────────────────────────── */
+test('⑨ 别的主人拨不动别家总闸（404）；env 命中时房间关也照样放行（取或不是取与）', async () => {
+  const I = mkAgent('别人闸');
+  const no = await request(app)
+    .patch(`/api/owners/agents/${I.id}/diary/publish`)
+    .set(bearer(humanToken(other))).send({ open: true });
+  assert.equal(no.status, 404, `别的主人竟拨得动别家房间的总闸：${no.status}`);
+  assert.equal(await roomPublishOpen(I.id), false, '拒绝必须零副作用');
+
+  // 取或的另外半边：env 白名单命中时，房间开关是关的也放行
+  setGate(String(I.id));
+  const e = await writeEntry({ agentId: I.id, authorKind: 'agent', authorId: I.id, body: `${uniq} 名单命中` });
+  const ok = await request(app)
+    .patch(`/api/owners/diary/${e.id}/audience`)
+    .set(bearer(humanToken(owner))).send({ audience: 'public' });
+  assert.equal(ok.status, 200, 'env 命中、房间关竟不放行——取或被写成了取与');
 });

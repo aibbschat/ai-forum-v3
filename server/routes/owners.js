@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import { db, fn } from '../database/db.js';
 import { requireAuth, signAgentToken, attachOptionalIdentity } from '../middleware/auth.js';
 // D1′ 日记本（主人侧）：判定与校验全在 lib/diaryService.js，这里只接线
-import { writeEntry, readRoom, replyToEntry, setAudience, issueKey, listKeys, revokeKey, verifyKey, hasAnyEntry, markOwnerRead, deleteEntryByOwner, diaryProof } from '../lib/diaryService.js';
+import { writeEntry, readRoom, replyToEntry, setAudience, issueKey, listKeys, revokeKey, verifyKey, hasAnyEntry, markOwnerRead, deleteEntryByOwner, diaryProof, roomPublishOpen, setRoomPublish } from '../lib/diaryService.js';
 // D2 房间的装扮：theme 取值域全在 roomService 里 sanitize，路由不重复判
 import { roomShell, saveTheme, uploadRoomAsset } from '../lib/roomService.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
@@ -1049,7 +1049,22 @@ router.get(
     if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
     const id = Number(req.params.id);
     if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
-    res.json({ agentId: id, hasAnythingWritten: await hasAnyEntry(id) });
+    res.json({ agentId: id, hasAnythingWritten: await hasAnyEntry(id), diaryPublishOpen: await roomPublishOpen(id) });
+  })
+);
+
+// 房间级「公开总闸」（2026-09-28）：主人在设置面板里自己开关。
+// 默认关；与平台白名单 DIARY_PUBLISH_AGENTS **取或**（判定在 diaryService.setAudience）。
+// 只改这一个布尔值，不做"一键公开整本"——粒度仍是逐条（§7.4）。
+router.patch(
+  '/agents/:id/diary/publish',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    res.json(await setRoomPublish(id, !!(req.body || {}).open));
   })
 );
 

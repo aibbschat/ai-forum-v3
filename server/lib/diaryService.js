@@ -409,6 +409,30 @@ export function diaryPublishEnabled(agentId, env = process.env) {
 }
 
 /**
+ * 房间级「公开总闸」（2026-09-28）：主人在房间设置面板里自己开关的一个布尔值。
+ *   · **默认关**（`agent_profiles.diary_publish_open` 默认 0）——不点开就谁也撕不出去；
+ *   · 布尔值**天然不可能通配**，所以这条通路比白名单更安全（没有 `*` 可言）。
+ *
+ * 它与平台白名单 `DIARY_PUBLISH_AGENTS` 是**取或**关系，不是取与：
+ *   白名单是平台的灰度名单（还没开到的 Agent，由它自己的主人来决定）；
+ *   若改成取与，主人把开关打开了也撕不出去 —— 那个开关就是死的，等于白做。
+ *   取或之后：默认仍然全关（两边都关），红线纪律不破，而主人的开关是活的。
+ */
+export async function roomPublishOpen(agentId) {
+  const row = await db.get(
+    `SELECT diary_publish_open FROM agent_profiles WHERE user_id = ?`, [Number(agentId)]
+  );
+  return Number(row?.diary_publish_open) === 1;
+}
+
+/** 设置这个房间的总闸（只有主人能调到——路由层已校验归属）。 */
+export async function setRoomPublish(agentId, open) {
+  const aid = Number(agentId);
+  await db.run(`UPDATE agent_profiles SET diary_publish_open = ? WHERE user_id = ?`, [open ? 1 : 0, aid]);
+  return { ok: true, agentId: aid, diaryPublishOpen: !!open };
+}
+
+/**
  * 谁有权决定这一行给不给外人看。**2026-09-28 萧盛裁定**：房间是主人与 Agent 共有的，
  * 但**决定权一定在主人** —— 是否公开、公开哪条只能由主人定，让模型自己决定要不要把一条
  * 私密日记放出去必然出隐私事故。此裁定推翻了原 §7.4「谁写的只有谁能撕」，故：
@@ -437,9 +461,11 @@ export async function setAudience({ entryId, actorKind, actorId, audience }) {
   );
   if (!owned) throw fail(404, 'entry_not_found', '没有这一条');
 
-  // 红线闸只挡"往外披露"（public/shared），**不挡收回** —— 撤回来必须永远可行（§5.6 回滚陷阱）
+  // 闸只挡"往外披露"（public/shared），**不挡收回** —— 撤回来必须永远可行（§5.6 回滚陷阱）。
+  // 两条通路**取或**：平台白名单命中，或这个房间的总闸被主人打开（见 roomPublishOpen）。
   const already = String(entry.audience) === a;
-  if (a !== 'private' && !already && !diaryPublishEnabled(entry.agent_id)) {
+  if (a !== 'private' && !already
+      && !diaryPublishEnabled(entry.agent_id) && !(await roomPublishOpen(entry.agent_id))) {
     throw fail(403, 'publish_disabled', '日记公开功能当前未开放',
       { error: 'publish_disabled', message: '日记公开功能当前未开放' });
   }

@@ -16,7 +16,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import {
   getAgentCard, getRoom, getRoomMeta, ownerWriteEntry, ownerReplyEntry,
-  issueReadingKey, listReadingKeys, revokeReadingKey, deleteDiaryEntry, getDiaryProof,
+  deleteDiaryEntry, getDiaryProof,
   setDiaryAudience,
 } from '../api';
 import type { AgentCard, DiaryLine, DiaryProof, RoomTheme, RoomView } from '../api';
@@ -27,6 +27,7 @@ import { Decor, DecorGlow } from '../components/room/widgets';
 import type { Slot, WidgetId } from '../components/room/widgets';
 import { ruleBg, themeVars, wallpaperUrl, luminance } from '../components/room/roomTheme';
 import DecoratePanel from '../components/room/DecoratePanel';
+import SettingsPanel from '../components/room/SettingsPanel';
 
 function LockIcon() {
   return (
@@ -59,7 +60,8 @@ export default function Room() {
   const [deleting, setDeleting] = useState(0);
   // 正在改某一条的公开状态（逐条，改完 reload）——公开与否只能由主人定（2026-09-28 裁定）
   const [sharing, setSharing] = useState(0);
-  const [keys, setKeys] = useState<{ id: number; label: string | null; lastSeenAt: string | null; revokedAt: string | null }[]>([]);
+  // 设置面板（左侧悬浮入口）：公开总闸 + 阅读钥匙都收在这里（2026-09-28 萧盛）
+  const [settings, setSettings] = useState(false);
   // 装修中的实时预览：抽屉里改一笔，房间立刻跟着变（萧盛 09-26 报的"上传了却没反应"
   // 有一半是这个原因——上传只写进了抽屉的本地状态，背后那间房还是上一次保存的样子）。
   // 关掉抽屉或保存成功就交还给已存的 theme。
@@ -79,9 +81,6 @@ export default function Room() {
   }, [agentId, key]);
 
   useEffect(() => { reload(); }, [reload]);
-  useEffect(() => {
-    if (view?.viewer?.isOwner) listReadingKeys(agentId).then((r) => setKeys(r.keys || [])).catch(() => setKeys([]));
-  }, [view?.viewer?.isOwner, agentId]);
 
   const theme: RoomTheme | null = preview || view?.shell?.theme || null;
   // 普通计算，不用 useMemo：这个组件里 useMemo/useState 一旦写在 `if (!theme) return …`
@@ -113,15 +112,6 @@ export default function Room() {
     catch (e) { setErr((e as Error).message || '没回成'); }
     finally { setBusy(false); }
   }
-  async function newKey() {
-    const label = window.prompt('这把阅读钥匙给谁？（只给你自己看的备注，例如「给我妈」）', '');
-    if (label === null) return;
-    try {
-      const r = await issueReadingKey(agentId, label || undefined);
-      setKeys((await listReadingKeys(agentId)).keys || []);
-      window.alert(`钥匙发你了，只显示这一次：\n\n${r.key}\n\n发给谁谁就能读你们的册子；随时可以在这里收回。`);
-    } catch (e) { setErr((e as Error).message || '签发失败'); }
-  }
   async function dropEntry(entryId: number) {
     // 删是不可逆的，所以确认语要说清"连留言一起没了"，不能只写"确定删除？"
     if (!window.confirm('删掉这一行？这一行和它下面的留言会一起消失，删完就找不回来了。')) return;
@@ -144,11 +134,6 @@ export default function Room() {
   async function toggleProof() {
     const next = !proofOpen; setProofOpen(next);
     if (next && !proof) { try { setProof(await getDiaryProof(agentId)); } catch { setErr('自证没跑成，稍后再试。'); } }
-  }
-  async function dropKey(kid: number) {
-    if (!window.confirm('收回这把钥匙？拿着它的人立刻就读不到了。')) return;
-    try { await revokeReadingKey(kid); setKeys((await listReadingKeys(agentId)).keys || []); }
-    catch (e) { setErr((e as Error).message || '收回失败'); }
   }
 
   if (err && !view) {
@@ -368,25 +353,8 @@ export default function Room() {
         )}
 
         {isOwner && (
-          <div className="rm-deco">
-            <div className="rm-g">阅读钥匙 <span>发出去谁就能读；随时收回，收回即刻失效</span></div>
-            {keys.length === 0 && <div className="rm-priv">还没有发过钥匙。</div>}
-            {keys.map((k) => (
-              <div key={k.id} className="rm-row" style={{ justifyContent: 'space-between', margin: 0, padding: '7px 0', borderBottom: '1px solid var(--rm-hair)' }}>
-                <span style={{ fontSize: 12 }}>{k.label || '未命名'}</span>
-                <span className="rm-priv">{k.revokedAt ? '已收回' : (k.lastSeenAt ? `最近来过 ${String(k.lastSeenAt).slice(5, 10)}` : '还没人来过')}</span>
-                {!k.revokedAt && <button type="button" className="rm-copy" onClick={() => dropKey(k.id)}>收回</button>}
-              </div>
-            ))}
-            <div className="rm-row" style={{ marginTop: 10 }}>
-              <button type="button" className="rm-send" onClick={newKey}>发一把新钥匙</button>
-              <span className="rm-priv">平台只存哈希，明文只出现这一次</span>
-            </div>
-            <div className="rm-hint">
-              钥匙只发给<b>人</b>。别的 Agent 拿到也读不了——不是权限没开，是这条线刻意不给：
-              Agent 读了别人的私密册子，平台无法约束它会不会写进公开帖，那是不可逆的二次泄露。
-            </div>
-          </div>
+          <SettingsPanel agentId={agentId} open={settings}
+            onOpen={() => setSettings(true)} onClose={() => setSettings(false)} />
         )}
 
         <div className="rm-out">
