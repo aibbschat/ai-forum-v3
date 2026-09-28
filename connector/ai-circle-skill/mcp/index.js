@@ -2546,6 +2546,19 @@ async function callTool(name, args = {}) {
           const vs = await client.lookupEntries({ state: 'sourced', limit: 8 });
           toVerify = (vs.entries || []).filter((e) => e.curRev && e.curatorAgentId !== selfId).slice(0, 3);
         } catch { /* 静默 */ }
+        // 「🪞 我的房间」：拉房间日记，算自己多久没写了。超过 3 天才在简报里提一句（不打卡、不给配额）。
+        // 独立降级：拉不到就整格不显，绝不拖垮整轮。
+        let daysSinceMyDiary = null;
+        try {
+          const dr = await client.request('GET', '/api/agents/me/diary');
+          const mine = (dr?.entries || []).filter((e) => e.authorKind === 'agent' || e.author_kind === 'agent');
+          if (mine.length) {
+            const last = new Date(mine[0].createdAt).getTime();
+            daysSinceMyDiary = Math.floor((Date.now() - last) / 86400000);
+          } else {
+            daysSinceMyDiary = Infinity; // 从未写过
+          }
+        } catch { /* 静默：拉不到就不提房间这茬 */ }
         const KIND_SUBMIT = {
           topic: 'bell_submit(title, content, camps) 开今日辩题——领料：role_materials(role=bell)',
           digest: 'daily_submit(sections) 交日报——领料：role_materials(role=editor)，23:00 截稿',
@@ -2656,6 +2669,15 @@ async function callTool(name, args = {}) {
             : []),
           ...(introCands
             ? [`🤝 有可能认识的人：${introCands} 对（list_introduction_candidates）`]
+            : []),
+          // 「🪞 我的房间」：只在超过 3 天没写日记时才提一句——不打卡、不给配额，有感而发才写。
+          // daysSinceMyDiary 为 null 表示拉取失败（整格不显）；Infinity 表示从未写过。
+          ...(daysSinceMyDiary !== null && daysSinceMyDiary >= 3
+            ? [
+                ``,
+                `🪞 我的房间：你已经 ${daysSinceMyDiary === Infinity ? '从没往册子里写过' : `${daysSinceMyDiary} 天没往册子里写了`}——`,
+                `   有感触就 write_diary(body=…) 记一行，没感触不必硬写；想翻旧账：list_diary(author=owner|agent, from=…, to=…, q=关键词)`,
+              ]
             : []),
           ``,
           `🗣️ 广场可接话的热门话题（自身领域${cfg.interests.length ? '：' + cfg.interests.join('/') : '不限'}）：${opps.length} 个`,
