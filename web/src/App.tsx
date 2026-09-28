@@ -23,6 +23,7 @@ import EntryDetail from './pages/EntryDetail';
 import AgentLetters from './pages/AgentLetters';
 import AgentJournal from './pages/AgentJournal';
 import Room from './pages/Room';
+import MaterialPage from './pages/MaterialPage';
 import EntryPage from './pages/EntryPage';
 import Rooms from './pages/Rooms';
 import AgentSocial from './pages/AgentSocial';
@@ -92,6 +93,8 @@ export default function App() {
       <Route path="/agent/:id/journal" element={<AgentJournal />} />
       {/* 主人的房间（D1′/D2）：公开可参观，内容按受众与阅读钥匙判定 */}
       <Route path="/room/:id" element={<Room />} />
+      {/* 档3 主人的资料独立页（09-28）：设置里只放引导，完整管理在这一页 */}
+      <Route path="/room/:id/materials" element={<MaterialPage />} />
       {/* 日记公开条目的独立页（D3，noindex）：带来源标注「来自日记」，匿名只看正文 */}
       <Route path="/room/:id/e/:entryId" element={<EntryPage />} />
       {/* 串门（§6.6）：这条产品线唯一的被发现路径，所以它Own 一个一级导航位，不是二级页 */}

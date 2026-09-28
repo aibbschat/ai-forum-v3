@@ -58,7 +58,7 @@ export async function buildOwnerMaterial(agentId, { now = new Date() } = {}) {
  */
 export function renderOwnerMaterial(model) {
   if (!model) return '';
-  const KIND_LABEL = { profile: '关于他是谁', preference: '他喜欢什么', avoid: '别这么对他' };
+  const KIND_LABEL = { profile: '我的经历', preference: '我的习惯偏好', avoid: '工作及生活' };
   const label = KIND_LABEL[model.kind] || model.kind;
   const hint = '    去读：GET /api/agents/me/owner-impressions （找 source="owner_self" 的那条）；'
     + '读完写一条印象卡（write_owner_impression），或声明无所得（settle_owner_material {nothingToRecord:true}）';

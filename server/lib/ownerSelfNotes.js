@@ -23,6 +23,7 @@ import crypto from 'node:crypto';
 import { db, isMaria, fn } from '../database/db.js';
 
 export const SELF_NOTE_KINDS = new Set(['profile', 'preference', 'avoid']);
+// 显示名（09-28 定，值不变）：profile=我的经历（过去）/ preference=我的习惯偏好（习惯）/ avoid=工作及生活（当下/未来）
 export const SELF_NOTE_MAX_BODY = 2000;
 /** 超期自动放行天数：她没空不应该变成"他不能说"。 */
 export const SELF_NOTE_RELEASE_DAYS = 3;

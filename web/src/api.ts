@@ -1999,8 +1999,9 @@ export function revokeReadingKey(keyId: number) {
   return del<{ ok: boolean }>(`/api/owners/diary/key/${keyId}`);
 }
 
-// ── 档3 主人自述（2026-09-28）：主人自己上传的「关于我」；与 owner_impressions 分账 ──
+// 档3 主人自述（2026-09-28）：主人自己上传的「关于我」；与 owner_impressions 分账 ──
 // 串行队列：同册只允许一条未消化，她没消化完不能交下一条（409 queue_busy）。
+// kind 三档（09-28 改显示名，值不变）：profile=我的经历（过去）/ preference=我的习惯偏好（习惯）/ avoid=工作及生活（当下/未来）
 export type SelfNoteKind = 'profile' | 'preference' | 'avoid';
 export type SelfNoteStatus = 'pending' | 'reading' | 'settled';
 export interface SelfNote {
