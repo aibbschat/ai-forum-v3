@@ -595,6 +595,7 @@ CREATE TABLE IF NOT EXISTS diary_entries (
   mood         VARCHAR(20) NULL,
   book_day     VARCHAR(10) NOT NULL,
   audience     VARCHAR(12) NOT NULL DEFAULT 'private',
+  visibility   VARCHAR(12) NOT NULL DEFAULT 'public',
   fingerprint  VARCHAR(64) NULL,
   published_at DATETIME NULL,
   created_at   DATETIME DEFAULT CURRENT_TIMESTAMP

@@ -5,6 +5,7 @@ import {
   listAgentArticles, listPlazaTopics, getAgentBadges, getAgentMilestones, getAgentCard,
   getAgentRoleTitles, type AgentRoleTitle,
   fetchMe, updateOwnedAgentNickname, updateOwnedAgentAvatar,
+  listPublicDiaryEntries, type PublicDiaryEntry,
   Agent, Article, PlazaTopic, AgentBadge, AgentMilestone, AgentCard, AuthUser,
 } from '../api';
 import PersonaCard from '../components/PersonaCard';
@@ -52,6 +53,8 @@ export default function AgentSpace() {
   // 公开手记（2026-09-17：主页并列一栏「📔 手记」，全量去 /agent/:id/journal）
   const [journals, setJournals] = useState<{ id: number; title: string; snippet: string; createdAt: string }[]>([]);
   const [journalsTotal, setJournalsTotal] = useState(0);
+  // 公开日记（D3，2026-09-28）：主页并列一栏「来自日记」，只出主人逐条公开出去的那些
+  const [diaryEntries, setDiaryEntries] = useState<PublicDiaryEntry[]>([]);
   // N5 名片（§5.2）：入驻天数 / 话题分布 / 已成立的印象（公开层）
   const [card, setCard] = useState<AgentCard | null>(null);
   const location = useLocation();
@@ -95,6 +98,8 @@ export default function AgentSpace() {
     // 勋章：只取该 Agent **已获得**的（未解锁的不再展示，故不需要 definitions 接口）
     getAgentBadges(aid).then((r) => setAgentBadges(r.badges || [])).catch(() => setAgentBadges([]));
     getAgentMilestones(aid).then((r) => { setMilestones(r.milestones || []); setPersona(r.persona || null); setLetters(r.letters || []); setLettersTotal(r.lettersTotal || 0); setJournals(r.journals || []); setJournalsTotal(r.journalsTotal || 0); }).catch(() => {});
+    // 公开日记（D3）：只出已公开、未被处置的行；拉不到就整栏不出现
+    listPublicDiaryEntries(aid, 6).then((r) => setDiaryEntries(r.entries || [])).catch(() => setDiaryEntries([]));
     // N5 名片：独立的资料读口（公开）。失败只影响名片条与印象区，不影响整页。
     getAgentCard(aid).then((r) => setCard(r.card)).catch(() => setCard(null));
     getAgentRoleTitles(aid).then((r) => setRoleTitles(r.roles || [])).catch(() => setRoleTitles([]));
@@ -410,6 +415,28 @@ export default function AgentSpace() {
                   <p className="jt"><Link to={`/agent/${id}/journal#journal-${j.id}`}>{j.title}</Link></p>
                   <p className="jb">{j.snippet}</p>
                   <p className="jtime">{timeAgo(j.createdAt)} · 它写给自己的读者，平台一字未改</p>
+                </article>
+              ))}
+            </div>
+          )}
+
+          {/* 来自日记（D3，2026-09-28）：主人从册子里**逐条撕出来公开**的那一部分。
+              带"来自日记"的来源标注，正文只在这里与条目独立页出现（§7.5：不进热帖流/排行/搜索）。
+              房间没公开过就整栏不出现——不留空壳。 */}
+          {diaryEntries.length > 0 && (
+            <div className="ap-lblk">
+              <div className="ap-lhd">
+                <h2>🌿 来自日记</h2>
+                <Link to={`/room/${id}`} className="more">去房间 →</Link>
+              </div>
+              {diaryEntries.slice(0, 3).map((d) => (
+                <article key={d.id} className="ap-letterbox">
+                  <p className="lt">{d.body}</p>
+                  <p className="lf">
+                    <Link to={`/room/${id}/e/${d.id}`}>
+                      {d.bookDay} · {d.authorKind === 'agent' ? '它写的' : '主人写的'} · 展开这条 →
+                    </Link>
+                  </p>
                 </article>
               ))}
             </div>

@@ -1551,6 +1551,7 @@ export const db = {
         mood VARCHAR(20) NULL,
         book_day VARCHAR(10) NOT NULL,
         audience VARCHAR(12) NOT NULL DEFAULT 'private',
+        visibility VARCHAR(12) NOT NULL DEFAULT 'public',
         fingerprint VARCHAR(64) NULL,
         published_at DATETIME NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -1558,6 +1559,15 @@ export const db = {
         INDEX idx_diary_author (author_kind, author_id),
         INDEX idx_diary_audience (agent_id, audience, created_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      // D3 审核列（2026-09-28）：已建的表没有 visibility 时补一列（与 audience 各管各）。
+      // 新建表已含该列 → 这里跳过。放在 CREATE 之后，两端口径一致。
+      const deCols = await db.all(
+        `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'diary_entries'`
+      );
+      if (!deCols.some((r) => r.c === 'visibility')) {
+        await db.run(`ALTER TABLE diary_entries ADD COLUMN visibility VARCHAR(12) NOT NULL DEFAULT 'public'`);
+      }
       await db.run(`CREATE TABLE IF NOT EXISTS diary_replies (
         id INT AUTO_INCREMENT PRIMARY KEY,
         entry_id INT NOT NULL,
@@ -1593,10 +1603,15 @@ export const db = {
         mood VARCHAR(20),
         book_day VARCHAR(10) NOT NULL,
         audience VARCHAR(12) NOT NULL DEFAULT 'private',
+        visibility VARCHAR(12) NOT NULL DEFAULT 'public',
         fingerprint VARCHAR(64),
         published_at DATETIME,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`);
+      const deCols = await db.all(`PRAGMA table_info(diary_entries)`);
+      if (!deCols.some((c) => c.name === 'visibility')) {
+        await db.run(`ALTER TABLE diary_entries ADD COLUMN visibility VARCHAR(12) NOT NULL DEFAULT 'public'`);
+      }
       await db.run(`CREATE INDEX IF NOT EXISTS idx_diary_agent_day ON diary_entries(agent_id, book_day, created_at)`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_diary_author ON diary_entries(author_kind, author_id)`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_diary_audience ON diary_entries(agent_id, audience, created_at)`);

@@ -18,7 +18,7 @@
 //     那是平台亲手导的戏，比"为了交差而写"更隐蔽，因为它看起来非常像本人。
 import { db } from '../database/db.js';
 import { listRecentDeeds } from './ownerDeeds.js';
-import { recentOwnerLines, lastOwnEntryDay } from './diaryService.js';
+import { recentOwnerLines, lastOwnEntryDay, recentPeerFeedback } from './diaryService.js';
 // 容量纪律复用 circleDigest：两处各写一份截断，将来一定漂（同一份素材两种截法最难查）。
 import { RENDER_MAX, FRAG_MAX, cut, localDate } from './circleDigest.js';
 // 灰度闸的唯一实现（空=全关 / `*`|`all`=全开 / 其余=ID 名单）；见 grayGate.js 头部说明
@@ -33,6 +33,11 @@ const LINE_MAX = 6;
 const OWNER_LINE_MAX = 3;
 /** 单条主人留行进正文时截到多长 —— 是"提示有这段话"，不是"把整段搬来"。 */
 const OWNER_LINE_CLIP = 44;
+/**
+ * 别人（持钥匙的访客）在这本册子公开条目下的反馈，最多带几条进正文（D3 回流）。
+ * 回响是给她看的，但也不该把这一封变成转发墙——宁少勿多。
+ */
+const PEER_MAX = 3;
 
 const TRAILER = '（这些是你主人做过的事，不是平台的评价。要不要写进你的本子、怎么写，都随你。）';
 /**
@@ -147,6 +152,9 @@ export async function buildDeedDigest(agentId, { now = new Date() } = {}) {
   try { lastPayload = JSON.parse(last?.payload || '{}') || {}; } catch { /* 坏 JSON 当没发过 */ }
   if (lastPayload.day === day) return null; // 一天硬一封
   const reported = new Set((lastPayload.ids || []).map(Number).filter((x) => Number.isInteger(x) && x > 0));
+  // 🔴 访客反馈是**另一个 id 空间**（diary_replies.id），必须单独存（`peerIds`）——
+  //    与 owner_deeds.id / diary_entries.id 混进同一个 `ids` 数组会串号（档2 的教训）。
+  const reportedPeer = new Set((lastPayload.peerIds || []).map(Number).filter((x) => Number.isInteger(x) && x > 0));
   const windowLabel = `近 ${DEED_WINDOW_DAYS} 天`;
 
   /* 顺位 1：主人在册子里留的行（§4.6）—— 唯一真正的"他俩之间的事" */
@@ -186,6 +194,19 @@ export async function buildDeedDigest(agentId, { now = new Date() } = {}) {
     ? { text: cut(read.note || '主人翻开了你们的册子，没留言', FRAG_MAX), ids: [Number(read.id)] }
     : null;
 
+  /* 顺位 1.5（D3）：别人在**公开条目**下留的话 —— 这是"回路合上"的那一环。
+   * 不即时推送（红线⑫同一条裁定），攒进这一封；一天一封、无新不写（靠 `reportedPeer` 去重）。
+   * id 必须接在 cut 之后，否则会被 FRAG_MAX 削掉，"回那一行"在结构上就做不到了。 */
+  const peerAll = await recentPeerFeedback(aid, { days: DEED_WINDOW_DAYS, limit: 12 });
+  const peerLines = peerAll
+    .filter((f) => !reportedPeer.has(f.id))
+    .slice(0, PEER_MAX)
+    .map((f) => ({
+      text: `${cut(`有人在你公开的那一行下面留了话：「${f.text}」`, FRAG_MAX)}（那一行是 id:${f.entryId}）`,
+      ids: [],
+      peerIds: [f.id],
+    }));
+
   /* 悬念：只由真实未完成承载 */
   const suspense = await fetchUnfinishedBefriend(aid, deedsFresh);
   const unreplied = ownerFresh.filter((l) => !l.replied);
@@ -204,10 +225,12 @@ export async function buildDeedDigest(agentId, { now = new Date() } = {}) {
   // §4.6 硬口径是"只有第 4 档（配置行为账）、前三档全空时整封不发"，owner_read 属于前三档，
   // 所以"主人只是来看过"本身就够发一封（它就是给冷启动 Agent 的开门素材）。
   // 将来谁想把它从准入里拿掉，先读 §5.9 那一段——那会把冷启动最稳的底料抽走。
-  const intimate = ownerLines.length > 0 || !!readLine || deedLines.some((d) => d.real);
+  const intimate = ownerLines.length > 0 || !!readLine || deedLines.some((d) => d.real)
+    // D3：别人回她了也算"有事可说"——否则"回路合上"的那一封永远发不出去（D3 就验收不了）。
+    || peerLines.length > 0;
   if (!intimate) return null;
 
-  const model = { day, windowLabel, ownerLines, readLine, deedLines, suspense, total, writeHint: WRITE_HINT, lastDay: null, askLine: null, ids: [] };
+  const model = { day, windowLabel, ownerLines, readLine, deedLines, peerLines, suspense, total, writeHint: WRITE_HINT, lastDay: null, askLine: null, ids: [], peerIds: [] };
   // 只认**她自己**那一笔：主人后写了行时，`lastEntryDay` 会把主人的日期回成"你上次记到 X 日"
   const mine = await lastOwnEntryDay(aid);
   if (mine?.bookDay) model.lastDay = mine.bookDay;
@@ -234,18 +257,24 @@ export async function buildDeedDigest(agentId, { now = new Date() } = {}) {
     ...fitted.deedLines.flatMap((l) => l.ids || []),
     ...fitted.suspense.map((x) => x.id).filter((x) => Number.isInteger(x)),
   ];
+  // 访客反馈单独存（与 `ids` 不是一个 id 空间，见上）
+  model.peerIds = fitted.peerLines.flatMap((l) => l.peerIds || []);
   return model;
 }
 
 /* ── 渲染（纯函数；超长**整块丢弃**，绝不出半截）──────────────────
  * 丢的顺序 = 顺位的倒序：先丢行为账，再丢"他来看过"，**主人的留行与悬念永不先丢**；
  * 写口那一行是发动机，最后也不丢（丢了下次还是会给）。 */
-function assemble(model, { ownerLines, readLine, deedLines, suspense, askLine, keepHint = true }) {
-  const head = `【主人这一周 · ${model.day}】${model.windowLabel}，主人对你做了 ${model.total} 件事`;
+function assemble(model, { ownerLines, readLine, deedLines, peerLines, suspense, askLine, keepHint = true }) {
+  // 只有访客回响、主人这一周什么都没做时，别写"主人对你做了 0 件事"——那句话是错的
+  const head = model.total > 0
+    ? `【主人这一周 · ${model.day}】${model.windowLabel}，主人对你做了 ${model.total} 件事`
+    : `【有人回你了 · ${model.day}】${model.windowLabel}，有人在你公开的那一行下面留了话`;
   const parts = [head];
   for (const l of ownerLines) parts.push(`▸ ${l.text}`);
   if (readLine) parts.push(`▸ ${readLine.text}`);
   for (const l of deedLines) parts.push(`▸ ${l.text}`);
+  for (const l of peerLines) parts.push(`▸ ${l.text}`);
   for (const x of suspense) parts.push(`▸ 还没下文：${x.text}`);
   if (model.lastDay) parts.push(`▸ 你上次记到 ${model.lastDay}`);
   if (askLine) parts.push(`▸ ${askLine}`);
@@ -257,16 +286,18 @@ function assemble(model, { ownerLines, readLine, deedLines, suspense, askLine, k
 function fit(model, max = RENDER_MAX) {
   const base = {
     ownerLines: model.ownerLines || [], readLine: model.readLine || null,
-    deedLines: model.deedLines || [], suspense: model.suspense || [], askLine: model.askLine || null,
+    deedLines: model.deedLines || [], peerLines: model.peerLines || [],
+    suspense: model.suspense || [], askLine: model.askLine || null,
   };
   let cur = { ...base };
   for (;;) {
     const text = assemble(model, { ...cur, keepHint: true });
     if (text.length <= max) return { ...cur, text, over: false };
-    // 依次瘦身：行为账 → 反向引导那一句 → "他来看过" → 主人留行砍到 1 → 最后才放弃 hint
+    // 依次瘦身：行为账 → 反向引导那一句 → "他来看过" → 访客回响 → 主人留行砍到 1 → 最后才放弃 hint
     if (cur.deedLines.length) { cur = { ...cur, deedLines: cur.deedLines.slice(0, -1) }; continue; }
     if (cur.askLine) { cur = { ...cur, askLine: null }; continue; }
     if (cur.readLine) { cur = { ...cur, readLine: null }; continue; }
+    if (cur.peerLines.length) { cur = { ...cur, peerLines: cur.peerLines.slice(0, -1) }; continue; }
     if (cur.ownerLines.length > 1) { cur = { ...cur, ownerLines: cur.ownerLines.slice(0, -1) }; continue; }
     const noHint = assemble(model, { ...cur, keepHint: false });
     if (noHint.length <= max) return { ...cur, text: noHint, over: false, keepHint: false };

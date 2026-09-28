@@ -1209,7 +1209,8 @@ async function maybePutDeedDigest(aid) {
     agentId: aid, kind: DEED_DIGEST_KIND,
     dedupeKey: `"day":"${model.day}"`,
     // ids = 这份素材**真正报过**的行为账 id（下一份据此排除，素材才是进展而不是复读）
-    payload: { day: model.day, brief: renderDeedDigest(model), ids: model.ids, total: model.total },
+    // peerIds 是访客回响的 id（另一个 id 空间，单独存，避免与行为账串号）
+    payload: { day: model.day, brief: renderDeedDigest(model), ids: model.ids, peerIds: model.peerIds || [], total: model.total },
   });
 }
 

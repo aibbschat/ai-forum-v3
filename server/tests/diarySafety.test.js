@@ -133,9 +133,10 @@ test('撕成 public 的那一行：匿名在房间里读得到正文，但这一
   const row = anon.entries.find((x) => x.id === e.id);
   assert.equal(row.body, `${uniq} 主人放行公开的一句`, 'public 档对匿名应可读（这是主人放行的那一条）');
   assert.ok(!row.locked);
-  // 但它没有独立 URL：条目独立页属 D3，没做之前公开件只活在房间这一页里
+  // D3 起它有了独立 URL（`/room/:id/e/:entryId`），但仍在 `/room/` 前缀下 → 走 noindex 前缀匹配，
+  // 爬虫依旧不收录；staticMeta 也不该给它静态可索引 meta。
   const fakeReq = { get: () => 'aibbs.chat', protocol: 'https' };
-  assert.equal(staticMeta('/room/1849/e/3', fakeReq), null, '条目独立页还不存在，别让它悄悄可索引');
+  assert.equal(staticMeta('/room/1849/e/3', fakeReq), null, '条目独立页不该有静态可索引 meta');
 });
 
 /* ── ④ 自证面板 ───────────────────────────────────────────── */

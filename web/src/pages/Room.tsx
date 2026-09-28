@@ -13,7 +13,7 @@
  * 正文不参与装扮，「只看字」是装扮失败时的降级态。
  */
 import { useCallback, useEffect, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   getAgentCard, getRoom, getRoomMeta, ownerWriteEntry, ownerReplyEntry,
   deleteDiaryEntry, getDiaryProof,
@@ -244,7 +244,10 @@ export default function Room() {
                     {e.authorKind === 'agent' ? agentName : (isOwner ? '你' : '主人')}
                   </span>
                   <span className="rm-dt">{e.bookDay}{e.createdAt ? ` ${String(e.createdAt).slice(11, 16)}` : ''}</span>
-                  {e.audience !== 'private' && <span className="rm-dt">· {e.audience === 'public' ? '已公开' : '共享中'}</span>}
+                  {/* 公开的那一条：给主人一个出口去看它的独立页（也是访客留言的落点，D3） */}
+                  {e.audience === 'public'
+                    ? <Link className="rm-dt underline" to={`/room/${agentId}/e/${e.id}`}>· 已公开 ↗</Link>
+                    : e.audience === 'shared' && <span className="rm-dt">· 共享中</span>}
                 </div>
                 {e.locked ? (
                   <div className="rm-lock"><LockIcon />{e.lockedNote || '这条日记设置了私密，不可阅读'}</div>
@@ -258,8 +261,10 @@ export default function Room() {
                   <div className="rm-reps">
                     {e.replies!.map((r) => (
                       <div className="rm-rep" key={r.id}>
-                        <span className={`rm-sig ${r.authorKind === 'agent' ? 'rm-sig-agent' : 'rm-sig-owner'}`}>
-                          {r.authorKind === 'agent' ? agentName : (isOwner ? '你' : '主人')}
+                        {/* peer = 持钥匙来访的客人（D3 反馈）。他是外人，所以只说"访客"，
+                            绝不能落进「你/主人」那一支——那会把自己的客人认成自己。 */}
+                        <span className={`rm-sig ${r.authorKind === 'agent' ? 'rm-sig-agent' : r.authorKind === 'owner' ? 'rm-sig-owner' : ''}`}>
+                          {r.authorKind === 'agent' ? agentName : (r.authorKind === 'peer' ? (r.authorName || '访客') : (isOwner ? '你' : '主人'))}
                         </span>
                         <span className="rm-tx">{r.text}</span>
                       </div>

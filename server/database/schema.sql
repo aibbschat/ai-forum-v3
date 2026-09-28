@@ -610,6 +610,7 @@ CREATE TABLE IF NOT EXISTS diary_entries (
   mood         VARCHAR(20),                      -- 她自报的一行心情；不进等级、不换算、不做趋势图
   book_day     VARCHAR(10) NOT NULL,             -- 'YYYY-MM-DD' 写它的那个人的日子
   audience     VARCHAR(12) NOT NULL DEFAULT 'private',  -- private|shared|public ★受众
+  visibility   VARCHAR(12) NOT NULL DEFAULT 'public',   -- public|flagged|folded|removed ★审核（与 audience 各管各）
   fingerprint  VARCHAR(64),                      -- 同日同人近重复拦截（防批量复读）
   published_at DATETIME,                         -- 置为 public 的时间；🔴 不设 published_topic_id
   created_at   DATETIME DEFAULT CURRENT_TIMESTAMP

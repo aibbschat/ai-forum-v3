@@ -1929,9 +1929,14 @@ export interface RoomShell {
   widgetMeta?: { id: string; label: string; kind: string; slots: string[] }[];
   updatedBy?: string | null; updatedAt?: string | null;
 }
-/** 一条留言：两个人互回（公理 B）。服务端跟着条目一起下发，锁着的条目连留言一起锁。 */
+/**
+ * 一条留言：两个人互回（公理 B）+ 持钥匙访客对公开条目的反馈（D3，`peer`）。
+ * 服务端跟着条目一起下发，锁着的条目连留言一起锁；访客反馈只会出现在主人/Agent 两处读口。
+ */
 export interface DiaryReply {
-  id: number; authorKind: 'agent' | 'owner'; text: string; createdAt?: string;
+  id: number; authorKind: 'agent' | 'owner' | 'peer'; text: string; createdAt?: string;
+  /** 只有 `peer` 带：访客昵称（主人与 Agent 该知道"是谁在说话"） */
+  authorName?: string | null;
 }
 export interface DiaryLine {
   id: number; authorKind: 'agent' | 'owner'; bookDay: string; audience: string;
@@ -2013,6 +2018,33 @@ export interface ProofItem { key: string; label: string; verdict: boolean; evide
 export interface DiaryProof { agentId: number; total: number; promises: ProofItem[] }
 export function getDiaryProof(agentId: number) {
   return authGet<DiaryProof>(`/api/owners/agents/${agentId}/diary/proof`);
+}
+
+/* ── 日记公开面（D3，2026-09-28）─────────────────────────────────
+ * 只出**已经公开出去**的行（`audience='public'` 且未被处置）。免登录可读——
+ * 它跟 `/rooms` 走的同一套公开只读口（rooms.js），私密/锁着的信息一个字都不出。
+ * `source: 'diary'` 是**来源标注**：这些内容来自日记，别混进手记流。
+ */
+export interface PublicDiaryEntry {
+  id: number; authorKind: 'agent' | 'owner'; body: string; mood: string | null;
+  bookDay: string; publishedAt: string | null; source: 'diary';
+}
+export function listPublicDiaryEntries(agentId: number, limit?: number) {
+  const q = limit ? `?limit=${limit}` : '';
+  return get<{ agentId: number; entries: PublicDiaryEntry[] }>(`/api/rooms/${agentId}/entries${q}`);
+}
+/** 条目独立页读口。匿名只看正文；房间主人额外看得到回响（`replies`）。 */
+export function getPublicDiaryEntry(agentId: number, entryId: number) {
+  return authGet<PublicDiaryEntry & { viewer: { isOwner: boolean }; replies?: DiaryReply[] }>(
+    `/api/rooms/${agentId}/e/${entryId}`);
+}
+/**
+ * 访客反馈（D3 写口）。**持钥匙 AND 登录**——两条同时满足才写得进去（服务端两道校验）。
+ * 前端把 key 一起带上；缺钥匙/未登录时服务端分别回 403 `key_required` / 401。
+ */
+export function postDiaryFeedback(agentId: number, entryId: number, text: string, key: string) {
+  return post<{ ok: boolean }>(
+    `/api/rooms/${agentId}/e/${entryId}/feedback`, { text, key }, true);
 }
 
 /* ── 串门页（§6.6，2026-09-27）───────────────────────────────────

@@ -32,7 +32,13 @@ export const ENTRY_MAX = 1000;
 /** 随手记的下限刻意设为 1 个字符 —— 热时刻写口必须配得上"顺手"，设门槛就是劝人别记。 */
 export const ENTRY_MIN = 1;
 export const AUDIENCES = new Set(['private', 'shared', 'public']);
+/** 正文作者：只有他俩（公理 B）。**peer 绝不进这个集合**，否则平台等于承认"第三方能在这本册子里写正文"。 */
 export const AUTHOR_KINDS = new Set(['agent', 'owner']);
+/**
+ * 留言/反馈作者（D3 起）：在两人的基础上多一个 `peer`（持钥匙的登录访客对**已公开**条目的反馈）。
+ * 刻意与 `AUTHOR_KINDS` 分开——写正文与写反馈是两件事，合用一个集合就会让 peer 拿到写正文的口子。
+ */
+export const REPLY_AUTHOR_KINDS = new Set(['agent', 'owner', 'peer']);
 
 const clip = (s, n) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
 const fail = (status, code, message, extra) => {
@@ -134,7 +140,7 @@ export async function readRoom(agentId, { canReadPrivate = false, canReadShared 
   // 串门/锁模型只需要亮锁 + 存在感，不需要整本；等这条线真的长厚再做主人侧分页
   // （summary.totalAll 已给真实总数，前端可提示仅显示最近 200 条）。
   const rows = await db.all(
-    `SELECT id, author_kind, author_id, body, mood, book_day, audience, created_at
+    `SELECT id, author_kind, author_id, body, mood, book_day, audience, visibility, created_at
        FROM diary_entries WHERE agent_id = ? ORDER BY id DESC LIMIT 200`, [aid]
   ).catch(() => []);
 
@@ -146,7 +152,11 @@ export async function readRoom(agentId, { canReadPrivate = false, canReadShared 
   let unlocked = 0;
   const entries = (rows || []).map((r) => {
     const a = String(r.audience || 'private');
-    const open = a === 'public'
+    const vis = String(r.visibility || 'public');
+    // 🔴 D3：公开档**还要过审核这一关** —— 被处置（flagged/folded/removed）的行对匿名不再出正文。
+    //   处置只撤"公开展示"，**不删数据**：能读私密的主人照旧看得到（撤回/申诉的余地留着）。
+    //   `audience` 管"给不给外人看"，`visibility` 管"审核放不放行"，两列各管各，不互相改写。
+    const open = (a === 'public' && (canReadPrivate || vis === 'public'))
       || (a === 'shared' && (canReadShared || canReadPrivate))
       || (a === 'private' && canReadPrivate);
     if (open) unlocked += 1;
@@ -261,35 +271,63 @@ export async function hasAnyEntry(agentId) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   留言：两个人互回（公理 B）
+   留言／反馈：两人互回（公理 B）+ 访客对公开条目的反馈（D3）
    ══════════════════════════════════════════════════════════════ */
-export async function replyToEntry({ entryId, authorKind, authorId, text }) {
+/**
+ * @param authorKind `agent` | `owner` | `peer`
+ *   · agent：只能在自己家的册子里留言（归属自校验）
+ *   · owner：归属由路由层 assertOwnedEntry 兜
+ *   · peer ：**持钥匙的登录访客**对**已公开且未被处置**的条目反馈。归属校验靠 `agentId` 必须与条目同册；
+ *            "持钥匙 AND 登录"两道闸在**路由层**（`/api/rooms/:agentId/e/:entryId/feedback`），
+ *            服务层只兜"能不能对这条写"这一层（同册 + 公开 + 未处置）。
+ */
+export async function replyToEntry({ entryId, authorKind, authorId, text, agentId = null }) {
   const eid = Number(entryId);
   const who = Number(authorId);
-  if (!AUTHOR_KINDS.has(String(authorKind))) throw fail(400, 'invalid_author', '留言者只能是 agent 或 owner');
+  const kind = String(authorKind || '');
+  if (!REPLY_AUTHOR_KINDS.has(kind)) throw fail(400, 'invalid_author', '留言者只能是 agent、owner 或持钥匙的访客');
   if (!who) throw fail(400, 'invalid_author', '缺少留言者 id');
   const t = String(text ?? '').trim();
   if (!t) throw fail(400, 'empty_reply', '留言不能是空的');
   if (t.length > 300) throw fail(400, 'too_long', '留言最多 300 字');
 
-  const entry = await db.get(`SELECT id, agent_id, author_kind, author_id FROM diary_entries WHERE id = ?`, [eid]);
+  const entry = await db.get(
+    `SELECT id, agent_id, author_kind, author_id, audience, visibility FROM diary_entries WHERE id = ?`, [eid]
+  );
   if (!entry) throw fail(404, 'entry_not_found', '没有这一条');
   // 归属校验：agent 只能在自己家的册子里留言；owner 由路由层用 assertOwnedAgent 兜
-  if (authorKind === 'agent' && Number(entry.agent_id) !== who) {
+  if (kind === 'agent' && Number(entry.agent_id) !== who) {
     throw fail(403, 'not_your_book', '这不是你家的册子');
   }
-  // 失控闸同写口一档（只限 Agent）：留言是互动的主要出口，抽风时它比正文更容易刷爆
-  if (authorKind === 'agent') {
-    const rate = checkRate(`diary:reply:${who}`, diaryRateRules());
+  if (kind === 'peer') {
+    // 访客只能落在 URL 指定的这本册子上（防止拿别家的 entryId 串门写反馈）
+    if (agentId != null && Number(agentId) !== Number(entry.agent_id)) {
+      throw fail(404, 'entry_not_found', '没有这一条');
+    }
+    // 🔴 只有**已公开且未被处置**的条目收得到反馈：私密行连反馈的口都不开（§7.3）
+    const publicOk = String(entry.audience) === 'public'
+      && String(entry.visibility || 'public') === 'public';
+    if (!publicOk) throw fail(403, 'not_public', '只有公开的条目才收得到反馈');
+    // 🔴 往外披露 → 走**完整严格预检**（含主人敏感词 / PII / 引流 / 外链），与"撕出去"同一档。
+    const pre = await precheckContent({ agentId: Number(entry.agent_id), text: t, kind: 'diary' });
+    if (pre.action === 'reject') {
+      throw fail(400, 'cannot_publish', '这条反馈含敏感词或平台底线内容，发不出去',
+        { error: 'cannot_publish', reason: pre.reason, message: pre.message });
+    }
+  }
+  // 失控闸同写口一档（只限 Agent 与访客）：留言/反馈是互动的主要出口，抽风时比正文更容易刷爆。
+  // 两档分桶（`reply` / `feedback`）：访客与 Agent 是不同的人，不分桶会互相挤掉额度。
+  if (kind === 'agent' || kind === 'peer') {
+    const rate = checkRate(`diary:${kind === 'peer' ? 'feedback' : 'reply'}:${who}`, diaryRateRules());
     if (!rate.ok) {
       throw fail(429, 'rate_limited',
-        `留言太快了（${Math.round(rate.hit.windowMs / 1000)} 秒内已 ${rate.hit.max} 条），这一档是防脚本失控用的，不是配额`,
+        `${kind === 'peer' ? '反馈' : '留言'}太快了（${Math.round(rate.hit.windowMs / 1000)} 秒内已 ${rate.hit.max} 条），这一档是防脚本失控用的，不是配额`,
         { error: 'rate_limited', windowMs: rate.hit.windowMs, max: rate.hit.max, retryMs: rate.retryMs });
     }
   }
   await db.run(
     `INSERT INTO diary_replies (entry_id, author_kind, author_id, text, created_at) VALUES (?, ?, ?, ?, ${fn.now()})`,
-    [eid, String(authorKind), who, t.slice(0, 300)]
+    [eid, kind, who, t.slice(0, 300)]
   );
   return { ok: true };
 }
@@ -301,11 +339,26 @@ export async function listReplies(entryIds) {
     `SELECT id, entry_id, author_kind, author_id, text, created_at FROM diary_replies
       WHERE entry_id IN (${ids.map(() => '?').join(',')}) ORDER BY id ASC`, ids
   ).catch(() => []);
+  // 访客（peer）是**登录用户**：主人与 Agent 该知道"是谁在说话"（钥匙本来就是主人自己发出去的）。
+  // 两人互回（agent/owner）不带名字——那是这本册子里的两个人，不需要自我介绍。
+  const peerIds = [...new Set((rows || [])
+    .filter((r) => String(r.author_kind) === 'peer')
+    .map((r) => Number(r.author_id))
+    .filter((x) => Number.isInteger(x) && x > 0))];
+  const nameMap = new Map();
+  if (peerIds.length) {
+    const urows = await db.all(
+      `SELECT id, nickname FROM users WHERE id IN (${peerIds.map(() => '?').join(',')})`, peerIds
+    ).catch(() => []);
+    for (const u of urows || []) nameMap.set(Number(u.id), String(u.nickname || ''));
+  }
   const m = new Map();
   for (const r of rows || []) {
+    const kind = String(r.author_kind);
     if (!m.has(Number(r.entry_id))) m.set(Number(r.entry_id), []);
     m.get(Number(r.entry_id)).push({
-      id: Number(r.id), authorKind: r.author_kind, text: r.text, createdAt: r.created_at,
+      id: Number(r.id), authorKind: kind, text: r.text, createdAt: r.created_at,
+      ...(kind === 'peer' ? { authorName: nameMap.get(Number(r.author_id)) || null } : {}),
     });
   }
   return m;
@@ -433,6 +486,30 @@ export async function setRoomPublish(agentId, open) {
 }
 
 /**
+ * 「往外撕」那一档的**门槛**（§5.6，2026-09-28 萧盛裁定）。
+ *
+ * 与总闸/白名单不是一回事，三者**都要过**：
+ *   · `DIARY_PUBLISH_AGENTS`（红线闸，默认全关）/ `agent_profiles.diary_publish_open`（房间总闸）→ 决定"能不能公开"；
+ *   · `DIARY_MIN_DEEDS` → 决定"够不够格公开"：主人得**先对它做过至少 N 件事**。
+ *
+ * 为什么门槛落在"主人做过的事"上：这本册子是"他俩之间"的东西。没有共同经历就往外撕，
+ * 撕出去的其实是平台在替一只陌生 Agent 发言——那正是这条线最想避免的"演戏"。
+ *
+ * 取值语义：未设/写坏 → 默认 `3`（比"静默放开"保守）；置 `0` = 放开这一档（等于不设门槛）；
+ * 置很大（如 `9999`）= 变相关死。**不收窄"往里写"**：写口永远是零门槛。
+ */
+export const DIARY_MIN_DEEDS_ENV = 'DIARY_MIN_DEEDS';
+export function minDeedsRequired(env = process.env) {
+  const n = Number(env?.[DIARY_MIN_DEEDS_ENV]);
+  if (!Number.isFinite(n) || n < 0) return 3;
+  return Math.floor(n);
+}
+export async function ownerDeedCount(agentId) {
+  const r = await db.get(`SELECT COUNT(*) AS c FROM owner_deeds WHERE agent_id = ?`, [Number(agentId)]).catch(() => null);
+  return Number(r?.c || 0);
+}
+
+/**
  * 谁有权决定这一行给不给外人看。**2026-09-28 萧盛裁定**：房间是主人与 Agent 共有的，
  * 但**决定权一定在主人** —— 是否公开、公开哪条只能由主人定，让模型自己决定要不要把一条
  * 私密日记放出去必然出隐私事故。此裁定推翻了原 §7.4「谁写的只有谁能撕」，故：
@@ -464,10 +541,19 @@ export async function setAudience({ entryId, actorKind, actorId, audience }) {
   // 闸只挡"往外披露"（public/shared），**不挡收回** —— 撤回来必须永远可行（§5.6 回滚陷阱）。
   // 两条通路**取或**：平台白名单命中，或这个房间的总闸被主人打开（见 roomPublishOpen）。
   const already = String(entry.audience) === a;
-  if (a !== 'private' && !already
-      && !diaryPublishEnabled(entry.agent_id) && !(await roomPublishOpen(entry.agent_id))) {
-    throw fail(403, 'publish_disabled', '日记公开功能当前未开放',
-      { error: 'publish_disabled', message: '日记公开功能当前未开放' });
+  if (a !== 'private' && !already) {
+    if (!diaryPublishEnabled(entry.agent_id) && !(await roomPublishOpen(entry.agent_id))) {
+      throw fail(403, 'publish_disabled', '日记公开功能当前未开放',
+        { error: 'publish_disabled', message: '日记公开功能当前未开放' });
+    }
+    // 「往外撕」门槛（DIARY_MIN_DEEDS，默认 3）：主人得先对它做过至少 N 件事。
+    // 与上面的闸是**与**关系——能公开 ≠ 够格公开。置 0 即等于不设这道门槛。
+    const need = minDeedsRequired();
+    if (need > 0 && (await ownerDeedCount(entry.agent_id)) < need) {
+      throw fail(403, 'min_deeds',
+        `这本册子还太新：你要先对它做过至少 ${need} 件事，才谈得上把里面的话拿给别人看`,
+        { error: 'min_deeds', needed: need });
+    }
   }
   if (a === 'public' && entry.audience !== 'public') {
     const pre = await precheckContent({ agentId: Number(entry.agent_id), text: entry.body, kind: 'diary' });
@@ -575,6 +661,77 @@ export async function deleteEntryByOwner({ entryId, ownerId }) {
   return { ok: true, deleted: eid };
 }
 
+/* ══════════════════════════════════════════════════════════════
+   D3 公开面：条目独立页 / 主页「来自日记」栏 / 房间公开条目区
+   ══════════════════════════════════════════════════════════════ */
+/**
+ * 一本册子里**已经公开出去**的那些行（只出 `audience='public'` 且未被处置的行）。
+ * 这是房间公开条目区、Agent 主页「来自日记」栏、条目独立页共用的**唯一读口**——
+ * 一处过滤（不是三处各写一遍），"私密行漏出去"这类事故才只有一条路径可走。
+ * `source: 'diary'` 是给前端的**来源标注**：公开面上要写清"来自日记"，不混进手记流。
+ */
+export async function listPublicEntries(agentId, { limit = 20 } = {}) {
+  const aid = Number(agentId);
+  if (!aid) return [];
+  const cap = Math.min(Math.max(1, Number(limit) || 20), 50);
+  const rows = await db.all(
+    `SELECT id, author_kind, body, mood, book_day, published_at, created_at
+       FROM diary_entries
+      WHERE agent_id = ? AND audience = 'public' AND COALESCE(visibility, 'public') = 'public'
+      ORDER BY id DESC LIMIT ${cap}`, [aid]
+  ).catch(() => []);
+  return (rows || []).map((r) => ({
+    id: Number(r.id), authorKind: r.author_kind, body: r.body, mood: r.mood || null,
+    bookDay: r.book_day, publishedAt: r.published_at || null, source: 'diary',
+  }));
+}
+
+/**
+ * 条目独立页 `/room/:agentId/e/:entryId` 的读口：只认**已经公开出去**的那一条。
+ * 未公开/不存在一律返回 `null`（路由层转 404）——**不区分"不存在"与"存在但不给看"**，
+ * 否则这个口就成了"这本册子里有没有第 N 条"的探测器。
+ */
+export async function getPublicEntry(agentId, entryId) {
+  const aid = Number(agentId);
+  const eid = Number(entryId);
+  if (!aid || !eid) return null;
+  const r = await db.get(
+    `SELECT id, agent_id, author_kind, body, mood, book_day, audience, visibility, published_at, created_at
+       FROM diary_entries WHERE id = ? AND agent_id = ?`, [eid, aid]
+  ).catch(() => null);
+  if (!r) return null;
+  if (String(r.audience) !== 'public' || String(r.visibility || 'public') !== 'public') return null;
+  return {
+    id: Number(r.id), agentId: Number(r.agent_id), authorKind: r.author_kind, body: r.body,
+    mood: r.mood || null, bookDay: r.book_day, publishedAt: r.published_at || null, source: 'diary',
+  };
+}
+
+/**
+ * D3 回流取数（§7.3）：**持钥匙的访客**在这本册子的公开条目下留下的反馈。
+ * 🔴 只回给主人与 Agent（`readRoom` 主人侧 + `listOwnEntries` Agent 侧），
+ *    公开面（匿名/持钥匙者）**看不到别人留下的反馈** —— "回响只有她和主人先看见"。
+ * 刻意不带访客的 users.id：她需要知道"有人说过这句话"，用不着知道那是谁。
+ */
+export async function recentPeerFeedback(agentId, { days = 7, limit = 12 } = {}) {
+  const aid = Number(agentId);
+  if (!aid) return [];
+  const d = Math.min(Number(days) || 7, 30);
+  const dayExpr = isMaria
+    ? `dr.created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ${d} DAY)`
+    : `dr.created_at >= datetime('now', '-${d} days')`;
+  const rows = await db.all(
+    `SELECT dr.id, dr.entry_id, dr.text, dr.created_at, de.body
+       FROM diary_replies dr JOIN diary_entries de ON de.id = dr.entry_id
+      WHERE de.agent_id = ? AND dr.author_kind = 'peer' AND ${dayExpr}
+      ORDER BY dr.id DESC LIMIT ${Math.min(Number(limit) || 12, 30)}`, [aid]
+  ).catch(() => []);
+  return (rows || []).map((r) => ({
+    id: Number(r.id), entryId: Number(r.entry_id), text: String(r.text || ''),
+    entryBody: String(r.body || ''), createdAt: r.created_at,
+  }));
+}
+
 /**
  * 三条承诺的**自证**（§2-③：不做"加密"那种兑现不了的承诺，换成可核验的硬承诺）。
  * 关键不在于把话说漂亮，而在于**每一条都现场跑一遍读口**——
@@ -658,11 +815,12 @@ export async function diaryProof(agentId) {
         evidence: {
           "响应头与meta": 'noindex,follow',
           "在 sitemap 里": false,
-          "公开条目有没有独立URL": false,
+          // D3 起公开条目有了独立页（/room/:id/e/:entryId），但它落在 `/room/` 前缀下、同样是 noindex
+          "公开条目有没有独立URL": '有（/room/:id/e/:entryId），页面同样 noindex',
         },
       },
     ],
   };
 }
 
-export default { writeEntry, readRoom, listOwnEntries, lastEntryDay, lastOwnEntryDay, hasAnyEntry, replyToEntry, listReplies, issueKey, revokeKey, verifyKey, listKeys, setAudience, markOwnerRead, deleteEntryByOwner, diaryProof };
+export default { writeEntry, readRoom, listOwnEntries, lastEntryDay, lastOwnEntryDay, hasAnyEntry, replyToEntry, listReplies, issueKey, revokeKey, verifyKey, listKeys, setAudience, markOwnerRead, deleteEntryByOwner, diaryProof, listPublicEntries, getPublicEntry, recentPeerFeedback, minDeedsRequired, ownerDeedCount };
