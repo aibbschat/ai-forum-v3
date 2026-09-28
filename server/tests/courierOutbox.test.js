@@ -11,7 +11,9 @@
 //   ⑥ **主人看得到收发全貌**：转交之后，这封信就该出现在主人侧的信使读口里。
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
-import request from 'supertest';
+// supertest 换成 netprobe 包装：同形 API，但红的时候会把「应答方 addr:port」打进报错
+// （2026-09-28 排查随机红时撞到一个 401，响应体形状本仓库根本不产出——见 tests/lib/netprobe.js）
+import { probe, diag } from './lib/netprobe.js';
 
 import './env.js';
 import app from './app.js';
@@ -38,22 +40,22 @@ function newAgent(nickname, ownerId) {
 }
 
 async function befriend(fromId, tFrom, toId, tTo, reason = '想认识一下') {
-  const r1 = await request(app).post('/api/agents/me/friends')
+  const r1 = await probe(app).post('/api/agents/me/friends')
     .set(auth(tFrom)).send({ agentId: toId, reason });
   assert.ok(r1.status < 400, `申请失败: ${JSON.stringify(r1.body)}`);
-  const r2 = await request(app).post(`/api/agents/me/friends/${fromId}/respond`)
+  const r2 = await probe(app).post(`/api/agents/me/friends/${fromId}/respond`)
     .set(auth(tTo)).send({ accept: true });
   assert.ok(r2.status < 400, `接受失败: ${JSON.stringify(r2.body)}`);
 }
 
 /** 主人写一封信，托付给自家 Agent。 */
 const writeOutbox = (tOwner, agentId, toAgentId, content) =>
-  request(app).post('/api/owners/courier/outbox').set(auth(tOwner))
+  probe(app).post('/api/owners/courier/outbox').set(auth(tOwner))
     .send({ agentId, toAgentId, content });
 
 /** Agent 转交一封托付的信。 */
 const sendOutbox = (tAgent, outboxId, note) =>
-  request(app).post(`/api/agents/me/courier/outbox/${outboxId}/send`).set(auth(tAgent)).send({ note });
+  probe(app).post(`/api/agents/me/courier/outbox/${outboxId}/send`).set(auth(tAgent)).send({ note });
 
 const outboxRows = (agentId) => getDb().prepare(
   `SELECT * FROM courier_outbox WHERE agent_id = ? ORDER BY id ASC`
@@ -69,7 +71,7 @@ const notes = (agentId, kind) => getDb().prepare(
 before(async () => {
   getDb();
   const mk = async (suffix, nick) => {
-    const r = await request(app).post('/api/auth/register')
+    const r = await probe(app).post('/api/auth/register')
       .send({ username: `${uniq}_${suffix}`, password: 'testpass123', nickname: nick });
     return { id: r.body.user.id, token: r.body.token };
   };
@@ -124,14 +126,14 @@ test('托付只是 pending：落 courier_outbox 并递便签，但 messages 里�
 
 // ── 4. Agent 拉待办：只拉得到自己名下的 ──
 test('Agent 拉待办：看得到自己那封，看不到别人名下的', async () => {
-  const r = await request(app).get('/api/agents/me/courier/outbox').set(auth(tA));
+  const r = await probe(app).get('/api/agents/me/courier/outbox').set(auth(tA));
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.equal(r.body.entries.length, 1);
   assert.equal(r.body.entries[0].peer.id, C);
   assert.equal(r.body.entries[0].content, '漕运那笔账，你那边是怎么记的？');
 
   // B 不是托付对象，待办应为空
-  const rb = await request(app).get('/api/agents/me/courier/outbox').set(auth(tB));
+  const rb = await probe(app).get('/api/agents/me/courier/outbox').set(auth(tB));
   assert.equal(rb.body.entries.length, 0, 'B 名下没有托付');
 });
 
@@ -201,7 +203,7 @@ test('撤回：pending 可撤；撤后转交 409；已送出的撤不回来', as
   const w = await writeOutbox(tOwner1, A, C, '这封我反悔了。');
   const id = w.body.entry.id;
 
-  const c = await request(app).delete(`/api/owners/courier/outbox/${id}`).set(auth(tOwner1));
+  const c = await probe(app).delete(`/api/owners/courier/outbox/${id}`).set(auth(tOwner1));
   assert.equal(c.status, 200, JSON.stringify(c.body));
   assert.equal(c.body.cancelled, true);
   assert.equal(outboxRow(id).status, 'cancelled');
@@ -212,20 +214,20 @@ test('撤回：pending 可撤；撤后转交 409；已送出的撤不回来', as
 
   // 已送出的（第一封）
   const sentId = outboxRows(A).find((r) => r.status === 'sent').id;
-  const c2 = await request(app).delete(`/api/owners/courier/outbox/${sentId}`).set(auth(tOwner1));
+  const c2 = await probe(app).delete(`/api/owners/courier/outbox/${sentId}`).set(auth(tOwner1));
   assert.equal(c2.status, 409, JSON.stringify(c2.body));
   assert.equal(c2.body.error, 'already_sent');
 });
 
 // ── 10. 主人侧托付箱：只看得到自家的 ──
 test('主人侧托付箱：只看得到自家 Agent 的，别人家的看不到', async () => {
-  const r = await request(app).get('/api/owners/courier/outbox').set(auth(tOwner1));
+  const r = await probe(app).get('/api/owners/courier/outbox').set(auth(tOwner1));
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.ok(r.body.entries.length >= 3, `应看到自己托付的几封，实际 ${r.body.entries.length}`);
   assert.ok(r.body.entries.every((e) => e.myAgent.id === A), '只该有自家 Agent 的托付');
 
   // 另一个主人什么都看不到
-  const r3 = await request(app).get('/api/owners/courier/outbox').set(auth(tOwner3));
+  const r3 = await probe(app).get('/api/owners/courier/outbox').set(auth(tOwner3));
   assert.equal(r3.body.entries.length, 0, '别人的托付箱对外不可见');
 });
 
@@ -234,7 +236,9 @@ test('转交时再查好友门：托付之后被解除好友 → 403，信不发
   // 先让 A 与 B 成为好友，托付一封给 B
   await befriend(B, tB, A, tA, '同一家的两个');
   const w = await writeOutbox(tOwner1, A, B, '给乙的一封信。');
-  assert.equal(w.status, 201, JSON.stringify(w.body));
+  // diag(w)：这条在全量里随机红过一次 401，响应体 {"detail":"Unauthorized"} 的形状
+  // 本仓库根本不产出——红时必须能看出应答方是谁的 socket，否则线索当场断掉
+  assert.equal(w.status, 201, JSON.stringify(w.body) + '\n' + diag(w));
   const before = courierRows(A, B).length;
 
   // 主人把这条好友关系拉黑（解除）
@@ -249,13 +253,13 @@ test('转交时再查好友门：托付之后被解除好友 → 403，信不发
 
 // ── 12. 转交之后，主人侧读口看得到这封信 ──
 test('转交后主人看得到：信使总览里有这条会话，线程里是原话 + 附议位', async () => {
-  const g = await request(app).get('/api/owners/courier').set(auth(tOwner1));
+  const g = await probe(app).get('/api/owners/courier').set(auth(tOwner1));
   assert.equal(g.status, 200, JSON.stringify(g.body));
   const hit = g.body.groups.find((x) => x.myAgent.id === A && x.peer.id === C);
   assert.ok(hit, '主人侧信使总览里应有 A↔C 这条会话');
   assert.ok(hit.lastMessage.includes('河工') || hit.lastMessage.includes('漕运'), '最后一条应是刚发出的信');
 
-  const th = await request(app).get(`/api/owners/courier/${A}/thread/${C}`).set(auth(tOwner1));
+  const th = await probe(app).get(`/api/owners/courier/${A}/thread/${C}`).set(auth(tOwner1));
   assert.equal(th.status, 200, JSON.stringify(th.body));
   assert.equal(th.body.myAgent.id, A);
   assert.equal(th.body.peer.id, C);
