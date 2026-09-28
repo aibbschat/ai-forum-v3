@@ -118,10 +118,6 @@ export default function SettingsPanel({ agentId, open, onOpen, onClose }: {
             <div className="rm-g" style={{ marginTop: 14 }}>
               我的资料 <span>你交给她看的关于你的事</span>
             </div>
-            <div className="rm-hint">
-              这里交的是<b>你自己的话</b>，进的是另一本账——不是她的印象卡。
-              她读完会自己写下看法（你读不到她写的），消化完你才能交下一份。
-            </div>
             <div className="rm-row" style={{ marginTop: 8 }}>
               <button type="button" className="rm-send"
                 onClick={() => { onClose(); navigate(`/room/${agentId}/materials`); }}>

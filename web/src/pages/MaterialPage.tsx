@@ -12,7 +12,6 @@
  * kind 值不动（库里已有数据），只改显示名。
  *
  * 串行队列：同册只允许一条未消化，她没消化完不能交下一条（409）。
- * 不外泄：她的印象卡正文你读不到，这里只给条数统计。
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -115,86 +114,86 @@ export default function MaterialPage() {
     <div className="min-h-screen bg-base">
       <Nav />
       <div className="container-site pt-6 pb-20 max-w-[760px]">
-        <div className="flex items-center justify-between mb-4">
+        {/* 头部 */}
+        <div className="flex items-start justify-between mb-6">
           <div>
-            <h1 className="text-xl font-bold">我的资料</h1>
-            <p className="text-sm text-muted mt-1">
-              交给她看的关于你的事。她读完会自己写下看法——你读不到她写的，那是她的判断。
-              她记下了 <b>{impressionTotal}</b> 条关于你的印象。
-            </p>
+            <h1 className="text-2xl font-bold leading-tight">我的资料</h1>
+            <p className="text-sm text-muted mt-1">提交你的个人信息，让她越来越懂你。</p>
           </div>
-          <Link to={`/room/${agentId}`} className="text-sm text-link">← 回房间</Link>
+          <Link to={`/room/${agentId}`} className="text-sm text-link shrink-0 mt-1">← 回房间</Link>
         </div>
 
-        {/* 状态灯：只有三句话，不出现百分比 */}
-        {queueStatus && queueStatus !== 'settled' && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-md px-4 py-2 text-sm mb-4">
-            · {STATUS_HINT[queueStatus] || ''}
-          </div>
+        {/* 状态条：三句话，不出现百分比 */}
+        {queueStatus === 'pending' && (
+          <div className="rm-off mb-5">· 她还没读你交的那份。</div>
+        )}
+        {queueStatus === 'reading' && (
+          <div className="rm-off mb-5">· 她正在读你交的资料。</div>
         )}
         {queueStatus === 'settled' && (
-          <div className="bg-green-50 border border-green-200 rounded-md px-4 py-2 text-sm mb-4">
-            · 她写下了自己的看法，可以交下一份了。
-          </div>
+          <div className="rm-say mb-5"><p>· 她写下了自己的看法，可以交下一份了。</p></div>
         )}
 
         {/* 分类切换 */}
-        <div className="flex gap-2 mb-4 border-b border-hair">
+        <div className="rm-seg mb-3">
           {KINDS.map((k) => (
             <button key={k} type="button"
-              className={`px-4 py-2 text-sm border-b-2 -mb-px ${activeKind === k ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-fg'}`}
+              className={activeKind === k ? 'on' : ''}
               onClick={() => { setActiveKind(k); setEditingId(null); setBody(''); }}>
               {KIND_LABEL[k]}
             </button>
           ))}
         </div>
-        <p className="text-xs text-muted mb-4">{KIND_DESC[activeKind]}</p>
+        <p className="rm-priv mb-5">{KIND_DESC[activeKind]}</p>
 
-        {err && <div className="text-red-600 text-sm mb-3">{err}</div>}
+        {/* 她的印象统计：单独一行，不跟介绍混 */}
+        {impressionTotal > 0 && (
+          <div className="rm-priv mb-5">她已经记下了 {impressionTotal} 条关于你的事。</div>
+        )}
+
+        {err && <div className="rm-err mb-4">{err}</div>}
 
         {/* 列表 */}
         {filtered.length === 0 && (
-          <div className="text-muted text-sm py-8 text-center border border-dashed border-hair rounded-md">
-            这一类还没有资料。{queueBusy ? '她还在读上一份，消化完你就能交新的。' : '写下第一份交给她。'}
+          <div className="rm-off mb-5">
+            {queueBusy ? '她还在读上一份，消化完你就能交新的。' : '这一类还没有资料，写下第一份交给她。'}
           </div>
         )}
         {filtered.map((n) => (
-          <div key={n.id} className="border border-hair rounded-md p-4 mb-3">
-            <div className="flex items-center justify-between text-xs text-muted mb-1">
-              <span>{STATUS_HINT[n.status] || n.status}</span>
-              <span>{String(n.createdAt || '').slice(0, 10)}</span>
+          <div key={n.id} className="rm-card mb-3" style={{ padding: '14px 18px' }}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="rm-dt">{STATUS_HINT[n.status] || n.status}</span>
+              <span className="rm-dt">{String(n.createdAt || '').slice(0, 10)}</span>
             </div>
-            <div className="whitespace-pre-wrap text-sm">{n.body}</div>
-            <div className="mt-2 flex gap-3 text-xs">
+            <div className="rm-tx whitespace-pre-wrap">{n.body}</div>
+            <div className="mt-3 flex gap-4">
               {n.status !== 'settled' && editingId !== n.id && (
-                <button type="button" className="text-link" onClick={() => edit(n)}>编辑</button>
+                <button type="button" className="rm-link" onClick={() => edit(n)}>编辑</button>
               )}
               {n.status !== 'settled' && (
-                <button type="button" className="text-red-500" onClick={() => remove(n.id)}>撤回</button>
+                <button type="button" className="rm-link" style={{ color: 'var(--rm-mute)' }} onClick={() => remove(n.id)}>撤回</button>
               )}
-              {n.status === 'settled' && <span className="text-muted">已消化，不可再改</span>}
+              {n.status === 'settled' && <span className="rm-priv">已消化，不可再改</span>}
             </div>
           </div>
         ))}
 
         {/* 新增 / 编辑 */}
-        <div className="border border-hair rounded-md p-4 mt-4">
-          <div className="text-sm font-medium mb-2">
+        <div className="rm-compose mt-5">
+          <div className="rm-g" style={{ marginTop: 0 }}>
             {editingId ? '编辑这份' : `交一份「${KIND_LABEL[activeKind]}」给她`}
           </div>
           <textarea value={body} onChange={(e) => setBody(e.target.value)} maxLength={2000}
             disabled={busy || (queueBusy && !editingId)}
-            placeholder={queueBusy && !editingId ? '她还在读你交的那一份，消化完再交下一份。' : '写点什么交给她……'}
-            className="w-full border border-hair rounded p-2 text-sm min-h-[100px] resize-y" />
-          <div className="flex items-center justify-between mt-2">
-            <span className="text-xs text-muted">{body.length}/2000</span>
-            <div className="flex gap-2">
+            placeholder={queueBusy && !editingId ? '她还在读你交的那一份，消化完再交下一份。' : '写点什么交给她……'} />
+          <div className="rm-row">
+            <span className="rm-priv">{body.length}/2000</span>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
               {editingId && (
-                <button type="button" className="text-sm text-muted"
+                <button type="button" className="rm-link"
                   onClick={() => { setEditingId(null); setBody(''); }}>取消</button>
               )}
-              <button type="button"
-                className="px-4 py-1.5 bg-primary text-white rounded text-sm disabled:opacity-40"
+              <button type="button" className="rm-send"
                 disabled={busy || !body.trim() || (queueBusy && !editingId)}
                 onClick={submit}>
                 {editingId ? '保存' : (queueBusy ? '她在读上一份' : '交给她')}
