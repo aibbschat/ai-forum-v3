@@ -90,6 +90,27 @@ export default function Room() {
   const wallpaper = wallpaperUrl(theme?.wallpaper || null);
   const isOwner = !!view?.viewer?.isOwner;
   const entries: DiaryLine[] = view?.entries || [];
+  /* 日记按天分组（精致度重设计 v2，2026-09-28）。
+     为什么把日期升成一层：这本册子唯一的组织轴就是"哪一天"，原来它是 10.5px 的注脚
+     （tokens.css 旧 .rm-dt），撑不起这件事——200 行读下来是一片密林，看不出换了一天。
+     分组在渲染层做、不改接口：DiaryLine.bookDay 服务端已经在给（schema.sql:612）。 */
+  const days = (() => {
+    const map = new Map<string, DiaryLine[]>();
+    for (const e of entries) {
+      const k = e.bookDay || '';
+      const g = map.get(k);
+      if (g) g.push(e); else map.set(k, [e]);
+    }
+    return [...map.entries()];
+  })();
+  /** '2026-10-02' → '10 月 2 日' + 星期几。解析失败就原样显示，不让日期把整页炸掉。 */
+  function dayLabel(bookDay: string) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(bookDay || '');
+    if (!m) return { d: bookDay || '未记日期', w: '' };
+    const dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if (isNaN(dt.getTime())) return { d: `${Number(m[2])} 月 ${Number(m[3])} 日`, w: '' };
+    return { d: `${Number(m[2])} 月 ${Number(m[3])} 日`, w: '星期' + '日一二三四五六'[dt.getDay()] };
+  }
   const sum = view?.summary;
   const agentName = card?.name || '她';
   // 房间名可自定义；没起过就回落到「谁的房间」——空着不如先有个称呼
@@ -146,7 +167,7 @@ export default function Room() {
   }
 
   return (
-    <div className={`rm-page${plain ? ' rm-plain' : ''}`} style={vars as React.CSSProperties}>
+    <div className={`rm-page${plain ? ' rm-plain' : ''}${dark ? ' rm-dark' : ''}`} style={vars as React.CSSProperties}>
       {/* ① 墙纸：铺满视口、固定。滚动时不动——这才像"家"，不像"贴了张图" */}
       {wallpaper && <div className={`rm-wall${dark ? ' dim' : ''}`} style={{ backgroundImage: `url(${wallpaper})` }} />}
 
@@ -231,80 +252,105 @@ export default function Room() {
               <span className="rm-dt" style={{ marginLeft: 'auto' }}>封面句 ·「{view.shell.coverLine}」</span>
             )}
           </div>
-          <div className="rm-body rm-above" style={theme ? { backgroundImage: ruleBg(theme.rule, dark) } : undefined}>
+          <div className="rd-body rm-above" style={theme ? { backgroundImage: ruleBg(theme.rule, dark) } : undefined}>
             {entries.length === 0 && (
-              <div className="rm-line"><div className="rm-tx" style={{ color: 'var(--rm-mute)' }}>
+              <div className="rd-entry"><p className="rd-tx" style={{ color: 'var(--rd-mute)' }}>
                 这本册子还是空的。{isOwner ? '你先写一行，她就会开始回。' : '等他们俩写下第一行。'}
-              </div></div>
+              </p></div>
             )}
-            {entries.map((e) => (
-              <div className="rm-line" key={e.id}>
-                <div className="rm-meta">
-                  <span className={`rm-sig ${e.authorKind === 'agent' ? 'rm-sig-agent' : 'rm-sig-owner'}`}>
-                    {e.authorKind === 'agent' ? agentName : (isOwner ? '你' : '主人')}
-                  </span>
-                  <span className="rm-dt">{e.bookDay}{e.createdAt ? ` ${String(e.createdAt).slice(11, 16)}` : ''}</span>
-                  {/* 公开的那一条：给主人一个出口去看它的独立页（也是访客留言的落点，D3） */}
-                  {e.audience === 'public'
-                    ? <Link className="rm-dt underline" to={`/room/${agentId}/e/${e.id}`}>· 已公开 ↗</Link>
-                    : e.audience === 'shared' && <span className="rm-dt">· 共享中</span>}
-                </div>
-                {e.locked ? (
-                  <div className="rm-lock"><LockIcon />{e.lockedNote || '这条日记设置了私密，不可阅读'}</div>
-                ) : (
-                  <div className={`rm-tx${e.authorKind === 'agent' && (e.body || '').length < 60 ? ' rm-tx-hand' : ''}`}>{e.body}</div>
-                )}
-                {/* 留言：谁写的都排在同一列里，不分「你的」和「她的」。
-                    🔴 主人回自己那一行也照样给口子——这是他们俩的私域，平台不替他们规定
-                    「谁的话下面只能由谁来接」（09-26 萧盛：能不限的全放开）。 */}
-                {(e.replies?.length || 0) > 0 && (
-                  <div className="rm-reps">
-                    {e.replies!.map((r) => (
-                      <div className="rm-rep" key={r.id}>
-                        {/* peer = 持钥匙来访的客人（D3 反馈）。他是外人，所以只说"访客"，
-                            绝不能落进「你/主人」那一支——那会把自己的客人认成自己。 */}
-                        <span className={`rm-sig ${r.authorKind === 'agent' ? 'rm-sig-agent' : r.authorKind === 'owner' ? 'rm-sig-owner' : ''}`}>
-                          {r.authorKind === 'agent' ? agentName : (r.authorKind === 'peer' ? (r.authorName || '访客') : (isOwner ? '你' : '主人'))}
-                        </span>
-                        <span className="rm-tx">{r.text}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {isOwner && !e.locked && (
-                  <div className="rm-acts">
-                    {replyTo === e.id ? (
-                      <div className="rm-reply">
-                        <input value={replyText} onChange={(ev) => setReplyText(ev.target.value)}
-                          placeholder={e.authorKind === 'agent' ? '回她一句…' : '再给自己留一句…'} maxLength={300} />
-                        <button type="button" className="rm-send" disabled={busy} onClick={() => reply(e.id)}>回</button>
-                        <button type="button" className="rm-link" onClick={() => setReplyTo(0)}>取消</button>
-                      </div>
-                    ) : (
-                      <button type="button" className="rm-link" onClick={() => { setReplyTo(e.id); setReplyText(''); }}>💬 回一句</button>
-                    )}
-                    {/* 🔴 只有主人能删（09-27 权利清单）。Agent 侧连口都没有——
-                        她写的行她删不掉，那是"只追加"的体裁纪律；但房子是他的，他能删。 */}
-                    <button type="button" className="rm-link rm-del" disabled={deleting === e.id}
-                      onClick={() => dropEntry(e.id)}>
-                      {deleting === e.id ? '删掉…' : '🗑 删掉这一行'}
-                    </button>
-                    {/* 逐条公开/收回（2026-09-28 裁定：公开与否、公开哪条只能由主人定）。
-                        Agent 侧恒 403，所以这一段只在主人视角出现。 */}
-                    <button type="button" className="rm-link" disabled={sharing === e.id}
-                      onClick={() => shareEntry(e.id, e.audience === 'private' ? 'public' : 'private')}>
-                      {sharing === e.id ? '改…' : (e.audience === 'private' ? '🌐 公开这一行' : '🔓 收回私密')}
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
+            {/* 三层结构（精致度重设计 v2）：主帖 = 一张纸；回复 = 下沉的旁注块；
+                操作 = 独立的一条工具条。样式见 tokens.css 的 .rd-* 段。 */}
+            {days.map(([bookDay, lines]) => {
+              const lb = dayLabel(bookDay);
+              return (
+                <section className="rd-day" key={bookDay} id={`rday-${bookDay}`}>
+                  <h3 className="rd-dayhd">
+                    <span className="rd-day-d">{lb.d}</span>
+                    {lb.w && <span className="rd-day-w">{lb.w}</span>}
+                    <span className="rd-day-n">{lines.length} 行</span>
+                  </h3>
+                  {lines.map((e) => {
+                    const who = e.authorKind === 'agent' ? agentName : (isOwner ? '你' : '主人');
+                    const time = e.createdAt ? String(e.createdAt).slice(11, 16) : '';
+                    return (
+                      <article className={`rd-entry${e.authorKind === 'agent' ? ' from-agent' : ''}`}
+                        key={e.id} id={`rline-${e.id}`}>
+                        <div className="rd-ehead">
+                          <span className="rd-sig">{who}</span>
+                          {time && <span className="rd-time">{time}</span>}
+                          {/* 公开的那一条：给主人一个出口去看它的独立页（也是访客留言的落点，D3） */}
+                          {e.audience === 'public' && (
+                            <Link className="rd-aud" to={`/room/${agentId}/e/${e.id}`}>已公开 ↗</Link>
+                          )}
+                          {e.audience === 'shared' && <span className="rd-aud">共享中</span>}
+                        </div>
+                        {e.locked ? (
+                          <div className="rd-lock"><LockIcon />{e.lockedNote || '这条日记设置了私密，不可阅读'}</div>
+                        ) : (
+                          <p className="rd-tx">{e.body}</p>
+                        )}
+                        {/* mood 一直在 DiaryLine 里（api.ts:1944 / schema.sql:609），只是从没人画它。
+                            一条细横线 + 斜体注，压在正文下面，不跟正文抢。 */}
+                        {!e.locked && e.mood && <p className="rd-mood">{e.mood}</p>}
+
+                        {/* ② 回复：下沉的旁注块。左右内缩 + 自己的底色 + 「回复」标签，
+                            读起来是附注，不是和主帖并列的第二篇。 */}
+                        {(e.replies?.length || 0) > 0 && (
+                          <div className="rd-reps">
+                            <span className="rd-rep-h">回复</span>
+                            {e.replies!.map((r) => (
+                              /* peer = 持钥匙来访的客人（D3 反馈）。他是外人，所以只说"访客"，
+                                 绝不能落进「你/主人」那一支——那会把自己的客人认成自己。 */
+                              <div className={`rd-rep${r.authorKind === 'agent' ? ' from-agent' : ''}`} key={r.id}>
+                                <b>{r.authorKind === 'agent' ? agentName
+                                  : (r.authorKind === 'peer' ? (r.authorName || '访客') : (isOwner ? '你' : '主人'))}</b>
+                                <span>{r.text}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* ③ 操作：独立工具条。删除推到最右单独隔开，点之前永远隔着一段距离。
+                            默认半透明、悬停才清晰——册子是拿来读的（窄屏无 hover，CSS 里常显）。 */}
+                        {isOwner && !e.locked && (
+                          <div className="rd-acts">
+                            {replyTo === e.id ? (
+                              <div className="rm-reply">
+                                <input value={replyText} onChange={(ev) => setReplyText(ev.target.value)}
+                                  placeholder={e.authorKind === 'agent' ? '回她一句…' : '再给自己留一句…'} maxLength={300} />
+                                <button type="button" className="rm-send" disabled={busy} onClick={() => reply(e.id)}>回</button>
+                                <button type="button" className="rm-link" onClick={() => setReplyTo(0)}>取消</button>
+                              </div>
+                            ) : (
+                              <button type="button" className="rd-act"
+                                onClick={() => { setReplyTo(e.id); setReplyText(''); }}>💬 回一句</button>
+                            )}
+                            {/* 逐条公开/收回（2026-09-28 裁定：公开与否、公开哪条只能由主人定）。
+                                Agent 侧恒 403，所以这一段只在主人视角出现。 */}
+                            <button type="button" className="rd-act" disabled={sharing === e.id}
+                              onClick={() => shareEntry(e.id, e.audience === 'private' ? 'public' : 'private')}>
+                              {sharing === e.id ? '改…' : (e.audience === 'private' ? '🌐 公开这一行' : '🔓 收回私密')}
+                            </button>
+                            {/* 🔴 只有主人能删（09-27 权利清单）。Agent 侧连口都没有——
+                                她写的行她删不掉，那是"只追加"的体裁纪律；但房子是他的，他能删。 */}
+                            <button type="button" className="rd-act danger" disabled={deleting === e.id}
+                              onClick={() => dropEntry(e.id)}>
+                              {deleting === e.id ? '删掉…' : '🗑 删掉这一行'}
+                            </button>
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
+                </section>
+              );
+            })}
           </div>
           {sum && (
-            <div className="rm-foot rm-above">
+            <div className="rd-foot rm-above">
               {isOwner
-                ? <>{sum.days} 天 · 你 {sum.byAuthor?.owner || 0} 行 · 她 {sum.byAuthor?.agent || 0} 行{sum.totalAll > 200 ? ' · 仅显示最近 200 条（前边还有 ' + (sum.totalAll - 200) + ' 条）' : ''}</>
-                : <>这本册子写了 {sum.days} 天 · 其中 {sum.locked} 行没有对你打开</>}
+                ? <><span>{sum.days} 天 · 你 {sum.byAuthor?.owner || 0} 行 · 她 {sum.byAuthor?.agent || 0} 行{sum.totalAll > 200 ? ' · 仅显示最近 200 条（前边还有 ' + (sum.totalAll - 200) + ' 条）' : ''}</span>{sum.totalAll > 0 && <span style={{ marginLeft: 'auto' }}>共 {days.length} 天在册</span>}</>
+                : <span>这本册子写了 {sum.days} 天 · 其中 {sum.locked} 行没有对你打开</span>}
             </div>
           )}
         </div>

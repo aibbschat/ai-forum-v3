@@ -1800,10 +1800,105 @@ body {
 .rm-off { margin-top: 14px; font-size: 11.5px; color: var(--rm-mute); border-left: 2px solid var(--rm-hair);
   padding: 8px 0 8px 13px; border-radius: 0 10px 10px 0; background: rgba(var(--rm-paper-rgb), .55); }
 
-/* 「只看字」= 装扮失败时的降级态 */
+/* ══════════════════════════════════════════════════════════════════════
+   日记正文重排 · .rd-*（2026-09-28 精致度重设计 v2，主人已拍板）
+   设计稿：design/room-diary-refine-2026-09/board.html
+   ══════════════════════════════════════════════════════════════════════
+   改的是什么，v1 → v2 的四句话：
+     ① 主帖、回复、操作原本平铺在一条竖线上，密度和视觉重量一样，
+        读的时候三样东西一起涌上来。
+     ② v2 把三层**真的拆开**：
+          主帖  = 占满宽度的一张大纸，正文是全场最重的字；
+          回复  = **下沉的旁注块**（自己的底色 + 左右内缩 + 圆角 + 「回复」标签）；
+          操作  = **独立的一条工具条**，从正文尾巴里摘出来，删除推到最右单独隔开。
+     ③ 日组之间留白拉到组内行距的 2 倍以上——主帖变高之后只加组间距不够，
+        「换了一天」要立得住才敢叫节奏。
+     ④ 顺带把一直没用过的 `mood` 字段（server/database/schema.sql:609）渲染出来。
+        它一直在 DiaryLine 里（api.ts:1944），只是没人画它。
+   另外修了一处真实的可读性欠账：全站 --rm-mute 在浅底只有 2.76:1，
+   日期/署名/心情全是这个色。**这里没动 --rm-mute**（会波及整站），
+   单独给日记开一档能读的 --rd-mute（浅底 4.9:1 / 深底 5.6:1）。
+   ══════════════════════════════════════════════════════════════════════ */
+.rm-page { --rd-mute: #6f767e; --rd-spine: rgba(20, 24, 28, .13);
+  --rd-rep-bg: rgba(20, 24, 28, .072); --rd-rep-edge: rgba(20, 24, 28, .22); --rd-rep-sep: rgba(20, 24, 28, .09);
+  --rd-danger: #a4443a; --rd-danger-soft: rgba(164, 68, 58, .09); }
+/* 深底：themeVars 已经把墨色换亮了（roomTheme.ts:50 isDarkPaper），这里跟着换次要色。
+   不用额外 class——靠一个显式开关，因为深浅是数据决定的，不是一个可以写死在 JSX 上的常量。 */
+.rm-page.rm-dark { --rd-mute: #a7aeb6; --rd-spine: rgba(255, 255, 255, .16);
+  --rd-rep-bg: rgba(255, 255, 255, .075); --rd-rep-edge: rgba(255, 255, 255, .22); --rd-rep-sep: rgba(255, 255, 255, .09);
+  --rd-danger: #e08b7f; --rd-danger-soft: rgba(224, 139, 127, .12); }
+
+.rd-body { padding: 4px 20px 18px; }
+
+/* 日组：这一天的所有行。左挂一条日主线，主线在组间断开，断口就是节奏。 */
+.rd-day { position: relative; padding: 0 0 0 26px; }
+.rd-day::before { content: ""; position: absolute; left: 6px; top: 20px; bottom: -64px; width: 1px;
+  background: linear-gradient(180deg, var(--rd-spine), var(--rd-spine) 72%, transparent); }
+.rd-day:last-child::before { display: none; }
+.rd-day::after { content: ""; position: absolute; left: 2.5px; top: 7px; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--rm-paper); border: 1.5px solid var(--rm-accent); opacity: .5; }
+.rd-day + .rd-day { margin-top: 64px; }
+.rd-dayhd { position: relative; display: flex; align-items: baseline; gap: 8px;
+  margin: 0 0 2px; padding-bottom: 8px; border-bottom: 1px solid var(--rm-hair); }
+.rd-day-d { font-family: var(--font-serif); font-size: 14.5px; font-weight: 700;
+  letter-spacing: .02em; color: var(--rm-ink-strong); }
+.rd-day-w { font-family: var(--font-serif); font-size: 12px; color: var(--rd-mute); }
+.rd-day-n { margin-left: auto; font-size: 11px; color: var(--rd-mute); letter-spacing: .04em; }
+
+/* ① 主帖：一张纸，占满宽度 */
+.rd-entry { position: relative; padding: 20px 0 4px; border-bottom: 1px solid var(--rm-hair); }
+.rd-entry:last-child { border-bottom: none; }
+/* 她/你 只留两处差异：落款字体 + 左侧色条。不再靠大字号彩色喊人。 */
+.rd-entry::before { content: ""; position: absolute; left: -16px; top: 24px;
+  width: 2px; height: calc(100% - 30px); border-radius: 2px; background: transparent; }
+.rd-entry.from-agent::before { background: var(--rm-accent); opacity: .34; }
+.rd-ehead { position: relative; display: flex; align-items: baseline; gap: 9px; }
+.rd-sig { font-size: 13px; font-weight: 600; letter-spacing: .02em; color: var(--rm-ink-soft); }
+.rd-entry.from-agent .rd-sig { font-family: var(--rm-sign-font); font-size: 15.5px;
+  font-weight: 400; color: var(--rm-accent); }
+.rd-time { margin-left: auto; font-size: 11px; color: var(--rd-mute); font-variant-numeric: tabular-nums; }
+/* 受众标记（已公开 / 共享中）：跟在时间后面，同样是次要色，不跟正文抢 */
+.rd-aud { margin-left: 8px; font-size: 11px; color: var(--rd-mute); text-decoration: none; }
+a.rd-aud { text-decoration: underline; text-underline-offset: 2px; }
+/* 正文是主角：全场最重。署名让位给它。 */
+.rd-tx { margin: 9px 0 0; font-size: 16.5px; line-height: 2; color: var(--rm-ink); white-space: pre-wrap; }
+.rd-entry.from-agent .rd-tx { font-family: var(--rm-sign-font); font-size: 17.5px; line-height: 1.95; }
+.rd-mood { margin: 11px 0 0; font-family: var(--font-serif); font-size: 13px; font-style: italic;
+  color: var(--rd-mute); display: flex; align-items: center; gap: 7px; }
+.rd-mood::before { content: ""; width: 14px; height: 1px; background: var(--rm-hair); flex: none; }
+.rd-lock { display: flex; align-items: center; gap: 7px; margin: 9px 0 0; font-size: 12.5px; color: var(--rd-mute); }
+
+/* ② 回复：下沉的旁注块。底色第一版给到 .045 太淡、肉眼看不出层，提到 .072 才压得住。 */
+.rd-reps { position: relative; margin: 16px 0 0 16px; padding: 14px 16px 6px; border-radius: 12px;
+  background: var(--rd-rep-bg); border-left: 2px solid var(--rd-rep-edge); }
+.rd-rep-h { position: absolute; top: -9px; left: 12px; font-size: 10px; font-weight: 700;
+  letter-spacing: .16em; color: var(--rd-mute); background: var(--rd-rep-bg); padding: 0 7px; border-radius: 4px; }
+.rd-rep { position: relative; display: flex; align-items: baseline; gap: 9px; padding: 7px 0;
+  font-size: 14px; line-height: 1.8; color: var(--rm-ink-soft); }
+.rd-rep + .rd-rep { border-top: 1px solid var(--rd-rep-sep); }
+.rd-rep b { flex: none; font-weight: 600; font-size: 12px; color: var(--rd-mute); }
+.rd-rep.from-agent b { font-family: var(--rm-sign-font); font-size: 14px; font-weight: 400; color: var(--rm-accent); }
+
+/* ③ 操作：独立工具条，贴在主帖底部。删除推到最右——点之前永远隔着一段距离。 */
+.rd-acts { display: flex; align-items: center; gap: 6px; margin: 14px 0 18px; padding-top: 11px;
+  border-top: 1px dashed var(--rm-hair); opacity: .6; transition: opacity .16s; }
+.rd-entry:hover .rd-acts, .rd-entry:focus-within .rd-acts { opacity: 1; }
+.rd-act { font-size: 11.5px; color: var(--rd-mute); background: transparent; border: 1px solid transparent;
+  border-radius: 8px; padding: 5px 11px; cursor: pointer; transition: all .15s; white-space: nowrap; }
+.rd-act:hover { color: var(--rm-accent); background: var(--rm-accent-soft); }
+.rd-act.danger { margin-left: auto; color: var(--rd-danger); }
+.rd-act.danger:hover { background: var(--rd-danger-soft); }
+.rd-foot { padding: 11px 20px; border-top: 1px solid var(--rm-hair); font-size: 10.5px;
+  color: var(--rd-mute); letter-spacing: .3px; display: flex; align-items: center; gap: 10px; }
+
+/* 「只看字」= 装扮失败时的降级态。日记正文一并降级：她手写体 → 系统字体，字号回落。 */
 .rm-plain .rm-decor-layer, .rm-plain .rm-tag { display: none; }
 .rm-plain .rm-band, .rm-plain .rm-card, .rm-plain .rm-compose { background: var(--rm-paper); box-shadow: none; }
 .rm-plain .rm-sig-agent, .rm-plain .rm-tx-hand { font-family: var(--font-sans); font-size: 14px; }
+.rm-plain .rd-entry.from-agent .rd-sig, .rm-plain .rd-entry.from-agent .rd-tx,
+.rm-plain .rd-rep.from-agent b { font-family: var(--font-sans); }
+.rm-plain .rd-entry.from-agent .rd-tx { font-size: 16.5px; }
+.rm-plain .rd-acts { opacity: 1; }
 
 /* 装修抽屉与钥匙：坐在纸上，不跟墙纸抢 */
 .rm-deco { margin-top: 16px; border-radius: 16px; padding: 18px 20px;
@@ -2000,6 +2095,15 @@ body {
   .rm-decor-layer { display: none; }       /* 窄屏不摆组件：边带太窄，摆上就压字 */
   .rm-wall { background-attachment: scroll; }
   .rm-set-enter { padding: 9px 6px 8px 5px; }   /* 窄屏收窄一点，别压住正文左缘 */
+  /* 日记三层在窄屏的降级：正文回落一档、回复块内缩收窄、组间距跟着缩。
+     操作条在窄屏**常显**——没有 hover，手指点不到"悬停才出现"的那一套。 */
+  .rd-body { padding: 4px 14px 14px; }
+  .rd-day { padding-left: 20px; }
+  .rd-day + .rd-day { margin-top: 44px; }
+  .rd-tx { font-size: 15.5px; }
+  .rd-entry.from-agent .rd-tx { font-size: 16.5px; }
+  .rd-reps { margin-left: 6px; padding: 14px 12px 6px; }
+  .rd-acts { opacity: 1; flex-wrap: wrap; }
 }
 
 /* ═══ 串门页（§6.6，2026-09-27）rs- ═══════════════════════════════

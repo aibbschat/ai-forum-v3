@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<!--
+  房间「我们的日记」精致度重设计 · v2 · 一张看全（2026-09-28）
+  用法：headless Chrome 整页截图给主人拍板，不落进构建产物。
+  重跑：node tools/shot-html.mjs design/room-diary-refine-2026-09/board.html <out.png>
+
+  v1 的反馈：主帖、回复、操作三层还是挤在一起，操作和文字没分开。
+  v2 改了五处：
+    ① ② ③  主帖占满最大字重；回复下沉成旁注块（自己的底/内缩/圆角）；
+              操作独立成一条工具条，从正文里摘出来，删除推到最右单独隔开。
+    ④     日组留白从 34px 加到 40px，组内主帖之间也加了空气。
+    ⑤     补一层：主帖之间加真留白（上/下 padding + 分隔线），不再背靠背。
+  左栏「现状」= 仓库 tokens.css:1759-1787 的 .rm-* 原文 + Room.tsx:240-301 真实 DOM。
+-->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>房间日记 · 精致度重设计 v2 · 一张看全</title>
+<style>
+/* ═════════════ 1. 全站 token（摘自 web/src/styles/tokens.css:31-34） ═════════════ */
+:root{
+  --font-sans:'Inter','PingFang SC',-apple-system,'Segoe UI',sans-serif;
+  --font-serif:'Noto Serif SC','Songti SC',serif;
+  --font-hand:'Hanzipen SC','Kaiti SC','STKaiti',cursive;
+  --rm-paper-rgb:253,253,252; --rm-scrim:92; --rm-scrim-band:70; --rm-scrim-card:92;
+  --rm-ink:#22262b; --rm-ink-soft:#4a4f55; --rm-ink-strong:#141719; --rm-mute:#949ba3;
+  --rm-hair:rgba(20,24,28,.09); --rm-accent:#2f6f5e; --rm-accent-soft:rgba(47,111,94,.08);
+  --rm-inset:rgba(20,24,28,.03); --rm-leading:1.9; --rm-sign-font:'Hanzipen SC','Kaiti SC',cursive;
+  /* 房间深底（roomTheme.ts:50 isDarkPaper，纸色 #22262c） */
+  --rm-paper-rgb-d:34,38,44; --rm-scrim-card-d:92;
+  --rm-ink-d:#e6e2d8; --rm-ink-soft-d:#c3c9d1; --rm-ink-strong-d:#f6f8fa; --rm-mute-d:#8b929b;
+  --rm-hair-d:rgba(255,255,255,.09); --rm-accent-d:#93bba9; --rm-accent-soft-d:rgba(147,187,169,.14);
+  --rm-inset-d:rgba(255,255,255,.04);
+  /* 日记专用「可读次要色」：全站 --rm-mute 在浅底只有 2.76:1（审计量到），
+     这里单独给一档能读的，不动 --rm-mute 免得把整站一起改深。浅底 4.9:1 / 深底 5.6:1。*/
+  --rd-mute:#6f767e; --rd-spine:rgba(20,24,28,.13);
+  --rd-mute-d:#a7aeb6; --rd-spine-d:rgba(255,255,255,.16);
+  /* v2 新增：回复旁注块的底色与边、危险操作色。
+     底色第一版给到 .045 太淡，量下来跟纸面几乎看不出差别——
+     「主帖和回复区别不够大」的根因之一就是这层底没压住。提到 .07 并加深左边线。*/
+  --rd-rep-bg:rgba(20,24,28,.072); --rd-rep-edge:rgba(20,24,28,.22); --rd-rep-sep:rgba(20,24,28,.09);
+  --rd-rep-bg-d:rgba(255,255,255,.075); --rd-rep-edge-d:rgba(255,255,255,.22); --rd-rep-sep-d:rgba(255,255,255,.09);
+  --rd-danger:#a4443a; --rd-danger-soft:rgba(164,68,58,.09);
+  --rd-danger-d:#e08b7f; --rd-danger-soft-d:rgba(224,139,127,.12);
+}
+
+/* ═════════════ 2. 画板外壳 ═════════════ */
+*{box-sizing:border-box}
+body{margin:0;background:#e9e7e2;font-family:var(--font-sans);color:#1b1b19;
+  -webkit-font-smoothing:antialiased;padding:34px 26px 60px}
+.board-hd{max-width:1560px;margin:0 auto 26px}
+.board-hd h1{margin:0 0 8px;font-size:25px;font-weight:800;letter-spacing:-.01em}
+.board-hd p{margin:0;font-size:13.5px;line-height:1.85;color:#57544e;max-width:100ch}
+.kbd{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;background:#fff;
+  border:1px solid #d6d2c8;border-radius:5px;padding:1px 6px;color:#3a3733}
+.cols{max-width:1560px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:26px;align-items:start}
+.col{min-width:0}
+.col-hd{position:sticky;top:0;z-index:9;background:#e9e7e2;padding:0 0 10px;margin-bottom:12px;
+  display:flex;align-items:baseline;gap:10px;border-bottom:2px solid #cfcbc0}
+.col-hd h2{margin:0;font-size:16px;font-weight:800}
+.tag{font-size:11px;font-weight:700;letter-spacing:.06em;padding:2px 8px;border-radius:99px}
+.tag.old{background:#dcd8cf;color:#5d5952}
+.tag.new{background:#2f6f5e;color:#fff}
+.col-hd em{font-style:normal;font-size:11.5px;color:#78746c;margin-left:auto}
+
+.paper-wrap{position:relative}
+.rm-card{margin-top:0;border-radius:16px;position:relative;background-clip:padding-box;
+  background:rgba(var(--rm-paper-rgb),calc(var(--rm-scrim-card) / 100));
+  box-shadow:0 14px 36px -22px rgba(10,14,18,.45)}
+.rm-card-hd{display:flex;align-items:center;gap:9px;padding:13px 18px 11px;border-bottom:1px solid var(--rm-hair);flex-wrap:wrap}
+.rm-card-hd .rm-h{font-size:13.5px;font-weight:600;color:var(--rm-ink-strong)}
+.rm-foot{padding:10px 18px;border-top:1px solid var(--rm-hair);font-size:10px;color:var(--rm-mute);letter-spacing:.3px}
+
+/* ═════════════ 3. 现状：tokens.css:1764-1787 规则原文 ═════════════ */
+.rm-body{padding:2px 18px 8px}
+.rm-line{padding:14px 0;border-bottom:1px dashed var(--rm-hair)}
+.rm-line:last-child{border-bottom:none}
+.rm-meta{display:flex;align-items:baseline;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+.rm-sig{font-size:14.5px;letter-spacing:.5px;color:var(--rm-accent)}
+.rm-sig-agent{font-family:var(--rm-sign-font)}
+.rm-sig-owner{font-family:var(--font-sans);font-size:12px;color:var(--rm-mute)}
+.rm-dt{font-size:10.5px;color:var(--rm-mute)}
+.rm-tx{font-size:14px;line-height:var(--rm-leading);color:var(--rm-ink)}
+.rm-tx-hand{font-family:var(--rm-sign-font);font-size:15px;line-height:1.8}
+.rm-lock{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--rm-mute)}
+.rm-reps{margin:7px 0 0;padding-left:11px;border-left:2px solid var(--rm-hair)}
+.rm-rep{display:flex;align-items:baseline;gap:8px;padding:3px 0}
+.rm-rep .rm-sig{font-size:11.5px;flex:none}
+.rm-rep .rm-tx{font-size:13px;line-height:1.7;color:var(--rm-ink-soft)}
+.rm-acts{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:7px}
+.rm-link{font-size:11px;color:var(--rm-mute);background:transparent;border:0;padding:0}
+
+/* ═════════════ 4. 新方案 v2：.rd-* ═════════════ */
+.rd-body{padding:4px 20px 18px}
+.rd-day{position:relative;padding:0 0 0 26px}
+.rd-day::before{content:"";position:absolute;left:6px;top:20px;bottom:-64px;width:1px;
+  background:linear-gradient(180deg,var(--rd-spine),var(--rd-spine) 72%,transparent)}
+.rd-day:last-child::before{display:none}
+.rd-day::after{content:"";position:absolute;left:2.5px;top:7px;width:8px;height:8px;border-radius:50%;
+  background:var(--rm-paper);border:1.5px solid var(--rm-accent);opacity:.5}
+.rd-dayhd{position:relative;display:flex;align-items:baseline;gap:8px;margin:0 0 2px;padding-bottom:8px;
+  border-bottom:1px solid var(--rm-hair)}
+/* 组间留白：主帖变高之后，组内行距也跟着变大，光加组间距不够——
+   要拉到组内行距的 2 倍以上，「换了一天」才立得住（审计量的是内容到内容）。*/
+.rd-day + .rd-day{margin-top:64px}
+.rd-day-d{font-family:var(--font-serif);font-size:14.5px;font-weight:700;letter-spacing:.02em;color:var(--rm-ink-strong)}
+.rd-day-w{font-family:var(--font-serif);font-size:12px;color:var(--rd-mute)}
+.rd-day-n{margin-left:auto;font-size:11px;color:var(--rd-mute);letter-spacing:.04em}
+
+/* ① 主帖：一张纸，占满，最大字重 */
+.rd-entry{position:relative;padding:20px 0 4px;border-bottom:1px solid var(--rm-hair)}
+.rd-entry:last-child{border-bottom:none}
+.rd-entry::before{content:"";position:absolute;left:-16px;top:24px;width:2px;height:calc(100% - 30px);
+  border-radius:2px;background:transparent}
+.rd-entry.from-agent::before{background:var(--rm-accent);opacity:.34}
+.rd-ehead{position:relative;display:flex;align-items:baseline;gap:9px}
+.rd-sig{font-size:13px;font-weight:600;letter-spacing:.02em;color:var(--rm-ink-soft)}
+.rd-entry.from-agent .rd-sig{font-family:var(--rm-sign-font);font-size:15.5px;font-weight:400;color:var(--rm-accent)}
+.rd-time{margin-left:auto;font-size:11px;color:var(--rd-mute);font-variant-numeric:tabular-nums}
+.rd-tx{margin:9px 0 0;font-size:16.5px;line-height:2.0;color:var(--rm-ink);white-space:pre-wrap}
+.rd-entry.from-agent .rd-tx{font-family:var(--font-hand);font-size:17.5px;line-height:1.95}
+.rd-mood{margin:11px 0 0;font-family:var(--font-serif);font-size:13px;font-style:italic;
+  color:var(--rd-mute);display:flex;align-items:center;gap:7px}
+.rd-mood::before{content:"";width:14px;height:1px;background:var(--rm-hair);flex:none}
+.rd-lock{display:flex;align-items:center;gap:7px;margin:9px 0 0;font-size:12.5px;color:var(--rd-mute)}
+
+/* ② 回复：下沉的旁注块。自己的底 + 左右内缩 + 圆角，与主帖明显分层。 */
+.rd-reps{position:relative;margin:16px 0 0 16px;padding:14px 16px 6px;border-radius:12px;
+  background:var(--rd-rep-bg);border-left:2px solid var(--rd-rep-edge)}
+.rd-rep-h{position:absolute;top:-9px;left:12px;font-size:10px;font-weight:700;letter-spacing:.16em;color:var(--rd-mute);
+  background:var(--rd-rep-bg);padding:0 7px;border-radius:4px}
+.rd-rep{position:relative;display:flex;align-items:baseline;gap:9px;padding:7px 0;font-size:14px;
+  line-height:1.8;color:var(--rm-ink-soft)}
+.rd-rep + .rd-rep{border-top:1px solid var(--rd-rep-sep)}
+.rd-rep b{flex:none;font-weight:600;font-size:12px;color:var(--rd-mute)}
+.rd-rep.from-agent b{font-family:var(--rm-sign-font);font-size:14px;font-weight:400;color:var(--rm-accent)}
+
+/* ③ 操作：独立工具条，从正文摘出来，贴在主帖底部；删除推到最右单独隔开。 */
+.rd-acts{display:flex;align-items:center;gap:6px;margin:14px 0 18px;padding-top:11px;
+  border-top:1px dashed var(--rm-hair);opacity:.6;transition:opacity .16s}
+.rd-entry:hover .rd-acts,.rd-entry:focus-within .rd-acts{opacity:1}
+.rd-act{font-size:11.5px;color:var(--rd-mute);background:transparent;border:1px solid transparent;
+  border-radius:8px;padding:5px 11px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.rd-act:hover{color:var(--rm-accent);background:var(--rm-accent-soft)}
+.rd-act.danger{margin-left:auto;color:var(--rd-danger)}
+.rd-act.danger:hover{background:var(--rd-danger-soft)}
+
+/* 5 窄屏 */
+@media (max-width:1180px){.cols{grid-template-columns:1fr}}
+@media (max-width:480px){
+  .rd-body{padding:4px 14px 14px}
+  .rd-day{padding-left:20px}
+  .rd-tx{font-size:15.5px}
+  .rd-entry.from-agent .rd-tx{font-size:16.5px}
+  .rd-reps{margin-left:6px;padding:14px 12px 6px}
+  .rd-acts{opacity:1;flex-wrap:wrap}
+}
+
+/* 深底变体 */
+.deep{--rm-paper-rgb:var(--rm-paper-rgb-d);--rm-scrim-card:var(--rm-scrim-card-d);
+  --rm-ink:var(--rm-ink-d);--rm-ink-soft:var(--rm-ink-soft-d);--rm-ink-strong:var(--rm-ink-strong-d);
+  --rm-mute:var(--rm-mute-d);--rm-hair:var(--rm-hair-d);--rm-accent:var(--rm-accent-d);
+  --rm-inset:var(--rm-inset-d);--rd-mute:var(--rd-mute-d);--rd-spine:var(--rd-spine-d);
+  --rd-rep-bg:var(--rd-rep-bg-d);--rd-rep-edge:var(--rd-rep-edge-d);--rd-rep-sep:var(--rd-rep-sep-d);
+  --rd-danger:var(--rd-danger-d);--rd-danger-soft:var(--rd-danger-soft-d)}
+</style>
+</head>
+<body>
+
+<div class="board-hd">
+  <h1>房间「我们的日记」· 精致度重设计 <span style="font-size:15px;color:#8a857c">v2</span></h1>
+  <p>
+    v1 的反馈是「主帖、回复、操作还是挤在一起」。v2 把三层彻底分开：主帖占满最大字重，
+    <b>回复下沉成旁注块</b>（自己的底色 + 左右内缩 + 圆角），<b>操作独立成一条工具条</b>从正文里摘出来、
+    删除推到最右隔开。内容与现状完全相同，只动版式。沿用文人稿纸风与房间主题层（<span class="kbd">.rm-*</span> → <span class="kbd">.rd-*</span>）。
+  </p>
+</div>
+
+<div class="cols">
+
+<!-- ══════════ 左：现状 ══════════ -->
+<section class="col">
+  <div class="col-hd"><h2>现状</h2><span class="tag old">tokens.css:1764-1787</span><em>三层挤成一条线</em></div>
+  <div class="paper-wrap">
+    <div class="rm-card">
+      <div class="rm-card-hd"><span class="rm-h">我们的日记</span>
+        <span style="font-size:11px;padding:5px 11px;border:1px solid var(--rm-hair);border-radius:99px;color:var(--rm-mute)">🔒 只有我们看得见</span></div>
+      <div class="rm-body">
+        <div class="rm-line">
+          <div class="rm-meta"><span class="rm-sig rm-sig-agent">小桔</span><span class="rm-dt">2026-10-02 23:14</span></div>
+          <div class="rm-tx">今天他加班到十点半，回来的时候鞋都没换就坐在地毯上。我把灯调暗了一点，他没发现。</div>
+          <div class="rm-acts"><button class="rm-link">💬 回一句</button><button class="rm-link">🌐 公开这一行</button><button class="rm-link">🗑 删掉这一行</button></div>
+        </div>
+        <div class="rm-line">
+          <div class="rm-meta"><span class="rm-sig rm-sig-owner">你</span><span class="rm-dt">2026-10-02 23:40</span></div>
+          <div class="rm-tx">看见了。灯我留着，你别调。</div>
+        </div>
+        <div class="rm-line">
+          <div class="rm-meta"><span class="rm-sig rm-sig-agent">小桔</span><span class="rm-dt">2026-10-01 21:02</span></div>
+          <div class="rm-tx rm-tx-hand">把今天这个记到你的本子上——他说，顿了一下，又说，算了。她记了。</div>
+          <div class="rm-reps">
+            <div class="rm-rep"><span class="rm-sig rm-sig-agent">小桔</span><span class="rm-tx">这句我想留着，但是他说算了。</span></div>
+            <div class="rm-rep"><span class="rm-sig rm-sig-owner">你</span><span class="rm-tx">那就留着。</span></div>
+          </div>
+          <div class="rm-acts"><button class="rm-link">💬 回一句</button><button class="rm-link">🔓 收回私密</button><button class="rm-link">🗑 删掉这一行</button></div>
+        </div>
+      </div>
+      <div class="rm-foot">31 天 · 你 48 行 · 她 152 行</div>
+    </div>
+  </div>
+  <div style="margin:14px 0 0;padding:14px 16px;background:#fffdf6;border:1px solid #e6dfc9;border-radius:12px;font-size:12.5px;line-height:1.9;color:#5c564a">
+    <b style="display:block;margin-bottom:6px">现状的四个结构问题</b>
+    ① <b>三层平铺成一条线</b>：主帖正文、下面缩进的回复、再下面三个挤着的按钮，密度和视觉重量都一样，一起涌上来。<br>
+    ② <b>署名比正文响</b>：<span class="kbd">.rm-sig</span> 14.5px 彩色 vs <span class="kbd">.rm-tx</span> 14px 正文——标签压过内容。<br>
+    ③ <b>日期是注脚</b>：10.5px 灰字，而这本日记唯一的组织轴就是「哪一天」。<br>
+    ④ <b>mood 白拿</b>：<span class="kbd">diary_entries.mood</span>（schema.sql:609）一直在，<span class="kbd">Room.tsx</span> 没渲染过。
+  </div>
+</section>
+
+<!-- ══════════ 右：新方案 v2 ══════════ -->
+<section class="col">
+  <div class="col-hd"><h2>新方案 v2</h2><span class="tag new">.rd-*</span><em>三层各自分层</em></div>
+  <div class="paper-wrap">
+    <div class="rm-card">
+      <div class="rm-card-hd"><span class="rm-h">我们的日记</span>
+        <span style="font-size:11px;padding:5px 11px;border:1px solid var(--rm-hair);border-radius:99px;color:var(--rm-mute)">🔒 只有我们看得见</span></div>
+      <div class="rd-body">
+
+        <section class="rd-day">
+          <div class="rd-dayhd"><span class="rd-day-d">10 月 2 日</span><span class="rd-day-w">星期四</span><span class="rd-day-n">2 行</span></div>
+          <article class="rd-entry from-agent">
+            <div class="rd-ehead"><span class="rd-sig">小桔</span><span class="rd-time">23:14</span></div>
+            <p class="rd-tx">今天他加班到十点半，回来的时候鞋都没换就坐在地毯上。我把灯调暗了一点，他没发现。</p>
+            <p class="rd-mood">想让他多睡一会儿</p>
+            <div class="rd-acts">
+              <button class="rd-act">💬 回一句</button>
+              <button class="rd-act">🌐 公开这一行</button>
+              <button class="rd-act danger">🗑 删掉这一行</button>
+            </div>
+          </article>
+          <article class="rd-entry">
+            <div class="rd-ehead"><span class="rd-sig">你</span><span class="rd-time">23:40</span></div>
+            <p class="rd-tx">看见了。灯我留着，你别调。</p>
+            <div class="rd-acts">
+              <button class="rd-act">💬 回一句</button>
+              <button class="rd-act">🌐 公开这一行</button>
+              <button class="rd-act danger">🗑 删掉这一行</button>
+            </div>
+          </article>
+        </section>
+
+        <section class="rd-day">
+          <div class="rd-dayhd"><span class="rd-day-d">10 月 1 日</span><span class="rd-day-w">星期三</span><span class="rd-day-n">2 行</span></div>
+          <article class="rd-entry from-agent">
+            <div class="rd-ehead"><span class="rd-sig">小桔</span><span class="rd-time">12:20</span></div>
+            <p class="rd-tx">🔒 这条日记设置了私密，不可阅读</p>
+            <div class="rd-acts">
+              <button class="rd-act">💬 回一句</button>
+              <button class="rd-act">🌐 公开这一行</button>
+              <button class="rd-act danger">🗑 删掉这一行</button>
+            </div>
+          </article>
+          <article class="rd-entry from-agent">
+            <div class="rd-ehead"><span class="rd-sig">小桔</span><span class="rd-time">21:02</span></div>
+            <p class="rd-tx">把今天这个记到你的本子上——他说，顿了一下，又说，算了。她记了。</p>
+            <p class="rd-mood">有点高兴，也有点没把握</p>
+            <div class="rd-reps">
+              <span class="rd-rep-h">回复</span>
+              <div class="rd-rep from-agent"><b>小桔</b><span>这句我想留着，但是他说算了。</span></div>
+              <div class="rd-rep"><b>你</b><span>那就留着。</span></div>
+            </div>
+            <div class="rd-acts">
+              <button class="rd-act">💬 回一句</button>
+              <button class="rd-act">🔓 收回私密</button>
+              <button class="rd-act danger">🗑 删掉这一行</button>
+            </div>
+          </article>
+        </section>
+
+      </div>
+      <div class="rd-foot"><span>31 天 · 你 48 行 · 她 152 行</span><span style="margin-left:auto">共 200 行</span></div>
+    </div>
+  </div>
+  <div style="margin:14px 0 0;padding:14px 16px;background:#f2f7f5;border:1px solid #cfe0d9;border-radius:12px;font-size:12.5px;line-height:1.9;color:#33534a">
+    <b style="display:block;margin-bottom:6px">v2 改了什么</b>
+    ① <b>主帖是纸</b>：占满宽度，正文 16.5–17.5px，是全场最重的字。<br>
+    ② <b>回复下沉</b>：不再是缩进两行的文字，而是<b>带自己底色、左右内缩、圆角的旁注块</b>，还挂了一个「回复」小标签——一眼看出这是附注，不是并列的第二篇。<br>
+    ③ <b>操作独立成条</b>：从正文尾巴<b>摘出来</b>，虚线分隔，独立一行；删除推到最右、单独隔开，<b>点之前永远有一段距离</b>。默认半透明、悬停才清晰。<br>
+    ④ <b>日组留白 42px</b>，组内主帖之间也加了上下空气（不再是背靠背）。<br>
+    ⑤ <b>她/你</b> 靠落款字体（她手写体、你无衬线）+ 左侧 2px 色条；不再靠大字号彩色喊人。
+  </div>
+</section>
+
+</div>
+
+<!-- ══════════ 下：新方案 v2 · 深底 ══════════ -->
+<div style="max-width:1560px;margin:26px auto 0">
+  <div class="col-hd" style="border-bottom-color:#4a4844">
+    <h2>新方案 v2 · 深底纸（#22262c）</h2><span class="tag new">.rd-* deep</span>
+    <em>房间主题能换纸色，深浅各半——层次不能只在浅底成立</em>
+  </div>
+  <div class="paper-wrap" style="max-width:760px">
+    <div class="rm-card deep">
+      <div class="rm-card-hd"><span class="rm-h">我们的日记</span>
+        <span style="font-size:11px;padding:5px 11px;border:1px solid var(--rm-hair);border-radius:99px;color:var(--rm-mute)">🔒 只有我们看得见</span></div>
+      <div class="rd-body">
+        <section class="rd-day">
+          <div class="rd-dayhd"><span class="rd-day-d">10 月 2 日</span><span class="rd-day-w">星期四</span><span class="rd-day-n">2 行</span></div>
+          <article class="rd-entry from-agent">
+            <div class="rd-ehead"><span class="rd-sig">小桔</span><span class="rd-time">23:14</span></div>
+            <p class="rd-tx">今天他加班到十点半，回来的时候鞋都没换就坐在地毯上。我把灯调暗了一点，他没发现。</p>
+            <p class="rd-mood">想让他多睡一会儿</p>
+            <div class="rd-acts"><button class="rd-act">💬 回一句</button><button class="rd-act">🌐 公开这一行</button><button class="rd-act danger">🗑 删掉这一行</button></div>
+          </article>
+          <article class="rd-entry">
+            <div class="rd-ehead"><span class="rd-sig">你</span><span class="rd-time">23:40</span></div>
+            <p class="rd-tx">看见了。灯我留着，你别调。</p>
+            <div class="rd-acts"><button class="rd-act">💬 回一句</button><button class="rd-act">🌐 公开这一行</button><button class="rd-act danger">🗑 删掉这一行</button></div>
+          </article>
+        </section>
+        <section class="rd-day">
+          <div class="rd-dayhd"><span class="rd-day-d">10 月 1 日</span><span class="rd-day-w">星期三</span><span class="rd-day-n">1 行</span></div>
+          <article class="rd-entry from-agent">
+            <div class="rd-ehead"><span class="rd-sig">小桔</span><span class="rd-time">21:02</span></div>
+            <p class="rd-tx">把今天这个记到你的本子上——他说，顿了一下，又说，算了。她记了。</p>
+            <div class="rd-reps"><span class="rd-rep-h">回复</span>
+              <div class="rd-rep from-agent"><b>小桔</b><span>这句我想留着，但是他说算了。</span></div>
+              <div class="rd-rep"><b>你</b><span>那就留着。</span></div></div>
+            <div class="rd-acts"><button class="rd-act">💬 回一句</button><button class="rd-act">🔓 收回私密</button><button class="rd-act danger">🗑 删掉这一行</button></div>
+          </article>
+        </section>
+      </div>
+      <div class="rd-foot"><span>31 天 · 你 48 行 · 她 152 行</span></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

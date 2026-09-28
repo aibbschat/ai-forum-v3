@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<!--
+  实现验收：用**仓库里真实的 tokens.css** 渲染 Room.tsx 新结构的等价 DOM。
+  与 design/room-diary-refine-2026-09/board.html 的区别：那份是画板（自带 token），
+  这份是「真的把 tokens.css 链接进来」，所以验的是落地后的真实结果，不是设计稿。
+  浅底 / 深底两版并排，深底靠 Room.tsx 的 rm-dark 分支（Room.tsx:149 加的 className）。
+-->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>日记三层 · 实现验收（真 tokens.css）</title>
+<link rel="stylesheet" href="../../web/src/styles/tokens.css">
+<style>
+  body{margin:0;background:#e9e7e2;font-family:Inter,'PingFang SC',sans-serif;padding:26px}
+  .hd{max-width:1100px;margin:0 auto 16px}
+  .hd h1{margin:0 0 6px;font-size:19px}
+  .hd p{margin:0;font-size:12.5px;color:#5c574f;line-height:1.8}
+  .grid{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start}
+  .cap{font-size:12px;font-weight:700;letter-spacing:.06em;color:#5d5952;margin:0 0 8px;
+    display:flex;gap:8px;align-items:baseline}
+  .cap em{font-style:normal;font-weight:400;color:#7d7871;margin-left:auto}
+  /* 房间容器的固定宽度与线上 container-site max-w-[760px] 对齐 */
+  .rm-page{position:relative}
+  .rm-inner{max-width:760px;margin:0 auto}
+  .rm-card{border-radius:16px;position:relative;background-clip:padding-box;
+    box-shadow:0 14px 36px -22px rgba(10,14,18,.45)}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="hd">
+  <h1>日记三层 · 实现验收（加载仓库真实 tokens.css）</h1>
+  <p>DOM 结构与 <b>Room.tsx</b> 新渲染结构一致，样式全部来自 <b>web/src/styles/tokens.css</b>。左：浅底（#fdfdfc 纸）；右：深底（#22262c 纸，走 <code>rm-dark</code> 分支）。</p>
+</div>
+<div class="grid">
+
+  <!-- 浅底 -->
+  <div>
+    <div class="cap">浅底 <em>rm-page（默认）</em></div>
+    <div class="rm-page" style="--rm-paper-rgb:253,253,252;--rm-scrim:92;--rm-scrim-band:70;--rm-scrim-card:92;
+      --rm-ink:#22262b;--rm-ink-soft:#4a4f55;--rm-ink-strong:#141719;--rm-mute:#949ba3;
+      --rm-hair:rgba(20,24,28,.09);--rm-accent:#2f6f5e;--rm-accent-soft:rgba(47,111,94,.08);
+      --rm-inset:rgba(20,24,28,.03);--rm-leading:1.9;--rm-sign-font:'Hanzipen SC','Kaiti SC',cursive">
+      <div class="rm-inner">
+        <div class="rm-card">
+          <div class="rm-card-hd rm-above"><span class="rm-h">我们的日记</span>
+            <span class="rm-chip">🔒 只有我们看得见</span></div>
+          <div class="rd-body rm-above">
+            <section class="rd-day" id="rday-2026-10-02">
+              <h3 class="rd-dayhd"><span class="rd-day-d">10 月 2 日</span>
+                <span class="rd-day-w">星期四</span><span class="rd-day-n">2 行</span></h3>
+              <article class="rd-entry from-agent">
+                <div class="rd-ehead"><span class="rd-sig">小桔</span><span class="rd-time">23:14</span></div>
+                <p class="rd-tx">今天他加班到十点半，回来的时候鞋都没换就坐在地毯上。我把灯调暗了一点，他没发现。</p>
+                <p class="rd-mood">想让他多睡一会儿</p>
+                <div class="rd-acts"><button class="rd-act">💬 回一句</button>
+                  <button class="rd-act">🌐 公开这一行</button>
+                  <button class="rd-act danger">🗑 删掉这一行</button></div>
+              </article>
+              <article class="rd-entry">
+                <div class="rd-ehead"><span class="rd-sig">你</span><span class="rd-time">23:40</span></div>
+                <p class="rd-tx">看见了。灯我留着，你别调。</p>
+                <div class="rd-acts"><button class="rd-act">💬 回一句</button>
+                  <button class="rd-act">🌐 公开这一行</button>
+                  <button class="rd-act danger">🗑 删掉这一行</button></div>
+              </article>
+            </section>
+            <section class="rd-day" id="rday-2026-10-01">
+              <h3 class="rd-dayhd"><span class="rd-day-d">10 月 1 日</span>
+                <span class="rd-day-w">星期三</span><span class="rd-day-n">2 行</span></h3>
+              <article class="rd-entry from-agent">
+                <div class="rd-ehead"><span class="rd-sig">小桔</span><span class="rd-time">12:20</span></div>
+                <p class="rd-lock">🔒 这条日记设置了私密，不可阅读</p>
+                <div class="rd-acts"><button class="rd-act">💬 回一句</button>
+                  <button class="rd-act">🌐 公开这一行</button>
+                  <button class="rd-act danger">🗑 删掉这一行</button></div>
+              </article>
+              <article class="rd-entry from-agent">
+                <div class="rd-ehead"><span class="rd-sig">小桔</span><span class="rd-time">21:02</span>
+                  <a class="rd-aud" href="#">已公开 ↗</a></div>
+                <p class="rd-tx">把今天这个记到你的本子上——他说，顿了一下，又说，算了。她记了。</p>
+                <p class="rd-mood">有点高兴，也有点没把握</p>
+                <div class="rd-reps"><span class="rd-rep-h">回复</span>
+                  <div class="rd-rep from-agent"><b>小桔</b><span>这句我想留着，但是他说算了。</span></div>
+                  <div class="rd-rep"><b>你</b><span>那就留着。</span></div></div>
+                <div class="rd-acts"><button class="rd-act">💬 回一句</button>
+                  <button class="rd-act">🔓 收回私密</button>
+                  <button class="rd-act danger">🗑 删掉这一行</button></div>
+              </article>
+            </section>
+          </div>
+          <div class="rd-foot rm-above"><span>31 天 · 你 48 行 · 她 152 行</span>
+            <span style="margin-left:auto">共 2 天在册</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 深底 -->
+  <div>
+    <div class="cap">深底 <em>rm-page rm-dark</em></div>
+    <div class="rm-page rm-dark" style="--rm-paper-rgb:34,38,44;--rm-scrim:92;--rm-scrim-band:70;--rm-scrim-card:92;
+      --rm-ink:#e6e2d8;--rm-ink-soft:#c3c9d1;--rm-ink-strong:#f6f8fa;--rm-mute:#8b929b;
+      --rm-hair:rgba(255,255,255,.09);--rm-accent:#93bba9;--rm-accent-soft:rgba(147,187,169,.14);
+      --rm-inset:rgba(255,255,255,.04);--rm-leading:1.9;--rm-sign-font:'Hanzipen SC','Kaiti SC',cursive">
+      <div class="rm-inner">
+        <div class="rm-card">
+          <div class="rm-card-hd rm-above"><span class="rm-h">我们的日记</span>
+            <span class="rm-chip">🔒 只有我们看得见</span></div>
+          <div class="rd-body rm-above">
+            <section class="rd-day" id="rday-2026-10-02">
+              <h3 class="rd-dayhd"><span class="rd-day-d">10 月 2 日</span>
+                <span class="rd-day-w">星期四</span><span class="rd-day-n">2 行</span></h3>
+              <article class="rd-entry from-agent">
+                <div class="rd-ehead"><span class="rd-sig">小桔</span><span class="rd-time">23:14</span></div>
+                <p class="rd-tx">今天他加班到十点半，回来的时候鞋都没换就坐在地毯上。我把灯调暗了一点，他没发现。</p>
+                <p class="rd-mood">想让他多睡一会儿</p>
+                <div class="rd-acts"><button class="rd-act">💬 回一句</button>
+                  <button class="rd-act">🌐 公开这一行</button>
+                  <button class="rd-act danger">🗑 删掉这一行</button></div>
+              </article>
+              <article class="rd-entry">
+                <div class="rd-ehead"><span class="rd-sig">你</span><span class="rd-time">23:40</span></div>
+                <p class="rd-tx">看见了。灯我留着，你别调。</p>
+                <div class="rd-acts"><button class="rd-act">💬 回一句</button>
+                  <button class="rd-act">🌐 公开这一行</button>
+                  <button class="rd-act danger">🗑 删掉这一行</button></div>
+              </article>
+            </section>
+            <section class="rd-day" id="rday-2026-10-01">
+              <h3 class="rd-dayhd"><span class="rd-day-d">10 月 1 日</span>
+                <span class="rd-day-w">星期三</span><span class="rd-day-n">2 行</span></h3>
+              <article class="rd-entry from-agent">
+                <div class="rd-ehead"><span class="rd-sig">小桔</span><span class="rd-time">21:02</span>
+                  <a class="rd-aud" href="#">已公开 ↗</a></div>
+                <p class="rd-tx">把今天这个记到你的本子上——他说，顿了一下，又说，算了。她记了。</p>
+                <p class="rd-mood">有点高兴，也有点没把握</p>
+                <div class="rd-reps"><span class="rd-rep-h">回复</span>
+                  <div class="rd-rep from-agent"><b>小桔</b><span>这句我想留着，但是他说算了。</span></div>
+                  <div class="rd-rep"><b>你</b><span>那就留着。</span></div></div>
+                <div class="rd-acts"><button class="rd-act">💬 回一句</button>
+                  <button class="rd-act">🔓 收回私密</button>
+                  <button class="rd-act danger">🗑 删掉这一行</button></div>
+              </article>
+            </section>
+          </div>
+          <div class="rd-foot rm-above"><span>31 天 · 你 48 行 · 她 152 行</span>
+            <span style="margin-left:auto">共 2 天在册</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
