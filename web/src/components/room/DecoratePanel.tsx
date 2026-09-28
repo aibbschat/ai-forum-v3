@@ -23,7 +23,7 @@
  *  ③ 抽屉里改一笔，房间立刻跟着变（onPreview）。装修不是"填表—提交—生效"，
  *     是"边改边看这间房"。
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RoomShell, RoomTheme } from '../../api';
 import { saveRoomTheme, uploadRoomAsset } from '../../api';
 import { fileToWallpaperDataUrl } from '../../lib';
@@ -137,16 +137,23 @@ export default function DecoratePanel({ agentId, shell, open, onClose, onSaved, 
     }
   }
 
-  const Head = ({ id, hint }: { id: Section; hint?: string }) => (
-    <button type="button" className={`rm-sec-hd${sec === id ? ' on' : ''}`}
-      onClick={() => setSec(id)} aria-expanded={sec === id}>
-      <span>{TITLES[id]}</span>
-      {hint ? <em>{hint}</em> : null}
-      <i>{sec === id ? '▾' : '▸'}</i>
-    </button>
-  );
-  const Body = ({ id, children }: { id: Section; children: React.ReactNode }) =>
-    (sec === id ? <div className="rm-sec-bd">{children}</div> : null);
+  // 🔴 这两个小组件**必须只在切换分组时重建**，不能在每次渲染时新建：
+  //   组件函数每次渲染换一个新引用，React 就当成"类型变了"，把 <Body> 下整棵子树卸载重建——
+  //   而 patch() 每敲一下键就 setT 重渲染一次，于是输入框的 DOM 节点每键都被换掉，
+  //   焦点与输入法预编辑串一起丢，表现就是"房间名/一句话这两个框打不进中文"。
+  //   依赖只有 [sec]：打字时 sec 不变 → 组件引用不变 → 输入框不再被重建。
+  const { Head, Body } = useMemo(() => ({
+    Head: ({ id, hint }: { id: Section; hint?: string }) => (
+      <button type="button" className={`rm-sec-hd${sec === id ? ' on' : ''}`}
+        onClick={() => setSec(id)} aria-expanded={sec === id}>
+        <span>{TITLES[id]}</span>
+        {hint ? <em>{hint}</em> : null}
+        <i>{sec === id ? '▾' : '▸'}</i>
+      </button>
+    ),
+    Body: ({ id, children }: { id: Section; children: React.ReactNode }) =>
+      (sec === id ? <div className="rm-sec-bd">{children}</div> : null),
+  }), [sec]);
 
   return (
     <>
