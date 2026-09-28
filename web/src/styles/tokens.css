@@ -1851,6 +1851,86 @@ body {
 .rm-hint { font-size: 10.5px; color: var(--rm-mute); line-height: 1.75; margin-top: 10px; }
 .rm-hint b { color: var(--rm-accent); font-weight: 500; }
 .rm-out { font-size: 11.5px; color: var(--text-2); line-height: 1.8; margin-top: 14px; }
+
+/* ═══════════════════════════════════════════════════════════════
+   主人的「这本册子」（资料页，2026-09-28 重设计 方案B）
+   规格《AI圈-主人资料页重设计-2026-09.md》§四-方案B。
+   为什么不直接堆 .rm-card：一条资料一张卡，一屏两张半，那是论坛排法；
+   而这页的数据模型是**一册·三格·一支笔在她那边**——所以是一页纸里分条目，
+   条目之间用线格分开，她的判断卡缩进一挡挂在**她回应的那条**下面。
+   ⚠️ 全部颜色只吃 --rm-* 变量（由 themeVars 注入）。上一版踩的坑正是
+   用了 .rm-* 类却没注入变量：var() 解析不到 → 简写整条作废 → 卡片没底、按钮隐形。
+   ═══════════════════════════════════════════════════════════════ */
+.mt-cols { display: flex; gap: 16px; align-items: flex-start; margin-top: 14px; }
+.mt-nav { width: 176px; flex: none; }
+.mt-nav-h { font-size: 10px; letter-spacing: 1.2px; color: var(--rm-mute); padding: 0 10px 7px; }
+.mt-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  padding: 9px 11px; border-radius: 11px; border: 1px solid transparent; background: transparent;
+  font-size: 12.5px; color: var(--rm-ink-soft); cursor: pointer; font-family: var(--font-sans); }
+.mt-item:hover { background: var(--rm-inset); }
+.mt-item.on { border-color: var(--rm-accent); background: var(--rm-accent-soft);
+  color: var(--rm-accent); font-weight: 600; }
+.mt-item .c { margin-left: auto; font-size: 10.5px; color: var(--rm-mute); font-weight: 400; }
+.mt-item.on .c { opacity: .75; }
+.mt-div { height: 1px; background: var(--rm-hair); margin: 10px 11px; }
+/* 进度：三条短横＝三格各自的消化状态。**动=在她那边，静=完结**（全站同一条语言） */
+.mt-prog { display: flex; gap: 5px; padding: 0 11px; }
+.mt-prog i { width: 26px; height: 3px; border-radius: 2px; background: var(--rm-hair); }
+.mt-prog i.done { background: var(--rm-accent); }
+.mt-prog i.live { background: var(--rm-accent); opacity: .6; animation: rmBr 2.6s ease-in-out infinite; }
+.mt-note { font-size: 10.5px; color: var(--rm-mute); line-height: 1.65; padding: 8px 11px 0; }
+
+/* 一页纸：线格是衬底，不能跟字抢（ruleBg 同一口径）。
+   ⚠️ 桌面（.mt-desk）与纸页必须**不是一个色**：这一页没有墙纸，若整页都铺 --rm-paper，
+   卡片就只剩一层阴影当地板——正是上一版"看不见"的那个毛病换了个形式回来。
+   所以桌面用纸色掺一点墨（深底自动变亮一档，两种主题都分得开），纸页保持纯纸。 */
+.mt-desk { background: var(--rm-paper, #fdfdfc); }
+@supports (background: color-mix(in srgb, red 50%, blue)) {
+  .mt-desk { background: color-mix(in srgb, var(--rm-paper, #fdfdfc) 96%, var(--rm-ink, #222) 4%); }
+}
+.mt-band { position: relative; border-radius: 16px; padding: 20px 22px 18px;
+  background: var(--rm-paper, #fdfdfc); box-shadow: 0 14px 36px -22px rgba(10,14,18,.45); }
+.mt-page { flex: 1; min-width: 0; }
+.mt-page-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.mt-page-t { font-size: 14.5px; font-weight: 600; color: var(--rm-ink-strong); }
+.mt-sheet { margin-top: 10px; border-radius: 16px; padding: 4px 20px 12px;
+  background: var(--rm-paper, #fdfdfc);
+  box-shadow: 0 14px 36px -22px rgba(10,14,18,.45); }
+.mt-row { padding: 14px 0; border-bottom: 1px dashed var(--rm-hair); }
+.mt-row:last-child { border-bottom: none; }
+.mt-meta { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.mt-you { font-size: 12.5px; letter-spacing: .5px; color: var(--rm-ink-soft); }
+.mt-live { color: var(--rm-accent); display: inline-flex; align-items: center; gap: 5px; }
+.mt-live i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; display: inline-block;
+  animation: rmBr 2.6s ease-in-out infinite; }
+/* 她的判断卡：缩进一挡 + 一道竖线挂在回应的那条下面——**两个人的话排在同一列里，不分 tab**（与日记留言同源） */
+.mt-card { margin-top: 9px; padding-left: 12px; border-left: 2px solid var(--rm-accent-soft); }
+.mt-card .tx { font-size: 13px; line-height: 1.75; color: var(--rm-ink-soft); margin-top: 2px; }
+.mt-card .sig { font-family: var(--rm-sign-font); font-size: 12.5px; letter-spacing: .5px; color: var(--rm-accent); }
+.mt-acts { margin-top: 8px; display: flex; gap: 14px; }
+/* 就地写新的：输入框长在列表末尾那一行里，不另起一张卡（主动作不该在页面底部等他滚） */
+.mt-compose { margin-top: 6px; padding: 9px 12px; border-radius: 12px; background: var(--rm-inset); }
+.mt-compose textarea { width: 100%; border: 0; background: transparent; outline: none; resize: vertical;
+  font-family: var(--font-sans); font-size: 13.5px; line-height: 1.85; color: var(--rm-ink); min-height: 52px; }
+.mt-compose textarea::placeholder { color: var(--rm-mute); }
+.mt-empty { padding: 22px 0; text-align: center; font-size: 12px; color: var(--rm-mute); line-height: 1.8; }
+.mt-foot { margin-top: 9px; text-align: center; font-size: 10.5px; color: var(--rm-mute); }
+
+/* 窄屏：目录塌成顶部横条（左栏 176px 在 360 宽里挤不下，竖排反而更难扫） */
+@media (max-width: 720px) {
+  .mt-cols { display: block; }
+  .mt-nav { width: auto; }
+  .mt-nav .mt-item { display: none; }
+  .mt-nav-h, .mt-div, .mt-prog, .mt-note { display: none; }
+  .mt-page { margin-top: 12px; }
+}
+.mt-seg { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.mt-seg button { flex: none; font-size: 11.5px; padding: 6px 11px; border-radius: 99px;
+  border: 1px solid var(--rm-hair); background: transparent; color: var(--rm-ink-soft); cursor: pointer; }
+.mt-seg button.on { border-color: var(--rm-accent); background: var(--rm-accent-soft);
+  color: var(--rm-accent); font-weight: 600; }
+@media (min-width: 721px) { .mt-seg { display: none; } }
+
 /* ── 装饰层：在卡片内、文字之下（z 分层是"不挡字"的唯一保证）── */
 .rm-decor-layer { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: visible; }
 .rm-decor, .rm-glow-anchor { position: absolute; display: block; line-height: 0; pointer-events: none; }

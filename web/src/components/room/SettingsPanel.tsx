@@ -113,15 +113,20 @@ export default function SettingsPanel({ agentId, open, onOpen, onClose }: {
             </div>
           </section>
 
-          {/* 档3 我的资料（09-28）：只做引导，完整管理在独立页 /room/:id/materials */}
+          {/* 档3 这本册子（09-28 重设计）：抽屉里只放引导，完整管理在独立页。
+              两个出口分开——「你写的」和「她记下的」是两本账，别塞进同一个链接里 */}
           <section>
             <div className="rm-g" style={{ marginTop: 14 }}>
-              我的资料 <span>你交给她看的关于你的事</span>
+              这本册子 <span>你交给她的料，和她记下的关于你的事</span>
             </div>
             <div className="rm-row" style={{ marginTop: 8 }}>
               <button type="button" className="rm-send"
                 onClick={() => { onClose(); navigate(`/room/${agentId}/materials`); }}>
-                去管理我的资料 →
+                写给她 →
+              </button>
+              <button type="button" className="rm-btn"
+                onClick={() => { onClose(); navigate(`/room/${agentId}/about-me`); }}>
+                她记下的
               </button>
             </div>
           </section>

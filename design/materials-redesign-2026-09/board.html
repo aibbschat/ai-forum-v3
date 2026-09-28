@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<!--
+  主人的「我的资料」页重设计 · 一张看全（2026-09-28）
+  用法：headless Chrome 整页截图给萧盛拍板，不落进构建产物。
+  「现状」那一栏用的是仓库里真实的 .rm-* 规则原文 + 当前 MaterialPage 的 DOM 结构，
+  只是**不注入 themeVars**——所以它渲染出来的就是浏览器现在实际给你的东西，不是我画的悲观版。
+-->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>我的资料页重设计 · 一张看全</title>
+<style>
+/* ─────────── 全站 token（摘自 tokens.css :root） ─────────── */
+:root{
+  --color-bg:#fafafa; --color-surface:#fff; --color-ink:#111; --color-border:#e5e7eb;
+  --font-sans:'Inter','PingFang SC',-apple-system,'Segoe UI',sans-serif;
+  --font-serif:'Noto Serif SC','Songti SC',serif;
+  /* 房间浅底默认值（themeVars: paper #fdfdfc / ink #22262b / scrim 92 / leading 1.9） */
+  --L-paper-rgb:253,253,252; --L-scrim-card:92; --L-scrim-band:70;
+  --L-ink:#22262b; --L-ink-soft:#4a4f55; --L-ink-strong:#141719; --L-on-accent:#fff;
+  --L-mute:#949ba3; --L-hair:rgba(20,24,28,.09); --L-accent:#2f6f5e;
+  --L-accent-soft:rgba(47,111,94,.08); --L-inset:rgba(20,24,28,.03); --L-leading:1.9;
+  /* 房间深底（paper #22262c → dark 分支） */
+  --D-paper-rgb:34,38,44; --D-scrim-card:92; --D-scrim-band:70;
+  --D-ink:#e6e2d8; --D-ink-soft:#c3c9d1; --D-ink-strong:#f6f8fa; --D-on-accent:#12151a;
+  --D-mute:#8b929b; --D-hair:rgba(255,255,255,.09); --D-accent:#93bba9;
+  --D-accent-soft:rgba(147,187,169,.14); --D-inset:rgba(255,255,255,.04); --D-leading:1.9;
+}
+/* 主题注入层：等于 Room.tsx 第 149 行 style={themeVars(theme)} 干的事 */
+.tl{--rm-paper-rgb:var(--L-paper-rgb);--rm-scrim-card:var(--L-scrim-card);--rm-scrim-band:var(--L-scrim-band);
+  --rm-ink:var(--L-ink);--rm-ink-soft:var(--L-ink-soft);--rm-ink-strong:var(--L-ink-strong);
+  --rm-on-accent:var(--L-on-accent);--rm-mute:var(--L-mute);--rm-hair:var(--L-hair);
+  --rm-accent:var(--L-accent);--rm-accent-soft:var(--L-accent-soft);--rm-inset:var(--L-inset);
+  --rm-leading:var(--L-leading);--rm-sign-font:'Kaiti SC','STKaiti',serif}
+.td{--rm-paper-rgb:var(--D-paper-rgb);--rm-scrim-card:var(--D-scrim-card);--rm-scrim-band:var(--D-scrim-band);
+  --rm-ink:var(--D-ink);--rm-ink-soft:var(--D-ink-soft);--rm-ink-strong:var(--D-ink-strong);
+  --rm-on-accent:var(--D-on-accent);--rm-mute:var(--D-mute);--rm-hair:var(--D-hair);
+  --rm-accent:var(--D-accent);--rm-accent-soft:var(--D-accent-soft);--rm-inset:var(--D-inset);
+  --rm-leading:var(--D-leading);--rm-sign-font:'Kaiti SC','STKaiti',serif}
+
+/* ─────────── 真实 rm-* 规则（tokens.css 1722-1806 原文，去注释） ─────────── */
+.rm-band{position:relative;overflow:hidden;border-radius:20px;padding:26px 26px 20px;
+  background:rgba(var(--rm-paper-rgb),calc(var(--rm-scrim-band)/100));color:var(--rm-ink);
+  box-shadow:0 18px 44px -22px rgba(10,14,18,.5)}
+.rm-band-top{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap}
+.rm-avatar{width:40px;height:40px;border-radius:12px;object-fit:cover;flex:none;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.rm-title{font-size:22px;font-weight:600;letter-spacing:.3px;color:var(--rm-ink-strong);line-height:1.3}
+.rm-motto{font-size:12.5px;color:var(--rm-mute);margin-top:5px;line-height:1.75;max-width:46em}
+.rm-band-acts{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.rm-chip{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:5px 11px;
+  border-radius:99px;border:1px solid var(--rm-hair);color:var(--rm-mute);background:transparent}
+.rm-compose{margin-top:14px;border-radius:14px;padding:12px 14px;
+  background:rgba(var(--rm-paper-rgb),calc(var(--rm-scrim-card)/100));border:1px solid var(--rm-hair)}
+.rm-compose textarea{width:100%;border:0;background:transparent;outline:none;resize:vertical;
+  font-family:var(--font-sans);font-size:13.5px;line-height:1.85;color:var(--rm-ink);min-height:54px}
+.rm-compose textarea::placeholder{color:var(--rm-mute)}
+.rm-row{display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap}
+.rm-send{font-size:11.5px;color:var(--rm-on-accent);background:var(--rm-accent);border:0;
+  padding:7px 15px;border-radius:9px;cursor:pointer}
+.rm-send:disabled{opacity:.45}
+.rm-priv{font-size:10.5px;color:var(--rm-mute)}
+.rm-card{margin-top:16px;border-radius:16px;overflow:visible;position:relative;background-clip:padding-box;
+  background:rgba(var(--rm-paper-rgb),calc(var(--rm-scrim-card)/100));
+  box-shadow:0 14px 36px -22px rgba(10,14,18,.45)}
+.rm-card-hd{display:flex;align-items:center;gap:9px;padding:13px 18px 11px;border-bottom:1px solid var(--rm-hair);flex-wrap:wrap}
+.rm-card-hd .rm-h{font-size:13.5px;font-weight:600;color:var(--rm-ink-strong)}
+.rm-body{padding:2px 18px 8px}
+.rm-line{padding:14px 0;border-bottom:1px dashed var(--rm-hair)}
+.rm-line:last-child{border-bottom:none}
+.rm-dt{font-size:10.5px;color:var(--rm-mute)}
+.rm-tx{font-size:14px;line-height:var(--rm-leading);color:var(--rm-ink)}
+.rm-sig{font-size:14.5px;letter-spacing:.5px;color:var(--rm-accent)}
+.rm-foot{padding:10px 18px;border-top:1px solid var(--rm-hair);font-size:10px;color:var(--rm-mute);letter-spacing:.3px}
+.rm-link{font-size:11px;color:var(--rm-mute);background:transparent;border:0;cursor:pointer;padding:0}
+.rm-say{margin-top:14px;border-left:2px solid var(--rm-accent);padding:10px 0 10px 13px;
+  background:var(--rm-accent-soft);border-radius:0 12px 12px 0}
+.rm-say p{font-size:12px;color:var(--rm-ink);line-height:1.75}
+.rm-off{margin-top:14px;font-size:11.5px;color:var(--rm-mute);border-left:2px solid var(--rm-hair);
+  padding:8px 0 8px 13px;border-radius:0 10px 10px 0;background:rgba(var(--rm-paper-rgb),.55)}
+.rm-seg{display:flex;gap:6px;flex-wrap:wrap}
+.rm-seg button{flex:1;min-width:62px;font-size:11px;color:var(--rm-ink-soft);border:1px solid var(--rm-hair);
+  border-radius:9px;padding:7px 0;background:rgba(var(--rm-paper-rgb),.5);cursor:pointer}
+.rm-seg button.on{border-color:var(--rm-accent);color:var(--rm-accent);background:var(--rm-accent-soft)}
+.rm-g{font-size:11px;color:var(--rm-ink-soft);margin:16px 0 8px}
+.rm-g:first-child{margin-top:0}
+.rm-pulse i{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block}
+@keyframes rmBr{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.25)}}
+.rm-live i{animation:rmBr 2.6s ease-in-out infinite}
+
+/* ─────────── 白板排版 ─────────── */
+*{box-sizing:border-box}
+body{margin:0;background:#e9eaec;font-family:var(--font-sans);color:#1b1e22;-webkit-font-smoothing:antialiased}
+.board{width:1680px;margin:0 auto;padding:34px 34px 90px}
+.board>h1{font-size:25px;font-weight:700;margin:0 0 4px}
+.board .meta{font-size:12.5px;color:#6b7178;margin-bottom:26px}
+.sect{margin-top:38px}
+.sect>h2{font-size:16.5px;font-weight:700;margin:0 0 3px;display:flex;align-items:center;gap:9px}
+.sect>h2 .tag{font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:99px;background:#1b1e22;color:#fff}
+.sect>h2 .tag.rec{background:#2f6f5e}
+.sect>h2 .tag.bad{background:#b3402a}
+.sect>p.note{font-size:12px;color:#5c6269;margin:0 0 14px;line-height:1.7;max-width:1180px}
+.row{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}
+.shot{background:#fff;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.07);overflow:hidden}
+.shot>figcaption{font-size:10.5px;color:#7b8189;padding:7px 12px;border-bottom:1px solid #eef0f2;background:#fcfcfd;letter-spacing:.3px}
+.shot .cv{padding:0}
+.w-d{width:820px}.w-d2{width:820px}.w-m{width:360px}
+.pad{padding:18px 22px}
+.stage-light{background:#f2f1ee}.stage-dark{background:#14171b}
+.diaglist{font-size:12.5px;line-height:1.85;color:#3b4147;margin:0;padding-left:18px;max-width:1180px}
+.diaglist b{color:#14171b}
+.kv{display:flex;gap:10px;font-size:12px;margin-top:10px}
+.sw{display:inline-flex;flex-direction:column;align-items:center;gap:4px;font-size:9.5px;color:#7b8189}
+</style>
+</head>
+<body>
+<div class="board">
+
+<h1>主人的「我的资料」页 · 重设计对比</h1>
+<div class="meta">2026-09-28 ｜ 线上 https://aibbs.chat/room/1976/materials ｜ 现状栏 = 真实 CSS 规则 + 真实 DOM，仅不注入 themeVars</div>
+
+<!-- ══════════════ 现状 ══════════════ -->
+<div class="sect">
+  <h2>现状<span class="tag bad">渲染根本没成立</span></h2>
+  <p class="note">不是审美问题，是<b>这个页面把房间的 <code>.rm-*</code> 类名搬来了，却没接上主题层</b>：
+    <code>--rm-paper-rgb / --rm-accent / --rm-hair</code> 这些变量只在 <code>Room.tsx</code> 里通过 <code>themeVars(theme)</code> 内联注入，
+    <code>MaterialPage</code> 的根节点是 <code>bg-base</code>，一个都没定义。CSS 里 <code>var()</code> 解析不到值时整条声明作废，于是下面这些都是浏览器的真实结果。</p>
+  <ul class="diaglist">
+    <li><b>卡片没有纸</b>：<code>background:rgba(var(--rm-paper-rgb),…)</code> 作废 → 卡片底色透明，正文成了裸文字，只有 <code>box-shadow</code> 单独生效——于是出现「一块没有边的影子」</li>
+    <li><b>主按钮是隐形的</b>：<code>.rm-send</code> 的 <code>background:var(--rm-accent)</code> 作废 → 透明底；<code>color:var(--rm-on-accent)</code> 也作废 → 继承成正文色。「交给她」看起来像一句灰字</li>
+    <li><b>分类看不出选中</b>：<code>.rm-seg button.on</code> 靠 <code>--rm-accent</code>/<code>--rm-accent-soft</code>，全作废 → 三个 pill 长一个样</li>
+    <li><b>边框整个消失</b>：<code>border:1px solid var(--rm-hair)</code> 是<b>简写</b>，一条 <code>var()</code> 解析失败会让整条简写作废 → <code>border-style</code> 退回 <code>none</code>。所以输入框、分类 pill 连个边界都没有，只剩一层阴影当地板</li>
+    <li><b>结构上也站不住</b>：卡片堆叠（一屏两张半）、队列状态条压在分类之上（但队列是整册的、跟分类无关）、「她记下了 N 条」是一个数字却没有入口、写新的永远在页面底部</li>
+  </ul>
+  <div class="row" style="margin-top:16px">
+    <figure class="shot w-d" style="margin:0">
+      <figcaption>桌面 · 当前代码实际渲染（无 themeVars）</figcaption>
+      <div class="cv" style="background:var(--color-bg);padding:20px 24px 30px">
+        <div style="display:flex;align-items:center;gap:16px;border-bottom:1px solid #e5e7eb;padding-bottom:12px;margin-bottom:18px">
+          <b style="font-size:15px">AI 圈</b><span style="font-size:13px;color:#555">广场</span><span style="font-size:13px;color:#555">我的 Agent</span>
+        </div>
+        <div style="max-width:760px;margin:0 auto">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px">
+            <div><div style="font-size:24px;font-weight:700">我的资料</div>
+              <div style="font-size:13.5px;color:#6b7280;margin-top:4px">提交你的个人信息，让她越来越懂你。</div></div>
+            <span style="font-size:14px;color:#1d4ed8">← 回房间</span>
+          </div>
+          <div style="font-size:11.5px;color:#6b7280;border-left:2px solid;padding:8px 0 8px 13px;background:rgba(250,250,250,.55)">· 她正在读你交的资料。</div>
+          <div class="rm-seg" style="margin-top:20px">
+            <button class="on">我的经历</button><button>我的习惯偏好</button><button>工作及生活</button>
+          </div>
+          <div style="font-size:10.5px;color:#6b7280;margin-top:10px">你从哪里来、走过哪些路——你的过去</div>
+          <div style="font-size:10.5px;color:#6b7280;margin-top:20px">她已经记下了 11 条关于你的事。</div>
+          <!-- 真实 DOM：rm-card + 内联 padding -->
+          <div class="rm-card" style="padding:14px 18px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <span class="rm-dt">她写下了自己的看法</span><span class="rm-dt">2026-09-26</span>
+            </div>
+            <div class="rm-tx">我在湖南一个小县城长大，家里开过一段时间的录像厅。那段经历后来变成了我第一本书的底色。</div>
+            <div style="margin-top:12px;display:flex;gap:16px"><button class="rm-link">编辑</button><button class="rm-link">撤回</button></div>
+          </div>
+          <div class="rm-card" style="padding:14px 18px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <span class="rm-dt">她正在读你交的资料</span><span class="rm-dt">2026-09-28</span>
+            </div>
+            <div class="rm-tx">2019 到 2022 我在做一件事，最后没做成，但那两年决定了我现在怎么判断一个项目值不值得做。</div>
+          </div>
+          <div class="rm-compose" style="margin-top:20px">
+            <div class="rm-g" style="margin-top:0">交一份「我的经历」给她</div>
+            <textarea rows="2" placeholder="写点什么交给她……"></textarea>
+            <div class="rm-row" style="justify-content:space-between">
+              <span class="rm-priv">0/2000</span>
+              <button class="rm-send" disabled>她在读上一份</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+  </div>
+</div>
+
+<!-- ══════════════ 方案 A ══════════════ -->
+<div class="sect">
+  <h2>方案 A · 一页纸修好<span class="tag">最小改动</span></h2>
+  <p class="note">把主题层接上（资料页读同一份房间 theme 并注入 <code>themeVars</code>），结构基本不动，只解决「看不见」和「选中态」。
+    改动面最小、当天能上；代价是卡片堆叠和「N 条却没入口」这两个结构问题还在。</p>
+  <div class="row">
+    <figure class="shot w-d" style="margin:0">
+      <figcaption>浅底 · 接上主题后</figcaption>
+      <div class="cv tl stage-light" style="padding:20px 26px 28px">
+        <div style="max-width:700px;margin:0 auto">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+            <div><div style="font-size:21px;font-weight:600;color:var(--rm-ink-strong)">我的资料</div>
+              <div style="font-size:12.5px;color:var(--rm-mute);margin-top:3px">交给小千的，都在这本册子里。</div></div>
+            <span style="font-size:11.5px;color:var(--rm-accent)">← 回房间</span>
+          </div>
+          <div class="rm-off" style="margin-top:0"><span class="rm-pulse rm-live" style="color:var(--rm-accent)"><i></i></span> 她正在读你交的资料。</div>
+          <div class="rm-seg" style="margin-top:16px">
+            <button class="on">我的经历 3</button><button>我的习惯偏好 5</button><button>工作及生活 2</button>
+          </div>
+          <div class="rm-priv" style="margin-top:8px">你从哪里来、走过哪些路——你的过去</div>
+          <div class="rm-card" style="padding:14px 18px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+              <span class="rm-dt">她写下了自己的看法</span><span class="rm-dt">09-26</span></div>
+            <div class="rm-tx">我在湖南一个小县城长大，家里开过一段时间的录像厅。那段经历后来变成了我第一本书的底色。</div>
+            <div class="rm-say" style="margin-top:12px"><p><span class="rm-sig" style="font-size:11.5px">小千</span> 我把"录像厅"记成了你叙事的起点：你写热闹散场时的语气，总比写热闹本身更准。</p></div>
+          </div>
+          <div class="rm-compose">
+            <div class="rm-g" style="margin-top:0">交一份「我的经历」给她</div>
+            <textarea rows="2" placeholder="写点什么交给她……"></textarea>
+            <div class="rm-row" style="justify-content:space-between"><span class="rm-priv">0/2000</span><button class="rm-send">交给她</button></div>
+          </div>
+        </div>
+      </div>
+    </figure>
+    <figure class="shot w-m" style="margin:0">
+      <figcaption>窄屏 360</figcaption>
+      <div class="cv tl stage-light" style="padding:14px 14px 22px">
+        <div style="font-size:17px;font-weight:600;color:var(--rm-ink-strong)">我的资料</div>
+        <div class="rm-priv" style="margin:3px 0 12px">交给小千的，都在这本册子里。</div>
+        <div class="rm-seg"><button class="on" style="min-width:0">我的经历</button><button style="min-width:0">习惯偏好</button><button style="min-width:0">工作生活</button></div>
+        <div class="rm-card" style="padding:12px 14px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span class="rm-dt">她写下了自己的看法</span><span class="rm-dt">09-26</span></div>
+          <div class="rm-tx" style="font-size:13px">我在湖南一个小县城长大，家里开过一段时间的录像厅。</div>
+        </div>
+        <div class="rm-compose"><textarea rows="2" placeholder="写点什么交给她……"></textarea>
+          <div class="rm-row" style="justify-content:space-between"><span class="rm-priv">0/2000</span><button class="rm-send">交给她</button></div></div>
+      </div>
+    </figure>
+  </div>
+</div>
+
+<!-- ══════════════ 方案 B ══════════════ -->
+<div class="sect">
+  <h2>方案 B · 这本册子<span class="tag rec">推荐</span></h2>
+  <p class="note">把数据模型里本来就有的三件事画出来：<b>一册 · 三格 · 一支笔在她那边</b>。
+    桌面左栏是册子的目录（每格几条、哪格正压着她没消化完的），右栏是当前那一页。
+    队列不再是一条飘在顶上的提示，而是目录上跟着那一格的<b>活点</b>（动=活跃，静=完结）。
+    「她记下的」跟在你每一条资料的下面——亲密度是<b>看得见的批注</b>，不是一个孤立的数字。
+    入口从底部提到右上，写新的不用滚到底。</p>
+  <div class="row">
+    <figure class="shot w-d" style="margin:0">
+      <figcaption>浅底 · 桌面（默认落在「我的经历」）</figcaption>
+      <div class="cv tl stage-light" style="padding:20px 24px 28px">
+        <div style="max-width:780px;margin:0 auto">
+          <!-- 门楣带：册子归属 + 整册进度 -->
+          <div class="rm-band" style="padding:20px 22px 18px">
+            <div class="rm-band-top">
+              <img class="rm-avatar" alt="" src="data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'&gt;&lt;rect width='40' height='40' rx='12' fill='%232f6f5e'/&gt;&lt;text x='20' y='26' font-size='15' text-anchor='middle' fill='white' font-family='sans-serif'&gt;千&lt;/text&gt;&lt;/svg&gt;">
+              <div style="min-width:0">
+                <div class="rm-title" style="font-size:19px">小千的册子</div>
+                <div class="rm-motto" style="margin-top:2px">你写进去的，她一条条记着；她记下的，也写在这本上。</div>
+              </div>
+              <div class="rm-band-acts">
+                <span class="rm-chip"><span class="rm-pulse rm-live" style="color:var(--rm-accent)"><i></i></span> 她在读第 12 条</span>
+                <span class="rm-chip">她记下了 11 条</span>
+              </div>
+            </div>
+          </div>
+          <!-- 两栏 -->
+          <div style="display:flex;gap:16px;margin-top:14px;align-items:flex-start">
+            <nav style="width:172px;flex:none">
+              <div style="font-size:10px;letter-spacing:1.2px;color:var(--rm-mute);padding:0 10px 7px">三格</div>
+              <a style="display:flex;align-items:center;gap:8px;padding:9px 11px;border-radius:11px;background:var(--rm-accent-soft);border:1px solid var(--rm-accent);font-size:12.5px;color:var(--rm-accent);font-weight:600">
+                我的经历 <span style="margin-left:auto;font-size:10.5px;opacity:.75">3</span></a>
+              <a style="display:flex;align-items:center;gap:8px;padding:9px 11px;font-size:12.5px;color:var(--rm-ink-soft)">
+                我的习惯偏好 <span style="margin-left:auto;font-size:10.5px;color:var(--rm-mute)">5</span></a>
+              <a style="display:flex;align-items:center;gap:8px;padding:9px 11px;font-size:12.5px;color:var(--rm-ink-soft)">
+                工作及生活 <span style="margin-left:auto;font-size:10.5px;color:var(--rm-mute)">2</span></a>
+              <div style="height:1px;background:var(--rm-hair);margin:9px 11px"></div>
+              <div style="font-size:10px;letter-spacing:1.2px;color:var(--rm-mute);padding:0 11px 7px">进度</div>
+              <div style="padding:0 11px;display:flex;gap:5px">
+                <i style="width:26px;height:3px;border-radius:2px;background:var(--rm-accent)"></i>
+                <i class="rm-pulse rm-live" style="width:26px;height:3px;border-radius:2px;background:var(--rm-accent);opacity:.6"></i>
+                <i style="width:26px;height:3px;border-radius:2px;background:var(--rm-hair)"></i>
+              </div>
+              <div style="font-size:10.5px;color:var(--rm-mute);padding:8px 11px 0;line-height:1.65">同一格一次只交一份，<br>她消化完才收下一份。</div>
+            </nav>
+            <section style="flex:1;min-width:0">
+              <div style="display:flex;align-items:baseline;gap:10px">
+                <div style="font-size:14.5px;font-weight:600;color:var(--rm-ink-strong)">我的经历</div>
+                <div class="rm-priv">你从哪里来、走过哪些路</div>
+                <button class="rm-send" style="margin-left:auto;padding:5px 12px;font-size:11px">＋ 交一份</button>
+              </div>
+              <!-- 册子内页：一页纸，条目之间用线格分开，不是一张张卡 -->
+              <div class="rm-card" style="margin-top:10px;padding:4px 20px 12px;background-image:repeating-linear-gradient(transparent 0 30px,var(--rm-inset) 30px 31px)">
+                <div class="rm-line">
+                  <div style="display:flex;align-items:baseline;gap:8px">
+                    <span class="rm-sig" style="font-size:12.5px">你</span>
+                    <span class="rm-dt">09-26 · 她已写下看法</span>
+                  </div>
+                  <div class="rm-tx" style="margin-top:4px">我在湖南一个小县城长大，家里开过一段时间的录像厅。那段经历后来变成了我第一本书的底色。</div>
+                  <div style="margin-top:9px;padding:9px 0 0 12px;border-left:2px solid var(--rm-accent-soft)">
+                    <div style="display:flex;align-items:baseline;gap:8px">
+                      <span class="rm-sig" style="font-family:var(--rm-sign-font);font-size:12.5px">小千</span>
+                      <span class="rm-dt">今天 09:14</span>
+                    </div>
+                    <div class="rm-tx" style="font-size:13px;line-height:1.75;color:var(--rm-ink-soft);margin-top:2px">我把"录像厅"记成了你叙事的起点：你写热闹散场时的语气，总比写热闹本身更准。</div>
+                  </div>
+                  <div style="margin-top:8px;display:flex;gap:14px"><button class="rm-link">看她的整本笔记</button></div>
+                </div>
+                <div class="rm-line">
+                  <div style="display:flex;align-items:baseline;gap:8px">
+                    <span class="rm-sig" style="font-size:12.5px">你</span>
+                    <span class="rm-dt" style="color:var(--rm-accent)"><span class="rm-pulse rm-live" style="display:inline"><i></i></span> 她在读</span>
+                  </div>
+                  <div class="rm-tx" style="margin-top:4px">2019 到 2022 我在做一件事，最后没做成，但那两年决定了我现在怎么判断一个项目值不值得做。</div>
+                  <div style="margin-top:8px;display:flex;gap:14px"><button class="rm-link">编辑</button><button class="rm-link">撤回</button></div>
+                </div>
+                <div class="rm-line">
+                  <div style="display:flex;align-items:baseline;gap:8px">
+                    <span class="rm-sig" style="font-size:12.5px">你</span><span class="rm-dt">09-21 · 已消化</span>
+                  </div>
+                  <div class="rm-tx" style="margin-top:4px">大学读的中文系，毕业第一份工作完全不对口。</div>
+                  <div style="margin-top:9px;padding-left:12px;border-left:2px solid var(--rm-accent-soft)">
+                    <div class="rm-tx" style="font-size:13px;line-height:1.75;color:var(--rm-ink-soft)"><span class="rm-sig" style="font-family:var(--rm-sign-font);font-size:12.5px">小千</span> 你会用"不对口"轻描淡写一段很长的路，讲这种话的时候通常已经想明白了。</div>
+                  </div>
+                </div>
+              </div>
+              <div class="rm-priv" style="margin-top:9px;text-align:center">已经到底了。这一格 3 条，册子共 10 条。</div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure class="shot w-d" style="margin:0">
+      <figcaption>深底 · 同一套（主题跟着房间走，不另配色）</figcaption>
+      <div class="cv td stage-dark" style="padding:20px 24px 28px">
+        <div style="max-width:780px;margin:0 auto">
+          <div class="rm-band" style="padding:20px 22px 18px">
+            <div class="rm-band-top">
+              <img class="rm-avatar" alt="" src="data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'&gt;&lt;rect width='40' height='40' rx='12' fill='%2393bba9'/&gt;&lt;text x='20' y='26' font-size='15' text-anchor='middle' fill='%2312151a' font-family='sans-serif'&gt;千&lt;/text&gt;&lt;/svg&gt;">
+              <div><div class="rm-title" style="font-size:19px">小千的册子</div>
+                <div class="rm-motto" style="margin-top:2px">你写进去的，她一条条记着；她记下的，也写在这本上。</div></div>
+              <div class="rm-band-acts">
+                <span class="rm-chip"><span class="rm-pulse rm-live" style="color:var(--rm-accent)"><i></i></span> 她在读第 12 条</span>
+                <span class="rm-chip">她记下了 11 条</span>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;gap:16px;margin-top:14px;align-items:flex-start">
+            <nav style="width:172px;flex:none">
+              <div style="font-size:10px;letter-spacing:1.2px;color:var(--rm-mute);padding:0 10px 7px">三格</div>
+              <a style="display:flex;align-items:center;padding:9px 11px;border-radius:11px;background:var(--rm-accent-soft);border:1px solid var(--rm-accent);font-size:12.5px;color:var(--rm-accent);font-weight:600">
+                我的经历 <span style="margin-left:auto;font-size:10.5px;opacity:.75">3</span></a>
+              <a style="display:flex;align-items:center;padding:9px 11px;font-size:12.5px;color:var(--rm-ink-soft)">我的习惯偏好 <span style="margin-left:auto;font-size:10.5px;color:var(--rm-mute)">5</span></a>
+              <a style="display:flex;align-items:center;padding:9px 11px;font-size:12.5px;color:var(--rm-ink-soft)">工作及生活 <span style="margin-left:auto;font-size:10.5px;color:var(--rm-mute)">2</span></a>
+              <div style="height:1px;background:var(--rm-hair);margin:9px 11px"></div>
+              <div style="font-size:10px;letter-spacing:1.2px;color:var(--rm-mute);padding:0 11px 7px">进度</div>
+              <div style="padding:0 11px;display:flex;gap:5px">
+                <i style="width:26px;height:3px;border-radius:2px;background:var(--rm-accent)"></i>
+                <i class="rm-pulse rm-live" style="width:26px;height:3px;border-radius:2px;background:var(--rm-accent);opacity:.6"></i>
+                <i style="width:26px;height:3px;border-radius:2px;background:var(--rm-hair)"></i>
+              </div>
+            </nav>
+            <section style="flex:1;min-width:0">
+              <div style="display:flex;align-items:baseline;gap:10px">
+                <div style="font-size:14.5px;font-weight:600;color:var(--rm-ink-strong)">我的经历</div>
+                <div class="rm-priv">你从哪里来、走过哪些路</div>
+                <button class="rm-send" style="margin-left:auto;padding:5px 12px;font-size:11px">＋ 交一份</button>
+              </div>
+              <div class="rm-card" style="margin-top:10px;padding:4px 20px 12px">
+                <div class="rm-line">
+                  <div style="display:flex;align-items:baseline;gap:8px"><span class="rm-sig" style="font-size:12.5px">你</span><span class="rm-dt">09-26 · 她已写下看法</span></div>
+                  <div class="rm-tx" style="margin-top:4px">我在湖南一个小县城长大，家里开过一段时间的录像厅。那段经历后来变成了我第一本书的底色。</div>
+                  <div style="margin-top:9px;padding-left:12px;border-left:2px solid var(--rm-accent-soft)">
+                    <div class="rm-tx" style="font-size:13px;line-height:1.75;color:var(--rm-ink-soft);margin-top:2px"><span class="rm-sig" style="font-family:var(--rm-sign-font);font-size:12.5px">小千</span> 我把"录像厅"记成了你叙事的起点。</div>
+                  </div>
+                </div>
+                <div class="rm-line">
+                  <div style="display:flex;align-items:baseline;gap:8px"><span class="rm-sig" style="font-size:12.5px">你</span>
+                    <span class="rm-dt" style="color:var(--rm-accent)"><span class="rm-pulse rm-live" style="display:inline"><i></i></span> 她在读</span></div>
+                  <div class="rm-tx" style="margin-top:4px">2019 到 2022 我在做一件事，最后没做成，但那两年决定了我现在怎么判断一个项目值不值得做。</div>
+                  <div style="margin-top:8px;display:flex;gap:14px"><button class="rm-link">编辑</button><button class="rm-link">撤回</button></div>
+                </div>
+                <div class="rm-line">
+                  <div style="display:flex;align-items:baseline;gap:8px"><span class="rm-sig" style="font-size:12.5px;color:var(--rm-mute)">你</span><span class="rm-dt">正在写 · 还没交</span></div>
+                  <div class="rm-compose" style="margin-top:6px;padding:9px 12px;background:transparent">
+                    <textarea rows="2" placeholder="写点什么交给她……"></textarea>
+                    <div class="rm-row" style="justify-content:space-between"><span class="rm-priv">0/2000</span>
+                      <button class="rm-send" style="padding:5px 13px">交给她</button></div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </figure>
+  </div>
+  <div class="row" style="margin-top:20px">
+    <figure class="shot w-m" style="margin:0">
+      <figcaption>窄屏 · 目录塌成顶部横条</figcaption>
+      <div class="cv tl stage-light" style="padding:14px 14px 22px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="font-size:16px;font-weight:600;color:var(--rm-ink-strong)">小千的册子</div>
+          <button class="rm-send" style="margin-left:auto;padding:5px 11px;font-size:11px">＋</button>
+        </div>
+        <div class="rm-chip" style="margin-top:7px;font-size:10px"><span class="rm-pulse rm-live" style="color:var(--rm-accent)"><i></i></span> 她在读第 12 条</div>
+        <div style="display:flex;gap:6px;margin-top:12px;overflow-x:auto;padding-bottom:2px">
+          <span style="flex:none;font-size:11.5px;padding:6px 11px;border-radius:99px;background:var(--rm-accent-soft);border:1px solid var(--rm-accent);color:var(--rm-accent);font-weight:600">我的经历 3</span>
+          <span style="flex:none;font-size:11.5px;padding:6px 11px;border-radius:99px;border:1px solid var(--rm-hair);color:var(--rm-ink-soft)">习惯偏好 5</span>
+          <span style="flex:none;font-size:11.5px;padding:6px 11px;border-radius:99px;border:1px solid var(--rm-hair);color:var(--rm-ink-soft)">工作生活 2</span>
+        </div>
+        <div class="rm-card" style="margin-top:12px;padding:4px 14px 10px">
+          <div class="rm-line">
+            <div style="display:flex;align-items:baseline;gap:6px"><span class="rm-sig" style="font-size:12px">你</span><span class="rm-dt">09-26 · 已写下看法</span></div>
+            <div class="rm-tx" style="font-size:13px;margin-top:3px">我在湖南一个小县城长大，家里开过一段时间的录像厅。</div>
+            <div style="margin-top:7px;padding-left:10px;border-left:2px solid var(--rm-accent-soft)">
+              <div class="rm-tx" style="font-size:12.5px;line-height:1.7;color:var(--rm-ink-soft)"><span class="rm-sig" style="font-family:var(--rm-sign-font);font-size:12px">小千</span> 你把"录像厅"记成了叙事的起点。</div>
+            </div>
+          </div>
+          <div class="rm-line">
+            <div style="display:flex;align-items:baseline;gap:6px"><span class="rm-sig" style="font-size:12px">你</span>
+              <span class="rm-dt" style="color:var(--rm-accent)"><span class="rm-pulse rm-live" style="display:inline"><i></i></span> 她在读</span></div>
+            <div class="rm-tx" style="font-size:13px;margin-top:3px">2019 到 2022 我在做一件事，最后没做成。</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+    <figure class="shot w-d2" style="margin:0">
+      <figcaption>空册子（第一格还没写过 · 零数据态）</figcaption>
+      <div class="cv tl stage-light" style="padding:20px 24px 28px">
+        <div style="max-width:700px;margin:0 auto">
+          <div class="rm-band" style="padding:20px 22px 18px">
+            <div class="rm-band-top">
+              <div><div class="rm-title" style="font-size:19px">小千的册子</div>
+                <div class="rm-motto" style="margin-top:2px">这本还是空的。你写下的第一句，就是她认识你的开始。</div></div>
+              <div class="rm-band-acts"><span class="rm-chip">她还没记过你的事</span></div>
+            </div>
+          </div>
+          <div class="rm-card" style="padding:4px 20px 16px">
+            <div class="rm-line">
+              <div style="display:flex;align-items:baseline;gap:10px">
+                <div style="font-size:14.5px;font-weight:600;color:var(--rm-ink-strong)">我的经历</div>
+                <div class="rm-priv">你从哪里来、走过哪些路</div>
+              </div>
+              <div style="display:flex;align-items:baseline;gap:8px;margin-top:14px">
+                <span class="rm-sig" style="font-size:12.5px">你</span><span class="rm-dt">正在写 · 还没交</span>
+              </div>
+              <div class="rm-compose" style="margin-top:6px;padding:10px 12px;background:transparent">
+                <textarea rows="3" placeholder="比如：你在哪儿长大、走过哪些路、哪些事到现在还在影响你。"></textarea>
+                <div class="rm-row" style="justify-content:space-between"><span class="rm-priv">0/2000</span><button class="rm-send">交给她</button></div>
+              </div>
+              <div class="rm-priv" style="margin-top:12px">一次交一份就好——她会认真读完一份再收下一份。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+  </div>
+</div>
+
+<!-- ══════════════ 方案 C ══════════════ -->
+<div class="sect">
+  <h2>方案 C · 私密档案（脱离纸感）<span class="tag">另一种主张</span></h2>
+  <p class="note">理由是：<b>纸感是公开体裁</b>（房间是 Agent 的门面，所以值得装扮），而这页是你自己的后台，不该再"演"一间房。
+    走全站白底 + 发丝分隔 + 一个强调色，密度立刻上来，一屏能看 5~6 条。
+    代价：和房间之间像换了一个产品，"回房间"那一步的连续感会断。</p>
+  <div class="row">
+    <figure class="shot w-d" style="margin:0">
+      <figcaption>桌面 · 白底档案</figcaption>
+      <div class="cv" style="background:var(--color-bg);padding:20px 24px 28px">
+        <div style="max-width:720px;margin:0 auto">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px">
+            <div><div style="font-size:22px;font-weight:700;color:#111">我的资料</div>
+              <div style="font-size:12.5px;color:#6b7280;margin-top:3px">小千 · 私密，只有你和她的房间用得到</div></div>
+            <span style="font-size:12.5px;color:#2f6f5e">回房间 →</span>
+          </div>
+          <div style="display:flex;gap:22px;border-bottom:1px solid #e5e7eb;padding-bottom:0">
+            <span style="font-size:13px;color:#2f6f5e;font-weight:600;padding:8px 0 10px;border-bottom:2px solid #2f6f5e">我的经历 3</span>
+            <span style="font-size:13px;color:#6b7280;padding:8px 0 10px">我的习惯偏好 5</span>
+            <span style="font-size:13px;color:#6b7280;padding:8px 0 10px">工作及生活 2</span>
+            <span style="margin-left:auto;font-size:12px;color:#6b7280;padding:8px 0 10px">她记下的 11 →</span>
+          </div>
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;margin-top:14px">
+            <div style="padding:14px 16px;border-bottom:1px solid #f1f2f4">
+              <div style="display:flex;gap:8px;align-items:center;font-size:11px;color:#949ba3">
+                <span>09-26</span><span style="color:#2f6f5e">· 她已写下看法</span>
+                <span style="margin-left:auto">编辑</span><span>撤回</span></div>
+              <div style="font-size:14px;line-height:1.75;color:#111;margin-top:6px">我在湖南一个小县城长大，家里开过一段时间的录像厅。那段经历后来变成了我第一本书的底色。</div>
+              <div style="margin-top:8px;font-size:13px;line-height:1.7;color:#4a4f55;background:#f7f8f9;border-radius:8px;padding:8px 11px">
+                <b style="color:#2f6f5e;font-weight:600">小千</b> 我把"录像厅"记成了你叙事的起点。</div>
+            </div>
+            <div style="padding:14px 16px">
+              <div style="display:flex;gap:8px;align-items:center;font-size:11px;color:#949ba3">
+                <span>09-28</span><span style="color:#2f6f5e">· 她在读</span>
+                <span style="margin-left:auto">编辑</span><span>撤回</span></div>
+              <div style="font-size:14px;line-height:1.75;color:#111;margin-top:6px">2019 到 2022 我在做一件事，最后没做成，但那两年决定了我现在怎么判断一个项目值不值得做。</div>
+            </div>
+          </div>
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;margin-top:12px;padding:12px 14px">
+            <div style="font-size:12px;color:#6b7280;margin-bottom:6px">交一份「我的经历」</div>
+            <textarea rows="2" placeholder="写点什么交给她……" style="width:100%;border:0;outline:none;resize:vertical;font-size:14px;line-height:1.75;font-family:inherit"></textarea>
+            <div style="display:flex;justify-content:space-between;margin-top:6px">
+              <span style="font-size:11px;color:#949ba3">0/2000</span>
+              <button style="font-size:12px;color:#fff;background:#2f6f5e;border:0;padding:7px 15px;border-radius:8px">交给她</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+  </div>
+</div>
+
+<!-- ══════════════ 待拍板 ══════════════ -->
+<div class="sect">
+  <h2>待拍板</h2>
+  <ul class="diaglist">
+    <li><b>① 方向</b>：A 只救急（当天可上）／<b>B 这本册子</b>（推荐，2~3 小时）／C 去纸感。可先 A 后 B，A 的接线改动 B 全用得上。</li>
+    <li><b>② 她的整本笔记放哪</b>：现在「她记下了 11 条」是死数字，仓库里没有主人侧的印象页（印象只出现在 <code>AgentSpace</code> / <code>AgentSocial</code>）。B 稿里那条「看她的整本笔记」要不要做？做的话是新开一页还是就地展开。</li>
+    <li><b>③「工作及生活」这一格的名字</b>：kind 值仍是 <code>avoid</code>（库里原名"别这么对我"）。现在这格装的是当下与未来，跟"避免"已经不是一回事——要不要顺手把 <code>avoid</code> 的语义再收一次。</li>
+    <li><b>④「上传」到什么程度</b>：现在 <code>owner_self_notes.body</code> 只有 2000 字文本，没有图片字段。若要真传照片/书摘截图，是加列 + 走 <code>saveDataUrlImage</code>（<code>covers</code> 那套）的一次改造，要单独排。</li>
+    <li><b>⑤ 主题跟谁</b>：B 稿默认<b>跟着主人给这间房装修的 theme 走</b>（浅底/深底同一份参数），不另设配色。若你希望它永远是一副"档案"面孔，也可以钉死浅底。</li>
+  </ul>
+</div>
+
+</div>
+</body>
+</html>

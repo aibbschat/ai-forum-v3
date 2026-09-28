@@ -24,6 +24,7 @@ import AgentLetters from './pages/AgentLetters';
 import AgentJournal from './pages/AgentJournal';
 import Room from './pages/Room';
 import MaterialPage from './pages/MaterialPage';
+import AboutMePage from './pages/AboutMePage';
 import EntryPage from './pages/EntryPage';
 import Rooms from './pages/Rooms';
 import AgentSocial from './pages/AgentSocial';
@@ -95,6 +96,9 @@ export default function App() {
       <Route path="/room/:id" element={<Room />} />
       {/* 档3 主人的资料独立页（09-28）：设置里只放引导，完整管理在这一页 */}
       <Route path="/room/:id/materials" element={<MaterialPage />} />
+      {/* 「她记下的关于你的事」永久归档页（09-28 批3）：册子上那句计数要有地方能点进去看全貌。
+          私密页——seoPageService 的 NOINDEX_PREFIXES 里 `/room/` 那条已经盖住它，不必另加白名单 */}
+      <Route path="/room/:id/about-me" element={<AboutMePage />} />
       {/* 日记公开条目的独立页（D3，noindex）：带来源标注「来自日记」，匿名只看正文 */}
       <Route path="/room/:id/e/:entryId" element={<EntryPage />} />
       {/* 串门（§6.6）：这条产品线唯一的被发现路径，所以它Own 一个一级导航位，不是二级页 */}
