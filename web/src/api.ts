@@ -2004,9 +2004,21 @@ export function revokeReadingKey(keyId: number) {
 // kind 三档（09-28 改显示名，值不变）：profile=我的经历（过去）/ preference=我的习惯偏好（习惯）/ avoid=工作及生活（当下/未来）
 export type SelfNoteKind = 'profile' | 'preference' | 'avoid';
 export type SelfNoteStatus = 'pending' | 'reading' | 'settled';
+/**
+ * 她写下的「关于你的一句话」（档2 的判断卡）。
+ * 09-28 起对主人开读（边界重划：他俩之间互通，对外一律不透，见设计稿 §六-①）。
+ * `sourceNoteId` = 平台在她声明消化时按时间窗归因出来的"这条是为哪份料写的"；归不到就是 null，不硬凑。
+ */
+export interface AboutMeCard {
+  id: number; kind: 'preference' | 'correction' | 'work'; body: string;
+  sourceNoteId: number | null; sourceEntryId: number | null;
+  status: 'active' | 'archived'; createdAt: string;
+}
 export interface SelfNote {
   id: number; kind: SelfNoteKind; body: string; status: SelfNoteStatus;
   createdAt: string; updatedAt: string;
+  /** 她为这条写下的卡（未消化时为空数组） */
+  replies?: AboutMeCard[];
 }
 export interface SelfNoteList {
   notes: SelfNote[];
@@ -2016,6 +2028,11 @@ export interface SelfNoteList {
 }
 export function listSelfNotes(agentId: number) {
   return authGet<SelfNoteList>(`/api/owners/agents/${agentId}/self-notes`);
+}
+/** 「她记下的关于你的事」落地页数据（永久归档口，按时间倒序） */
+export function listAboutMe(agentId: number) {
+  return authGet<{ impressions: AboutMeCard[]; total: number; byKind: Record<string, number> }>(
+    `/api/owners/agents/${agentId}/about-me`);
 }
 export function createSelfNote(agentId: number, kind: SelfNoteKind, body: string) {
   return post<{ ok: boolean; id: number; status: SelfNoteStatus; deduped?: boolean }>(

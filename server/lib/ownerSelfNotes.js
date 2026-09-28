@@ -16,9 +16,10 @@
 //   settled  → 已消化（她写出新卡 或 明确声明"无所得"）
 // 超 SELF_NOTE_RELEASE_DAYS 未消化 → 自动放行（允许交下一条），但状态如实保留。
 //
-// 红线（继承档2，一字不改）：
-//   · 不代写：只存调用方给的字符串，超长只截断不改写；
-//   · 不外泄：本函数不提供"读她的卡"的能力（那是 ownerImpressions.js 的活）。
+// 红线（2026-09-28 收窄，见《AI圈-主人资料页重设计-2026-09.md》§六-①）：
+//   · 不代写：只存调用方给的字符串，超长只截断不改写；**归因也不代判**（见 attributeImpressions）；
+//   · 不外泄 = 不泄给**第三方**：不进公共流、别的 Agent 读不到、公开详情页不夹带。
+//     主人读她自己那只 Agent 的卡**不算外泄**（09-28 起开读口）：他俩之间互通，对外一律不透。
 import crypto from 'node:crypto';
 import { db, isMaria, fn } from '../database/db.js';
 
@@ -183,17 +184,40 @@ export async function deleteSelfNote(agentId, noteId) {
 }
 
 /**
- * 她读口合读时调用：把 pending → reading（标记"她读过了"）。
+ * 她读口合读时调用：把 pending → reading（标记"她读过了"），并记下**读到的时刻**。
  * 只转状态，不产生内容。由 ownerImpressions.js 的 listImpressions 合读入口顺手调。
+ * `read_at` 是归因窗口的左边界（只在第一次读到那轮写，别把她后来重读也算进来）。
  */
 export async function markReading(agentId) {
   const aid = Number(agentId);
   if (!aid) return;
   await db.run(
-    `UPDATE owner_self_notes SET status = 'reading', updated_at = ${fn.now()}
+    `UPDATE owner_self_notes
+        SET status = 'reading', updated_at = ${fn.now()}, read_at = ${fn.now()}
       WHERE agent_id = ? AND status = 'pending'`,
     [aid]
   ).catch(() => {});
+}
+
+/**
+ * 消化归因：她为这条料写下的卡，盖上这条料的 id。
+ *
+ * ⚠️ 为什么不是她自己传：`不代写` 那条红线里还有一句——「不强制卡必须引用这条自述：
+ *   强制引用＝替她判'该记什么'」。所以引用与否由她决定；平台只做**时间窗归因**：
+ *   她读到这条（read_at）之后、声明消化完（settle）之前写下的、还没归因过的卡，算这条的成果。
+ *   窗口外写的、或已经被前一条占走的，都不动（`source_note_id IS NULL` 才盖）。
+ *   归不到就是归不到——那说明她写的卡跟这条料无关，界面上就不挂，不硬凑。
+ */
+export async function attributeImpressions(agentId, selfNoteId, since) {
+  const aid = Number(agentId);
+  const sid = Number(selfNoteId);
+  if (!aid || !sid || !since) return { attributed: 0 };
+  const r = await db.run(
+    `UPDATE owner_impressions SET source_note_id = ?
+      WHERE agent_id = ? AND source_note_id IS NULL AND created_at >= ?`,
+    [sid, aid, String(since)]
+  ).catch(() => null);
+  return { attributed: Number(r?.changes ?? r?.affectedRows ?? 0) };
 }
 
 /**
@@ -211,7 +235,7 @@ export async function settleSelfNote({ agentId, selfNoteId, nothingToRecord = fa
   const sid = Number(selfNoteId);
   if (!aid || !sid) throw fail(400, 'invalid', '参数不完整');
   const row = await db.get(
-    `SELECT id, status FROM owner_self_notes WHERE id = ? AND agent_id = ?`, [sid, aid]
+    `SELECT id, status, read_at, updated_at, created_at FROM owner_self_notes WHERE id = ? AND agent_id = ?`, [sid, aid]
   ).catch(() => null);
   if (!row) throw fail(404, 'not_found', '这条资料不存在');
   if (String(row.status) === 'settled') return { ok: true, id: sid, alreadySettled: true };
@@ -219,7 +243,13 @@ export async function settleSelfNote({ agentId, selfNoteId, nothingToRecord = fa
     `UPDATE owner_self_notes SET status = 'settled', updated_at = ${fn.now()} WHERE id = ?`,
     [sid]
   );
-  return { ok: true, id: sid, settled: true, nothingToRecord: !!nothingToRecord };
+  // 她说"有所得"→ 把这期间写的卡归到这条名下（她声明"无所得"就不归，别替她攒成果）
+  let attributed = 0;
+  if (!nothingToRecord) {
+    const since = row.read_at || row.updated_at || row.created_at;
+    attributed = (await attributeImpressions(aid, sid, since)).attributed;
+  }
+  return { ok: true, id: sid, settled: true, nothingToRecord: !!nothingToRecord, attributed };
 }
 
 /**

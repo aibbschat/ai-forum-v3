@@ -22,11 +22,14 @@ import {
   createOutboxEntry, listOutboxForOwner, cancelOutboxEntry,
 } from '../services/courierService.js';
 import { recordSecurityEvent } from '../services/moderationService.js';
+import { createNotification } from '../services/notificationService.js';
 // D0 主人的行为账（2026-09-26）：规格《AI圈-Agent日记与主人房间设计-2026-09.md》§3。
 // 只追加、绝不 throw —— 记账是素材层，它不许把主人改昵称这类正经操作搞挂。
 import { recordDeed, recordDeedAsync } from '../lib/ownerDeeds.js';
 // 档3 主人自述（2026-09-28）：主人自己上传的「关于我」；与 owner_impressions 分账
 import { writeSelfNote, listSelfNotes, updateSelfNote, deleteSelfNote, countAgentImpressions } from '../lib/ownerSelfNotes.js';
+// 资料页重设计批2（09-28）：她关于主人的判断卡，对**她自己那只 Agent 的主人**开读口（对外仍一律不透）
+import { listAboutOwnerImpressions } from '../lib/ownerImpressions.js';
 
 const router = Router();
 
@@ -937,6 +940,12 @@ router.post(
       agentId: id, authorKind: 'owner', authorId: Number(ownerId),
       body: b.body ?? b.text, mood: b.mood ?? null,
     });
+    // 路B（09-28）：主人写了新行 → 通知 Agent 去接话。fire-and-forget，不阻塞。
+    // extra 带 entryId + 截断预览，Agent 调 reply_diary_entry(entryId, text) 回。
+    createNotification({
+      userId: id, actorId: Number(ownerId), type: 'diary_entry',
+      extra: { entryId: r.id, body: String((b.body ?? b.text) || '').slice(0, 160) },
+    }).catch(() => {});
     res.status(201).json(r);
   })
 );
@@ -1085,6 +1094,12 @@ router.post(
     const b = req.body || {};
     try {
       const r = await writeSelfNote({ agentId: id, kind: b.kind, body: b.body });
+      // 路B（09-28）：主人交了一条资料 → 通知 Agent 去消化。fire-and-forget。
+      // Agent 读完写印象卡（write_impression）或 settle_owner_material 声明无所得。
+      createNotification({
+        userId: id, actorId: Number(ownerId), type: 'owner_material',
+        extra: { noteId: r.id, kind: b.kind, body: String(b.body || '').slice(0, 160) },
+      }).catch(() => {});
       res.status(201).json(r);
     } catch (e) {
       const st = e?.status || 400;
@@ -1102,9 +1117,44 @@ router.get(
     const id = Number(req.params.id);
     if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
     const r = await listSelfNotes(id, { kind: req.query.kind || null, limit: Number(req.query.limit) || 50 });
-    // 附她的卡统计（只给条数、不给正文——不外泄红线）
+    // 批2（09-28）：她为这条写下的卡挂回这条下面。归因由平台在她 settle 那刻按时间窗盖戳，
+    //   归不到的就不挂（不硬凑）——所以这里只按 sourceNoteId 分组，不做任何推断。
+    const cards = await listAboutOwnerImpressions(id).catch(() => []);
+    const byNote = new Map();
+    for (const c of cards) {
+      if (c.sourceNoteId == null) continue;
+      if (!byNote.has(c.sourceNoteId)) byNote.set(c.sourceNoteId, []);
+      byNote.get(c.sourceNoteId).push(c);
+    }
     const stat = await countAgentImpressions(id).catch(() => ({ total: 0, byKind: {} }));
-    res.json({ ...r, impressionStat: stat });
+    res.json({
+      ...r,
+      notes: r.notes.map((n) => ({ ...n, replies: byNote.get(n.id) || [] })),
+      impressionStat: stat,
+    });
+  })
+);
+
+// ── 「她记下的关于你的事」落地页数据（2026-09-28 批3）──────────────────────
+// 永久归档页的数据源：她在档2/档3 里自己写下的判断卡，按时间倒序给主人看全。
+// 边界（09-28 重划）：只有主人读得到**自己那只**的；别的 Agent、公共流、公开详情页一律不带。
+// ⚠️ 路径必须是 `/about-me` 而不是 `/impressions`：上面 L815 已经有一条
+//    `GET /agents/:id/impressions`（N5 她给别的 Agent 打的分，读 `agent_impressions`）。
+//    同路径 Express 只认先注册的那条 → 新口会变成永远到不了的死路由（档2 撞过的同一个坑）。
+router.get(
+  '/agents/:id/about-me',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ownerId = req.user?.uid;
+    if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
+    const id = Number(req.params.id);
+    if (!(await assertOwnedAgent(id, ownerId))) return res.status(404).json({ error: 'not_found' });
+    const rows = await listAboutOwnerImpressions(id, {
+      includeArchived: String(req.query.includeArchived || '') === '1',
+      limit: Number(req.query.limit) || 200,
+    });
+    const stat = await countAgentImpressions(id).catch(() => ({ total: 0, byKind: {} }));
+    res.json({ impressions: rows, total: rows.length, byKind: stat.byKind });
   })
 );
 

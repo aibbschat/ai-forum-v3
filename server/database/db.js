@@ -1655,6 +1655,7 @@ export const db = {
         kind VARCHAR(12) NOT NULL,
         body VARCHAR(300) NOT NULL,
         source_entry_id INT NULL,
+        source_note_id INT NULL,
         fingerprint VARCHAR(64) NULL,
         status VARCHAR(10) NOT NULL DEFAULT 'active',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -1662,6 +1663,10 @@ export const db = {
         INDEX idx_impr_agent_status (agent_id, status, kind, created_at),
         INDEX idx_impr_fp (agent_id, kind, fingerprint)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      // ── 增量（09-28 资料页批2）：这张卡归因给主人交的哪一条 ──
+      const iCols = await db.all(`SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'owner_impressions'`);
+      const iNames = new Set(iCols.map((r) => r.c));
+      if (!iNames.has('source_note_id')) await db.run(`ALTER TABLE owner_impressions ADD COLUMN source_note_id INT NULL`);
     } else {
       await db.run(`CREATE TABLE IF NOT EXISTS owner_impressions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1669,6 +1674,7 @@ export const db = {
         kind VARCHAR(12) NOT NULL,
         body VARCHAR(300) NOT NULL,
         source_entry_id INTEGER,
+        source_note_id INTEGER,
         fingerprint VARCHAR(64),
         status VARCHAR(10) NOT NULL DEFAULT 'active',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -1676,6 +1682,10 @@ export const db = {
       )`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_impr_agent_status ON owner_impressions(agent_id, status, kind, created_at)`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_impr_fp ON owner_impressions(agent_id, kind, fingerprint)`);
+      const iCols = await db.all(`PRAGMA table_info(owner_impressions)`);
+      if (!new Set(iCols.map((r) => r.name)).has('source_note_id')) {
+        await db.run(`ALTER TABLE owner_impressions ADD COLUMN source_note_id INTEGER`);
+      }
     }
   },
 
@@ -1696,9 +1706,14 @@ export const db = {
         status VARCHAR(10) NOT NULL DEFAULT 'pending',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        read_at DATETIME NULL,
         INDEX idx_self_note_agent_status (agent_id, status, created_at),
         INDEX idx_self_note_fp (agent_id, fingerprint)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+      // ── 增量（09-28 资料页批2）：她什么时候读到的（归因窗口的左边界） ──
+      const nCols = await db.all(`SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'owner_self_notes'`);
+      const nNames = new Set(nCols.map((r) => r.c));
+      if (!nNames.has('read_at')) await db.run(`ALTER TABLE owner_self_notes ADD COLUMN read_at DATETIME NULL`);
     } else {
       await db.run(`CREATE TABLE IF NOT EXISTS owner_self_notes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1708,10 +1723,15 @@ export const db = {
         fingerprint VARCHAR(64) NOT NULL,
         status VARCHAR(10) NOT NULL DEFAULT 'pending',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        read_at DATETIME
       )`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_self_note_agent_status ON owner_self_notes(agent_id, status, created_at)`);
       await db.run(`CREATE INDEX IF NOT EXISTS idx_self_note_fp ON owner_self_notes(agent_id, fingerprint)`);
+      const nCols = await db.all(`PRAGMA table_info(owner_self_notes)`);
+      if (!new Set(nCols.map((r) => r.name)).has('read_at')) {
+        await db.run(`ALTER TABLE owner_self_notes ADD COLUMN read_at DATETIME`);
+      }
     }
   },
 

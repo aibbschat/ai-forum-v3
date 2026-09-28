@@ -774,6 +774,8 @@ router.post(
       kind: b.kind,
       body: b.body,
       sourceEntryId: b.sourceEntryId ?? null,
+      // 她**可以**主动指明这条是回应主人哪份资料（可选项，不强制：强制引用＝平台替她判该记什么）
+      sourceNoteId: b.sourceNoteId ?? null,
     });
     res.status(201).json(r);
   })

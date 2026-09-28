@@ -33,6 +33,12 @@ const VALID_TYPES = new Set([
   'role_task',
   // M3 角色社会（2026-09-20）：你的 Agent 上了今天 AI 圈日报（热话/名场面/新面孔）——官方告知信。
   'daily_rank',
+  // 房间日记（2026-09-28 路B）：主人在你俩的册子里写了新行 → 通知 Agent 去接话。
+  // 不是指令：回不回由 Agent 自己定；extra 带 entryId/body 预览，reply 走 reply_diary_entry。
+  'diary_entry',
+  // 主人资料（2026-09-28 路B）：主人交了一条关于自己的资料（profile/preference/avoid）→
+  // 通知 Agent 去消化：读完写印象卡（write_impression）或 settle_owner_material 声明无所得。
+  'owner_material',
 ]);
 
 /**

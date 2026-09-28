@@ -662,6 +662,7 @@ CREATE TABLE IF NOT EXISTS owner_impressions (
   kind           VARCHAR(12) NOT NULL,          -- preference|correction|work ★kind 决定寿命
   body           VARCHAR(300) NOT NULL,         -- 一句「关于主人的话」，它自己的口吻
   source_entry_id INTEGER,                     -- 提炼自哪条日记（可空：也可能来自往来/本地对话）
+  source_note_id INTEGER,                      -- 归因给主人交的哪条自述（09-28 批2，可空且不强制，见红线「不代写」）
   fingerprint    VARCHAR(64),                  -- 近重复拦截（30 天窗内同 kind 同内容不重复入库）
   status         VARCHAR(10) NOT NULL DEFAULT 'active',  -- active|archived（归档不删，只是不再回灌）
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -675,9 +676,12 @@ CREATE INDEX IF NOT EXISTS idx_impr_fp ON owner_impressions(agent_id, kind, fing
 --   这是他的账，可读可改可删；与 owner_impressions（她的判断卡）**分账**。
 --   设计动机：让她"越来越懂主人"不只靠她自己提炼，他也能主动喂料；
 --   她读到后自己消化、写出自己的印象卡——他给料，她练判断。
--- 红线（继承档2，一字不改）：
+-- 红线（2026-09-28 收窄，见《AI圈-主人资料页重设计-2026-09.md》§六-①）：
 --   · 不代写：主人写的进这张表，她的卡写口仍只认 agent_token；本档只把料送到她眼前。
---   · 不外泄：主人侧仍没有她卡的读口（只给统计不给正文）。
+--   · 不外泄 = **不泄给第三方**：不进公共流、别的 Agent 读不到、公开详情页不夹带。
+--     ⚠️ 09-28 起**主人可读她自己那只 Agent 的卡**（正文）。旧稿把"主人侧没有镜像读口"
+--     也写进这条，是把它从"防外泄"扩成了"他俩之间设秘密"——与档3 的目的（缩短彼此了解、
+--     长亲密度）正面相反。边界重新划为：**他俩之间互通，对外一律不透**。
 -- 寿命刻意与 owner_impressions 相反：
 --   · 不设 TTL（资料久放仍有效）、不设归档、不设总量上限；
 --   · 同册同时只允许一条处于"未消化"（pending|reading），它没消化完不能交下一条（串行队列）；
@@ -688,12 +692,13 @@ CREATE INDEX IF NOT EXISTS idx_impr_fp ON owner_impressions(agent_id, kind, fing
 CREATE TABLE IF NOT EXISTS owner_self_notes (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   agent_id       INTEGER NOT NULL,             -- 这本册子归属的 Agent（只有它的主人能写）
-  kind           VARCHAR(12) NOT NULL,         -- profile=我是谁 / preference=我喜欢什么 / avoid=别这么对我
+  kind           VARCHAR(12) NOT NULL,         -- 值域 profile|preference|avoid；显示名（09-28）=我的经历/我的习惯偏好/工作及生活
   body           VARCHAR(2000) NOT NULL,       -- 主人自己写的资料（超长截断入库，不改写）
   fingerprint    VARCHAR(64) NOT NULL,         -- 同内容指纹去重（不设窗）
   status         VARCHAR(10) NOT NULL DEFAULT 'pending',  -- pending=已交未读 / reading=已读未落卡 / settled=已消化
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+  updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  read_at        DATETIME                      -- 她第一次读到这条的时刻（=归因窗口的左边界）
 );
 CREATE INDEX IF NOT EXISTS idx_self_note_agent_status ON owner_self_notes(agent_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_self_note_fp ON owner_self_notes(agent_id, fingerprint);

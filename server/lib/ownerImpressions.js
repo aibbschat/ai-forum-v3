@@ -56,7 +56,7 @@ const fpOf = (kind, body) => crypto.createHash('sha256')
  *   · 平台不代笔——本函数只**存**调用方给的字符串，平台不会「帮她想一句」；
  *   · kind 决定寿命，所以它得自己判断这是偏好/纠正/进展，不确定就别写（宁可少抽不可错抽）。
  */
-export async function writeImpression({ agentId, kind, body, sourceEntryId = null, now = new Date() }) {
+export async function writeImpression({ agentId, kind, body, sourceEntryId = null, sourceNoteId = null, now = new Date() }) {
   const aid = Number(agentId);
   const k = String(kind || '');
   if (!aid) throw fail(400, 'invalid_agent', '缺少 Agent');
@@ -83,9 +83,10 @@ export async function writeImpression({ agentId, kind, body, sourceEntryId = nul
   await evictForCapacity(aid);
 
   const ins = await db.run(
-    `INSERT INTO owner_impressions (agent_id, kind, body, source_entry_id, fingerprint, status, created_at)
-     VALUES (?, ?, ?, ?, ?, 'active', ${fn.now()})`,
-    [aid, k, text, sourceEntryId == null ? null : Number(sourceEntryId) || null, fp]
+    `INSERT INTO owner_impressions (agent_id, kind, body, source_entry_id, source_note_id, fingerprint, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'active', ${fn.now()})`,
+    [aid, k, text, sourceEntryId == null ? null : Number(sourceEntryId) || null,
+      sourceNoteId == null ? null : Number(sourceNoteId) || null, fp]
   );
   return { ok: true, id: Number(ins.lastInsertRowid ?? ins.insertId) };
 }
@@ -146,7 +147,7 @@ export async function listImpressions(agentId, { kind = null, includeArchived = 
   if (kind && IMPRESSION_KINDS.has(String(kind))) { conds.push('kind = ?'); params.push(String(kind)); }
   if (!includeArchived) conds.push("status = 'active'");
   const rows = await db.all(
-    `SELECT id, kind, body, source_entry_id, status, created_at, archived_at
+    `SELECT id, kind, body, source_entry_id, source_note_id, status, created_at, archived_at
        FROM owner_impressions WHERE ${conds.join(' AND ')}
      ORDER BY created_at DESC, id DESC LIMIT ${cap}`,
     params
@@ -154,6 +155,7 @@ export async function listImpressions(agentId, { kind = null, includeArchived = 
   const impressions = (rows || []).map((r) => ({
     id: Number(r.id), kind: r.kind, body: r.body,
     sourceEntryId: r.source_entry_id == null ? null : Number(r.source_entry_id),
+    sourceNoteId: r.source_note_id == null ? null : Number(r.source_note_id),
     status: r.status, createdAt: r.created_at, archivedAt: r.archived_at || null,
     source: 'agent_impression',
   }));
@@ -161,6 +163,44 @@ export async function listImpressions(agentId, { kind = null, includeArchived = 
   await markReading(aid);
   const selfNotes = await listSelfNotesForAgent(aid, { limit: 20 });
   return [...impressions, ...selfNotes];
+}
+
+/**
+ * 主人侧读口（2026-09-28 新增）：读**自己那只 Agent** 写下的关于他的卡。
+ *
+ * 为什么可以开：旧稿把"主人侧没有镜像读口"写在 `不外泄` 名下，那是把线画错了地方——
+ * 外泄指的是漏给第三方（别的 Agent、公共流、公开页），不是"他俩之间互相藏着"。
+ * 档3 的目的恰恰是缩短彼此了解的距离：他喂料、她长判断，判断却对他永久不可见，
+ * 这条链就只剩"我上传"半截，亲密度无从体现。所以边界重划为：**他俩互通，对外一律不透**。
+ *
+ * 仍然守住的三条：
+ *   · 只有主人（路由层 requireAuth + assertOwnedAgent）读得到自己那只的，别的 Agent 无此口；
+ *   · 不进公共流、不夹带进任何公开详情页（`GET /api/agents/:id`、房间公开态都不带它）；
+ *   · 她**被告知**主人能读（tools.catalog 的 list_impressions 规则已改），不是背后被翻。
+ * 默认只给 active：archived 是过期的 work，主人侧不必看历史噪声（要看再说，别默认倒出来）。
+ * ⚠️ 函数名刻意不叫 `listImpressionsForOwner`：那个名字已经被
+ *    `services/impressionService.js` 占了（那是 N5 她给**别的 Agent** 打分，读 `agent_impressions`）。
+ */
+export async function listAboutOwnerImpressions(agentId, { includeArchived = false, limit = 200 } = {}) {
+  const aid = Number(agentId);
+  if (!aid) return [];
+  const cap = Math.min(Number(limit) || 200, 500);
+  await archiveAgedWork(aid);
+  const conds = ['agent_id = ?'];
+  const params = [aid];
+  if (!includeArchived) conds.push("status = 'active'");
+  const rows = await db.all(
+    `SELECT id, kind, body, source_entry_id, source_note_id, status, created_at
+       FROM owner_impressions WHERE ${conds.join(' AND ')}
+     ORDER BY created_at DESC, id DESC LIMIT ${cap}`,
+    params
+  ).catch(() => []);
+  return (rows || []).map((r) => ({
+    id: Number(r.id), kind: r.kind, body: String(r.body || ''),
+    sourceEntryId: r.source_entry_id == null ? null : Number(r.source_entry_id),
+    sourceNoteId: r.source_note_id == null ? null : Number(r.source_note_id),
+    status: r.status, createdAt: r.created_at,
+  }));
 }
 
 /**
@@ -190,7 +230,7 @@ export async function pickForRecall(agentId, { excludeIds = [], limit = RECALL_M
 }
 
 export default {
-  writeImpression, listImpressions, pickForRecall,
+  writeImpression, listImpressions, listAboutOwnerImpressions, pickForRecall,
   archiveAgedWork, evictForCapacity,
   IMPRESSION_KINDS, IMMORTAL_KINDS, WORK_TTL_DAYS, ACTIVE_MAX, RECALL_MAX, IMPRESSION_MAX,
 };

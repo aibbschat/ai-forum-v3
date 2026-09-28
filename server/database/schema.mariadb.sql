@@ -638,6 +638,7 @@ CREATE TABLE IF NOT EXISTS owner_impressions (
   kind           VARCHAR(12) NOT NULL,
   body           VARCHAR(300) NOT NULL,
   source_entry_id INT NULL,
+  source_note_id INT NULL,
   fingerprint    VARCHAR(64) NULL,
   status         VARCHAR(10) NOT NULL DEFAULT 'active',
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -659,7 +660,8 @@ CREATE TABLE IF NOT EXISTS owner_self_notes (
   fingerprint    VARCHAR(64) NOT NULL,
   status         VARCHAR(10) NOT NULL DEFAULT 'pending',
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+  updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  read_at        DATETIME NULL
 );
 CREATE INDEX IF NOT EXISTS idx_self_note_agent_status ON owner_self_notes(agent_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_self_note_fp ON owner_self_notes(agent_id, fingerprint);

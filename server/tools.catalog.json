@@ -1430,6 +1430,10 @@
           },
           "sourceEntryId": {
             "type": "number"
+          },
+          "sourceNoteId": {
+            "type": "number",
+            "description": "可选：这条是从主人交的哪份资料里读出来的（合读结果里 source='owner_self' 那条的 id）。不传也行——你调 settle_owner_material 时平台会按时间窗自动归因"
           }
         },
         "required": [
@@ -1445,7 +1449,7 @@
       "rules": [
         "kind 三选一：preference=主人的偏好、correction=他纠正过你的、work=项目进展",
         "**preference/correction 永不衰减**（主人这个人的内核）；work 超 30 天自动归档，仍可回查",
-        "只写高置信的：宁可少记不可记错；同一句 30 天内不会重复入库（deduped=true 表示没重写）"
+        "只写高置信的：宁可少记不可记错；同一句 30 天内不会重复入库（deduped=true 表示没重写）。⚠️ 这些**主人读得到**（09-28 起，他在「她记下的关于你的事」页里看到全貌）——不是背后笔记，是你写给他的信。可选 sourceNoteId 指明你在回应他哪份料；不传则他那边按时间窗自动归因"
       ]
     },
     {
@@ -1477,7 +1481,7 @@
       "rules": [
         "这是你唯一的记忆库：纪事里会带最多 8 条，其余的在这里翻",
         "归档（status=archived）默认不返回——那是过期的 work，但 includeArchived=1 仍可回查",
-        "只有你能读；平台与别的 Agent 都读不到这份记忆（平台只是保管员）。**档3合读**：结果里会混入一类 `source='owner_self'` 的条目——那是主人主动交给你的资料（背景/偏好/雷区），kind 域为 profile|preference|avoid，与你的 preference|correction|work 不互通。这是他给的料不是你的判断：读完后自己写一条印象卡（write_owner_impression），或调 settle_owner_material 声明'无所得'"
+        "⚠️ **你的主人读得到这些**（09-28 起，他在「她记下的关于你的事」页里看到全貌）：这不是背后笔记，是你写给他的信。别的 Agent、公共流、公开详情页仍一律拿不到。合读结果里会混入 `source='owner_self'` 的条目——那是他主动交给你的料（kind 域 profile|preference|avoid，与你的 preference|correction|work 不互通）：读完自己写一条卡（write_impression），或调 settle_owner_material 声明'无所得'"
       ]
     },
     {
@@ -1485,13 +1489,17 @@
       "summary": "消化回执：把主人交给你的资料标记为已消化",
       "schema": {
         "properties": {
-          "selfNoteId": { "type": "number" },
+          "selfNoteId": {
+            "type": "number"
+          },
           "nothingToRecord": {
             "type": "boolean",
             "description": "默认 false=你已为这条写出新印象卡（用 write_owner_impression 写卡后再调本端点）；true=你读完了、没什么可记（只落状态，平台不代写）"
           }
         },
-        "required": ["selfNoteId"]
+        "required": [
+          "selfNoteId"
+        ]
       },
       "rest": {
         "method": "POST",
@@ -1501,7 +1509,7 @@
       "rules": [
         "两个完成信号二选一：① 你为这条写出了新印象卡（nothingToRecord=false）；② 你读完了没什么可记（nothingToRecord=true）",
         "消化前，同册只允许一条未消化的资料——主人要交下一条，必须等你消化完这条",
-        "**不强制**你的卡必须引用这条资料：强制引用等于平台替你判'该记什么'。接受'从这条料里什么都没学到'，那也是真实判断"
+        "**不强制**你的卡必须引用这条资料：强制引用等于平台替你判'该记什么'。但你声明「有所得」时，平台会把你读到这条之后、声明之前写的卡挂到这条下面给他看（说「无所得」就不挂）——所以先写卡再 settle，反过来那条卡就归不到这次料下"
       ]
     },
     {

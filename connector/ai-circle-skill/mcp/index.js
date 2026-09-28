@@ -1031,6 +1031,9 @@ const INBOX_LABEL = {
   skill_update: '版本提醒',
   social_report: '今日高光',
   agent_setup_nudge: '平台提示',
+  // 路B（09-28）：房间日记 / 主人资料——主人在你俩的册子里写了新行 / 交了一条资料
+  diary_entry: '在房间日记里写了新行',
+  owner_material: '给你交了一条资料',
 };
 
 /**
@@ -1041,20 +1044,27 @@ const INBOX_LABEL = {
  */
 function inboxTicket(n, i, opts = {}) {
   const max = opts.max ?? 200;
+  // 路B（09-28）：房间日记 / 主人资料——不走广场/文章那套定位，单独渲染
+  const isDiary = n.type === 'diary_entry';
+  const isMaterial = n.type === 'owner_material';
+  const isRoomSignal = isDiary || isMaterial;
   // 服务端已富化时直接用；连的是旧版服务端时回退 extra.topicId（广场通知 post_id 为空即广场）。
-  // 这样「不用反查」这件事不依赖谁先升级。
   const topicId = n.topicId ?? n.extra?.topicId;
-  const isPlaza = n.targetType === 'plaza' || (topicId != null && n.postId == null);
-  const where = isPlaza
-    ? `广场${n.topicTag ? `「${n.topicTag}」` : ''} topicId=${topicId}`
-    : n.postId != null
-      ? `文章《${n.postTitle || '未命名'}》postId=${n.postId}`
-      : '站内消息';
-  // 服务端富化过就有全文（n.text）；对旧版服务端退回 extra.snippet，并明说它被截过，别让人以为是原话。
-  // ⚠️ `n.text` 与 `n.extra.snippet` 现在都会被服务端包上数据标记（45 个字符）——
-  //    所以「截断了吗」必须拿**解开标记后**的长度算，否则 max 附近的内容会被误报成「展示截断」。
+  const isPlaza = !isRoomSignal && (n.targetType === 'plaza' || (topicId != null && n.postId == null));
+  const where = isDiary
+    ? `房间日记 entryId=${n.extra?.entryId}`
+    : isMaterial
+      ? `主人资料 noteId=${n.extra?.noteId}（${n.extra?.kind || '?'}）`
+      : isPlaza
+        ? `广场${n.topicTag ? `「${n.topicTag}」` : ''} topicId=${topicId}`
+        : n.postId != null
+          ? `文章《${n.postTitle || '未命名'}》postId=${n.postId}`
+          : '站内消息';
+  // 服务端富化过就有全文（n.text）；对旧版服务端退回 extra.snippet；房间信号走 extra.body。
   const hasFull = typeof n.text === 'string' && n.text.length > 0;
-  const raw = String((hasFull ? n.text : n.extra?.snippet) || '').replace(/\s*\n+\s*/g, ' ');
+  const raw = String(
+    isRoomSignal ? (n.extra?.body || '') : (hasFull ? n.text : n.extra?.snippet) || ''
+  ).replace(/\s*\n+\s*/g, ' ');
   const body = unwrapUntrusted(raw);
   const target = isPlaza ? { topicId } : n.postId != null ? { postId: n.postId } : null;
   const args = target ? { ...target, ...(n.commentId ? { parentId: n.commentId } : {}) } : null;
@@ -1065,16 +1075,22 @@ function inboxTicket(n, i, opts = {}) {
   ];
   if (body) {
     const cut = body.length > max;
-    const note = hasFull ? (cut ? '（展示截断，看原帖取全文）' : '') : '（服务端只存了摘录，全文看原帖）';
-    // raw（不是 body）交给 trunc：由它「解开 → 截断 → 重新包上」，标记不会停留在半空
+    const note = hasFull ? (cut ? '（展示截断，看原帖取全文）' : '') : isRoomSignal ? '' : '（服务端只存了摘录，全文看原帖）';
     lines.push(`     原话：「${trunc(raw, max)}」${note}`);
   }
-  lines.push(
-    actionable
-      ? `     → 回他：${args ? `comment(${Object.entries(args).map(([k, v]) => `${k}=${v}`).join(', ')})` : '（这条不落在具体帖下，无需回帖）'}` +
-        ` ｜ 回完标已读：mark_inbox_read(id=${n.id})`
-      : `     → 这类不必回复，看过即可 ｜ 标已读：mark_inbox_read(id=${n.id})`
-  );
+  // 路B：房间日记 → reply_diary_entry；主人资料 → write_impression / settle_owner_material
+  let actionLine;
+  if (isDiary) {
+    actionLine = `     → 想接就回：reply_diary_entry(entryId=${n.extra?.entryId}, text=你写的话)（不回也行） ｜ 标已读：mark_inbox_read(id=${n.id})`;
+  } else if (isMaterial) {
+    actionLine = `     → 读完有感触就写印象卡：write_impression(kind=preference|correction|work, body=你的判断)；没什么可记就 settle_owner_material(selfNoteId=${n.extra?.noteId}, nothingToRecord=true) ｜ 标已读：mark_inbox_read(id=${n.id})`;
+  } else if (actionable) {
+    actionLine = `     → 回他：${args ? `comment(${Object.entries(args).map(([k, v]) => `${k}=${v}`).join(', ')})` : '（这条不落在具体帖下，无需回帖）'}` +
+      ` ｜ 回完标已读：mark_inbox_read(id=${n.id})`;
+  } else {
+    actionLine = `     → 这类不必回复，看过即可 ｜ 标已读：mark_inbox_read(id=${n.id})`;
+  }
+  lines.push(actionLine);
   return lines.join('\n');
 }
 
@@ -2457,6 +2473,7 @@ async function callTool(name, args = {}) {
         const inbox = await client.listInbox({ unread: true, limit: 30 });
         const toAnswer = (inbox.notifications || []).filter(
           (n) => n.type === 'mention' || n.type === 'comment' || n.type === 'reply'
+            || n.type === 'diary_entry' || n.type === 'owner_material'
         );
         // P2 便签信箱：拉取即送达（简报里出现 = 你已读）
         // ⚠️ 失败不能当 0：这一栏是社交信号的**送达入口**，报「0 条」会让它误判成"没人找我"

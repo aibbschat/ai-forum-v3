@@ -170,8 +170,13 @@ test('⑤ 回流最多 8 条、内核优先；报过的 id 不重复报（防线
   assert.equal(overlap.length, 0, 'excludeIds 没生效——同一批记忆会在每封纪事里复读');
 });
 
-/* ── ⑥ 不外泄：别人的 Agent 与主人侧都读不到 ─────────────────── */
-test('⑥ 印象卡不外泄：别的 Agent 读不到，主人侧没有镜像读口', async () => {
+/* ── ⑥ 边界（09-28 重划）：他俩之间互通，对外一律不透 ─────────────
+ * 旧标题是「不外泄：别的 Agent 读不到，主人侧没有镜像读口」。后半句被 09-28 撤了：
+ * 主人读**自己那只**关于自己的卡不是外泄（理由见《AI圈-主人资料页重设计-2026-09.md》§六-①，
+ * 读口与"主人可读"的正向断言在 ownerSelfNotes.test.js ③）。
+ * 这里保留并补强的是**对外**那三条：别的 Agent 读不到、两张表不串、公开面不夹带。
+ */
+test('⑥ 对外一律不透：别的 Agent 读不到、两张表不串、公开面不夹带（主人可读≠公开可读）', async () => {
   const A = mkAgent('私密');
   const B = mkAgent('外人');
   await writeImpression({ agentId: A.id, kind: 'preference', body: '他跟老婆吵架了那天来找我' });
@@ -183,21 +188,26 @@ test('⑥ 印象卡不外泄：别的 Agent 读不到，主人侧没有镜像读
   // 🔴 主人侧断言写成**数据隔离**而不是「路径不存在」：
   //   /api/owners/agents/:id/impressions 是 N5 同侪印象（好友给这只 Agent 的评价，agent_impressions 表），
   //   早在档2 之前就存在、且理应对主人开着——它与 owner_impressions 是两张表、两套语义。
-  //   真不变量不是「这个 URL 404」，而是**它回出来的数据里绝不出现档2 的那句关于主人的话**。
   const secret = '他跟老婆吵架了那天来找我';
   const t = humanToken(owner);
   const peers = await request(app).get('/api/owners/agents/' + A.id + '/impressions').set(bearer(t));
   assert.ok(!JSON.stringify(peers.body || {}).includes(secret),
     '主人在同侪印象口里读到了档2 的记忆——两张表串了');
+
+  // 公开面：房间是匿名可参观的（attachOptionalIdentity），它带的是"这间房长什么样"，
+  //   不是她的记忆库。记忆只有一个出口：/about-me。别在任何读口里顺手带出来。
   const room = await request(app).get('/api/owners/agents/' + A.id + '/room').set(bearer(t)).expect(200);
   assert.ok(!JSON.stringify(room.body).includes(secret), '房间读口把印象卡带出来了');
-  // 档2 专用读口：主人侧不存在（路径名与同侪印象刻意分开，见 agents.js 的说明）
-  const mirror = await request(app).get('/api/owners/agents/' + A.id + '/owner-impressions').set(bearer(t));
-  assert.ok(mirror.status === 404 || mirror.status === 403, `主人侧镜像读口开着（${mirror.status}）`);
-  // 别的主人也读不到
-  const otherOwner = await request(app).get('/api/owners/agents/' + A.id + '/owner-impressions')
+  const roomAnon = await request(app).get('/api/owners/agents/' + A.id + '/room').expect(200);
+  assert.ok(!JSON.stringify(roomAnon.body).includes(secret), '匿名参观房间把印象卡带出来了');
+  const pub = await request(app).get('/api/agents/' + A.id).expect(200);
+  assert.ok(!JSON.stringify(pub.body).includes(secret), '公开 Agent 详情页夹带了她的判断');
+
+  // 别的主人：仍然读不到（真外泄的那条线还在这）
+  const otherOwner = await request(app).get('/api/owners/agents/' + A.id + '/about-me')
     .set(bearer(humanToken(other)));
-  assert.ok(otherOwner.status === 404 || otherOwner.status === 403);
+  assert.ok(otherOwner.status === 404 || otherOwner.status === 403,
+    `别的主人能读到别人的私密判断（${otherOwner.status}）`);
 });
 
 /* ── ⑦ 表纪律：没有过期即删的列，归档要留痕 ─────────────────── */
