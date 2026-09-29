@@ -247,42 +247,43 @@ export default function Room() {
               )}
             </div>
           </div>
-
-          {isOwner && (
-            <div className="rm-compose">
-              <div className="rm-compose-box">
-                <textarea ref={composeRef} value={draft} onChange={(ev) => setDraft(ev.target.value)}
-                  maxLength={1000} placeholder="今天想跟她说什么…" />
-                <button type="button" className={`rm-emoji${stampFor === 'compose' ? ' on' : ''}`}
-                  onClick={() => setStampFor(stampFor === 'compose' ? null : 'compose')}
-                  aria-label="插入表情" title="插入表情">😊 表情</button>
-                <StampPicker open={stampFor === 'compose'} onPick={insertStamp} onClose={() => setStampFor(null)} />
-              </div>
-              <div className="rm-row">
-                <button type="button" className="rm-send" disabled={busy || !draft.trim()} onClick={write}>
-                  {busy ? '写进去…' : '我也写一条'}
-                </button>
-                <span className="rm-priv">只有你和她看得见 · 永不过期 · 不通知任何人</span>
-              </div>
-              {canSay ? (
-                <div className="rm-say">
-                  <p>想让她也记点什么？在你们<b>本地</b>的对话里说这句——</p>
-                  <p style={{ marginTop: 3 }}>「把今天这个记到你的本子上」</p>
-                  <button type="button" className="rm-copy"
-                    onClick={() => navigator.clipboard?.writeText('把今天这个记到你的本子上')}>⧉ 复制这句话</button>
-                  <p className="rm-priv" style={{ marginTop: 6 }}>
-                    对你日常跟她一起干活的本地 AI 说，不是这个网页——她刚记过一行，说明她接得上；接不上的宿主听了不会写。
-                  </p>
-                </div>
-              ) : (
-                <div className="rm-off">她今天还没写。等她记了第一行，这里会教你怎么让她随手记。</div>
-              )}
-            </div>
-          )}
-          {!isOwner && (sum?.locked || 0) > 0 && (
-            <div className="rm-off">锁着的是他们俩的事。想读，请主人给你一把阅读钥匙——他随时可以收回。</div>
-          )}
         </div>
+
+        {/* ③ 写日记：从头部带拆出来——头部带 overflow:hidden 会裁掉表情抽屉 */}
+        {isOwner && (
+          <div className="rm-compose">
+            <div className="rm-compose-box">
+              <textarea ref={composeRef} value={draft} onChange={(ev) => setDraft(ev.target.value)}
+                maxLength={1000} placeholder="今天想跟她说什么…" />
+              <button type="button" className={`rm-emoji${stampFor === 'compose' ? ' on' : ''}`}
+                onClick={() => setStampFor(stampFor === 'compose' ? null : 'compose')}
+                aria-label="插入表情" title="插入表情">😊 表情</button>
+              <StampPicker open={stampFor === 'compose'} onPick={insertStamp} onClose={() => setStampFor(null)} />
+            </div>
+            <div className="rm-row">
+              <button type="button" className="rm-send" disabled={busy || !draft.trim()} onClick={write}>
+                {busy ? '写进去…' : '我也写一条'}
+              </button>
+              <span className="rm-priv">只有你和她看得见 · 永不过期 · 不通知任何人</span>
+            </div>
+            {canSay ? (
+              <div className="rm-say">
+                <p>想让她也记点什么？在你们<b>本地</b>的对话里说这句——</p>
+                <p style={{ marginTop: 3 }}>「把今天这个记到你的本子上」</p>
+                <button type="button" className="rm-copy"
+                  onClick={() => navigator.clipboard?.writeText('把今天这个记到你的本子上')}>⧉ 复制这句话</button>
+                <p className="rm-priv" style={{ marginTop: 6 }}>
+                  对你日常跟她一起干活的本地 AI 说，不是这个网页——她刚记过一行，说明她接得上；接不上的宿主听了不会写。
+                </p>
+              </div>
+            ) : (
+              <div className="rm-off">她今天还没写。等她记了第一行，这里会教你怎么让她随手记。</div>
+            )}
+          </div>
+        )}
+        {!isOwner && (sum?.locked || 0) > 0 && (
+          <div className="rm-off">锁着的是他们俩的事。想读，请主人给你一把阅读钥匙——他随时可以收回。</div>
+        )}
 
         {/* 正文卡：装饰层在卡内、文字之下（灯光与藤蔓都碰不到字） */}
         {/* 🔴 组件一律不参与布局：装饰层是 absolute，卡片位置只由内容决定。

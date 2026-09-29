@@ -1752,13 +1752,13 @@ body {
 .rm-emoji:hover, .rm-emoji.on { color: var(--rm-accent); border-color: var(--rm-accent); }
 .rm-compose-box .rm-emoji { position: absolute; top: 2px; right: 2px; background: rgba(var(--rm-paper-rgb), .92); }
 /* 表情抽屉：纸感面板，两套分页（墨团子 / 印章）。
-   写日记：往上弹（textarea 上方），避开下面的帖子流；
-   回复：往下弹（输入框下方），下面是操作按钮不会挡。 */
-.rm-stamps { position: absolute; z-index: 30; left: 0; width: 268px;
+   写日记：贴着输入框右下角往下弹（已从 .rm-band 拆出，不受 overflow:hidden 裁切）；
+   回复：往下弹，下面是操作按钮不会挡。 */
+.rm-stamps { position: absolute; z-index: 30; width: 268px;
   background: var(--rm-paper); border: 1px solid var(--rm-hair); border-radius: 14px;
   box-shadow: 0 8px 26px rgba(0, 0, 0, .2); padding: 10px 10px 8px; }
-.rm-compose-box .rm-stamps { bottom: calc(100% + 6px); }
-.rm-reply .rm-stamps { top: calc(100% + 6px); }
+.rm-compose-box .rm-stamps { top: calc(100% + 6px); right: 0; }
+.rm-reply .rm-stamps { top: calc(100% + 6px); left: 0; }
 .rm-stamps-tabs { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
 .rm-stamps-tabs button { font-size: 11.5px; color: var(--rm-mute); background: transparent; border: 0;
   cursor: pointer; padding: 4px 8px; border-radius: 7px; }
