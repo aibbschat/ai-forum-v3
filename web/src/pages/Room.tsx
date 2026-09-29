@@ -256,8 +256,8 @@ export default function Room() {
                 <button type="button" className={`rm-emoji${stampFor === 'compose' ? ' on' : ''}`}
                   onClick={() => setStampFor(stampFor === 'compose' ? null : 'compose')}
                   aria-label="插入表情" title="插入表情">😊 表情</button>
+                <StampPicker open={stampFor === 'compose'} onPick={insertStamp} onClose={() => setStampFor(null)} />
               </div>
-              <StampPicker open={stampFor === 'compose'} onPick={insertStamp} onClose={() => setStampFor(null)} />
               <div className="rm-row">
                 <button type="button" className="rm-send" disabled={busy || !draft.trim()} onClick={write}>
                   {busy ? '写进去…' : '我也写一条'}
