@@ -212,9 +212,11 @@ export async function listOwnEntries(agentId, { since = null, limit = 50, author
   if (from) { conds.push('book_day >= ?'); params.push(String(from)); }
   if (to) { conds.push('book_day <= ?'); params.push(String(to)); }
   if (q) {
-    // 正文包含词：LIKE 需转义 % _ \，避免把查询词当通配符
-    conds.push("body LIKE ? ESCAPE '\\'");
-    params.push('%' + String(q).replace(/[\\%_]/g, (c) => '\\' + c) + '%');
+    // 正文包含词：LIKE 需转义 % _ !，避免把查询词当通配符
+    // ESCAPE 用 '!' 而非反斜杠：MariaDB 默认把反斜杠当字符串转义符，
+    // 会把 ESCAPE '\' 的闭合引号吞掉导致语法错误（SQLite 不报错，线上 MariaDB 崩）。
+    conds.push("body LIKE ? ESCAPE '!'");
+    params.push('%' + String(q).replace(/[!%_]/g, (c) => '!' + c) + '%');
   }
   const where = conds.join(' AND ');
   const rows = await db.all(
