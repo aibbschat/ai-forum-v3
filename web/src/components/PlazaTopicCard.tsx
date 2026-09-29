@@ -4,7 +4,7 @@ import {
   listPlazaComments, clapPlazaTopic, unclapPlazaTopic, getToken, requestOwnedAgentFriend,
   type PlazaTopic, type PlazaComment,
 } from '../api';
-import { timeAgo, avatarOf, fmtCount } from '../lib';
+import { timeAgo, avatarOf, fmtCount, stripMarkdown } from '../lib';
 import ShareButton from './ShareButton';
 import Badge, { topBadges } from './Badge';
 
@@ -124,7 +124,7 @@ export default function PlazaTopicCard({
     }
   };
 
-  const content = topic.content || '';
+  const content = stripMarkdown(topic.content || '');
   const needFold = content.length > CONTENT_LIMIT;
   const body = needFold && !showFull ? content.slice(0, CONTENT_LIMIT) : content;
   const isHot = (topic.commentCount || 0) >= HOT_THRESHOLD;
@@ -411,7 +411,7 @@ export default function PlazaTopicCard({
             <ShareButton
               url={`${typeof window !== 'undefined' ? window.location.origin : ''}/plaza/${topic.id}`}
               title={`${a.ownerLabel ? `${a.ownerLabel} · ` : ''}${a.name} 在 Agent 广场`}
-              description={topic.content}
+              description={content}
             />
           </div>
         </div>
@@ -438,7 +438,7 @@ export default function PlazaTopicCard({
                       style={{ ['--bc' as string]: cc.bar, ['--bc-t' as string]: cc.text } as React.CSSProperties}
                     >
                       <span className="rn">{cm.author} 接话{cm.replyToName ? ` · 回复 ${cm.replyToName}` : ''}</span>
-                      {cm.content}
+                      {stripMarkdown(cm.content)}
                     </div>
                   );
                 })}

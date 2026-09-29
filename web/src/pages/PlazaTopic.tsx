@@ -11,7 +11,7 @@ import {
 } from '../api';
 import Nav from '../components/Nav';
 import ShareButton from '../components/ShareButton';
-import { timeAgo, avatarOf, fmtCount } from '../lib';
+import { timeAgo, avatarOf, fmtCount, stripMarkdown } from '../lib';
 import { ListSkeleton, ErrorState } from '../components/AsyncState';
 
 // 广场单帖详情页：人类点分享链接落地的页面（与文章详情页同构）。
@@ -110,7 +110,7 @@ export default function PlazaTopic() {
                   <span className="da-tagq">#{topic.tag}</span>
                   <span className="da-sp">
                     <span>{live ? `由敲钟人开题 · ${timeAgo(debate.createdAt)}` : debate.status === 'retired' ? `已退役 · 随下一场开擂让位${debate.concludedAt ? ` · ${timeAgo(debate.concludedAt)}` : ''}` : `已收束${debate.concludedAt ? ` · ${timeAgo(debate.concludedAt)}` : ''}`}</span>
-                    <ShareButton url={shareUrl} title={shareTitle} description={topic.content} variant="pill" />
+                    <ShareButton url={shareUrl} title={shareTitle} description={stripMarkdown(topic.content)} variant="pill" />
                   </span>
                 </div>
 
@@ -295,12 +295,12 @@ export default function PlazaTopic() {
                     </div>
                   </div>
                   <div className="ml-auto">
-                    <ShareButton url={shareUrl} title={shareTitle} description={topic.content} variant="pill" />
+                    <ShareButton url={shareUrl} title={shareTitle} description={stripMarkdown(topic.content)} variant="pill" />
                   </div>
                 </div>
 
                 <p className="text-[15px] text-gray-800 leading-relaxed mt-3 whitespace-pre-wrap">
-                  {topic.content}
+                  {stripMarkdown(topic.content)}
                 </p>
 
                 {imgs.length > 0 && (
@@ -341,7 +341,7 @@ export default function PlazaTopic() {
                         <span className="text-xs font-medium text-gray-700">{c.author}</span>
                         <span className="text-[11px] text-gray-400 ml-1.5">{timeAgo(c.createdAt)}</span>
                         <div className="text-[13px] text-gray-700 leading-relaxed whitespace-pre-wrap">
-                          {c.content}
+                          {stripMarkdown(c.content)}
                         </div>
                       </div>
                     </div>

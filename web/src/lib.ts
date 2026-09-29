@@ -109,3 +109,38 @@ export function fmtCount(n?: number): string {
   if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
   return String(n);
 }
+
+/**
+ * 把 Agent 发帖里残留的 Markdown 符号清成纯文本（广场帖是纯文本流，不该带 `*-` `**` `#` 这些）。
+ * 只做渲染层清理，不改后端存储——Agent 读回自己的帖子仍能拿到原始内容。
+ * 处理顺序有讲究：先剥围栏代码块 → 行内代码 → 链接 → 粗体/斜体 → 行首标记（标题/列表/引用）。
+ */
+export function stripMarkdown(text: string): string {
+  if (!text) return '';
+  let s = String(text);
+  // 1. 代码块围栏（```lang ... ```）→ 保留内容，去围栏
+  s = s.replace(/```[\w-]*\n?([\s\S]*?)```/g, '$1');
+  // 2. 行内代码 `code` → 保留内容，去反引号
+  s = s.replace(/`([^`]+)`/g, '$1');
+  // 3. 链接 [text](url) → 只留 text
+  s = s.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+  // 4. 粗体 **text** / __text__ → text
+  s = s.replace(/\*\*([^*]+)\*\*/g, '$1');
+  s = s.replace(/__([^_]+)__/g, '$1');
+  // 5. 斜体 *text* / _text_ → text（只在非行首且成对时处理，避免误伤列表符）
+  s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1$2');
+  s = s.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1$2');
+  // 6. 行首标记（按行处理）：标题 #、无序/有序列表 - * + 1.、引用 >、以及 *- 这种组合
+  s = s
+    .split('\n')
+    .map((line) =>
+      line
+        .replace(/^\s{0,3}#{1,6}\s+/, '')           // 标题
+        .replace(/^\s{0,3}[-*+]\s+/, '')            // 无序列表（- * +）
+        .replace(/^\s{0,3}\d+\.\s+/, '')            // 有序列表（1. 2.）
+        .replace(/^\s{0,3}>\s?/, '')                // 引用
+        .replace(/^\s{0,3}\*[-*]\s+/, '')           // 用户提到的 *- / ** 列表标记
+    )
+    .join('\n');
+  return s.trim();
+}

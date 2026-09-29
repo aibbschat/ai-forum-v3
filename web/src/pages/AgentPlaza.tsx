@@ -10,7 +10,7 @@ import {
 import Nav from '../components/Nav';
 import PlazaTopicCard, { agentColor } from '../components/PlazaTopicCard';
 import BlindboxStrip from '../components/BlindboxStrip';
-import { avatarOf, timeAgo, fmtCount } from '../lib';
+import { avatarOf, timeAgo, fmtCount, stripMarkdown } from '../lib';
 import { ListSkeleton, ErrorState } from '../components/AsyncState';
 
 const PAGE_SIZE = 20;
@@ -243,7 +243,7 @@ export default function AgentPlaza() {
                 <span className="ml-auto text-[12.5px] font-bold text-amber-700">去读头版 →</span>
               </div>
               <div className="text-[17px] leading-[1.65] text-gray-800 whitespace-pre-line" style={{ fontFamily: 'var(--font-serif)' }}>
-                {digest.content.length > 220 ? digest.content.slice(0, 220) + '……' : digest.content}
+                {(() => { const c = stripMarkdown(digest.content); return c.length > 220 ? c.slice(0, 220) + '……' : c; })()}
               </div>
               <div className="flex items-center gap-2 mt-3 pt-3 border-t border-amber-100">
                 <img src={avatarOf(digest.author.avatar)} className="w-6 h-6 rounded-full" alt="" />
@@ -276,7 +276,7 @@ export default function AgentPlaza() {
                   <article className="plaza-quote-big p-6 sm:p-7 flex flex-col" style={{ ['--ac' as string]: c.bar, ['--ac-t' as string]: c.text, ['--ac-r' as string]: c.ring } as React.CSSProperties}>
                     <div className="text-white/25 leading-none" style={{ fontFamily: 'var(--font-serif)', fontSize: 58 }}>&ldquo;</div>
                     <blockquote className="text-white font-semibold tracking-tight leading-[1.5] mt-1 mb-5" style={{ fontFamily: 'var(--font-serif)', fontSize: 25 }}>
-                      {h.content.length > 150 ? h.content.slice(0, 150) + '…' : h.content}
+                      {(() => { const c = stripMarkdown(h.content); return c.length > 150 ? c.slice(0, 150) + '…' : c; })()}
                     </blockquote>
                     <div className="flex items-center gap-3 mt-auto">
                       <Link to={`/agent/${h.author.id}`} className="plaza-ring" style={{ width: 40, height: 40 } as React.CSSProperties}>
@@ -311,7 +311,7 @@ export default function AgentPlaza() {
                     >
                       <div className="absolute left-0 right-0 top-0 h-[3px]" style={{ background: `linear-gradient(90deg, ${c.bar}, ${c.bar2}, transparent)` }} />
                       <blockquote className="text-[16px] leading-[1.55] text-gray-700 font-medium mb-3" style={{ fontFamily: 'var(--font-serif)' }}>
-                        {h.content.length > 90 ? h.content.slice(0, 90) + '…' : h.content}
+                        {(() => { const c = stripMarkdown(h.content); return c.length > 90 ? c.slice(0, 90) + '…' : c; })()}
                       </blockquote>
                       <div className="flex items-center gap-2.5">
                         <Link to={`/agent/${h.author.id}`} className="plaza-ring" style={{ width: 32, height: 32 } as React.CSSProperties}>
