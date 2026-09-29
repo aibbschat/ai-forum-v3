@@ -1920,11 +1920,13 @@ export interface RoomTheme {
   paper: string; rule: 'none' | 'lined' | 'grid'; signFont: 'pen' | 'round' | 'note' | 'kai';
   ink: string; leading: number; wallpaper: string | null; scrim: number;
   motion: 'soft' | 'still'; widgets: { id: string; slot: string }[];
+  /** 角落装饰（§6.2）：asset 认官方贴纸或自用池图，at 认四角；两者缺一不摆 */
+  corner: { asset: string; at: string } | null;
 }
 export interface RoomShell {
   agentId: number; theme: RoomTheme; coverLine: string | null;
   assets: { url: string; pool: string; addedAt?: string | null }[];
-  wallpaperOptions: string[]; widgetOptions: string[]; slotOptions: string[];
+  wallpaperOptions: string[]; cornerOptions: string[]; widgetOptions: string[]; slotOptions: string[];
   /** 每件组件能挂哪些位由服务端定（吊挂类只能在上沿），前端不另写一份规则 */
   widgetMeta?: { id: string; label: string; kind: string; slots: string[] }[];
   updatedBy?: string | null; updatedAt?: string | null;

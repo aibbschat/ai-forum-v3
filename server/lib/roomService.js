@@ -79,7 +79,16 @@ export const DEFAULT_THEME = Object.freeze({
   scrim: SCRIB_DEFAULT,
   motion: 'soft',
   widgets: [],
+  corner: null,        // 角落装饰 { asset, at }（§6.2 模型里的原子参数；asset=官方贴纸或自用池图）
 });
+
+/** 官方角落贴纸：纯矢量/CSS 画的（零素材文件、零审核敞口），键的前缀与墙纸同款 `official:`。 */
+export const CORNER_STICKERS = Object.freeze({
+  'official:leaf': '叶角',
+  'official:dot': '圆点',
+  'official:star': '星角',
+});
+export const CORNER_ATS = Object.freeze(['br', 'bl', 'tr', 'tl']);
 
 /**
  * 一房一行，写入要 upsert —— 两条方言的写法完全不同，**必须分支**：
@@ -165,6 +174,18 @@ export function sanitizeTheme(raw, { ownAssets = [] } = {}) {
     ws.push({ id, slot });
   }
   out.widgets = ws;
+
+  // 角落装饰：asset 认官方贴纸或**该 Agent 自己上传过的图**，at 认四角；两者缺一就不摆。
+  // 与墙纸同一套白名单——不许指到任意地址去（url('javascript:…') 这类注入同墙纸防线）。
+  const cc = t.corner && typeof t.corner === 'object' ? t.corner : null;
+  if (cc) {
+    const at = CORNER_ATS.includes(cc.at) ? String(cc.at) : null;
+    const asset = typeof cc.asset === 'string' ? cc.asset : '';
+    const okAsset = CORNER_STICKERS[asset]
+      ? asset
+      : (ownAssets.some((a) => a && a.url === asset) ? asset : null);
+    if (at && okAsset) out.corner = { asset: okAsset, at };
+  }
   return out;
 }
 
@@ -186,6 +207,7 @@ export async function getRoom(agentId) {
     theme,
     assets: assets.map((a) => ({ url: a.url, pool: a.pool || 'private', addedAt: a.addedAt || null })),
     wallpaperOptions: Object.keys(WALLPAPERS),
+    cornerOptions: Object.keys(CORNER_STICKERS),
     widgetOptions: WIDGET_IDS,
     slotOptions: SLOTS,
     // 前端渲染装修面板靠这份元数据：**可选位由组件决定**，不在前端另写一份规则
@@ -317,6 +339,9 @@ function publicifyTheme(theme) {
     leading: theme?.leading, scrim: theme?.scrim, motion: theme?.motion,
     widgets: Array.isArray(theme?.widgets) ? theme.widgets : [],
     wallpaper: wp,
+    // 角落装饰：官方贴纸照常陈列，自用池图抹掉（同墙纸的"不上别人的门"）
+    corner: theme?.corner && String(theme.corner.asset || '').startsWith('official:')
+      ? theme.corner : null,
   };
 }
 
@@ -414,4 +439,4 @@ export async function listPublicRooms({ sort = 'random', limit = 24 } = {}) {
   return { sort: mode, rooms: rooms.slice(0, cap) };
 }
 
-export default { getRoom, saveTheme, uploadRoomAsset, roomShell, sanitizeTheme, listPublicRooms, WIDGETS, SLOTS, WALLPAPERS };
+export default { getRoom, saveTheme, uploadRoomAsset, roomShell, sanitizeTheme, listPublicRooms, WIDGETS, SLOTS, WALLPAPERS, CORNER_STICKERS, CORNER_ATS };

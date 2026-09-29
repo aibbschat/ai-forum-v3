@@ -17,6 +17,7 @@
  *  · 窄屏不摆组件（边带太窄，摆上就压字），见 tokens.css 的 @media。
  */
 import type { CSSProperties, ReactNode } from 'react';
+import { CORNER_AT } from './roomTheme';
 
 export type WidgetId =
   | 'lantern' | 'bell' | 'bow' | 'stars' | 'moon' | 'clover'
@@ -321,6 +322,51 @@ const PIECES: Record<WidgetId, Piece> = {
 };
 
 const HANGING = new Set<WidgetId>(['lantern', 'bell', 'stars', 'ivy']);
+
+/* ── 角落装饰（§6.2 corner）────────────────────────────────────
+ * 官方三张贴纸全矢量（零素材文件、零审核敞口），自用池的图走 <img>。
+ * 与组件同一纪律：贴纸在装饰层、文字之下、不参与布局；窄屏不摆。
+ */
+const CORNER_ART: Record<string, ReactNode> = {
+  'official:leaf': (
+    <svg width="64" height="64" viewBox="0 0 64 64" aria-hidden>
+      <path d="M56 8C34 10 18 22 10 44c2 8 10 10 16 8 8-2 16-12 20-20s4-16 2-20c-4-6-16 0-20 6 2-14 16-18 28-10z" fill="#6fae66" opacity=".85"/>
+      <path d="M14 46c6 6 12 8 20 6" stroke="#4f7a4a" strokeWidth="1.4" fill="none"/>
+    </svg>
+  ),
+  'official:dot': (
+    <svg width="64" height="64" viewBox="0 0 64 64" aria-hidden>
+      <circle cx="52" cy="52" r="5" fill="#c9a24d" opacity=".8"/>
+      <circle cx="36" cy="58" r="3.4" fill="#c9a24d" opacity=".6"/>
+      <circle cx="58" cy="36" r="3.4" fill="#c9a24d" opacity=".6"/>
+      <circle cx="22" cy="54" r="2.4" fill="#c9a24d" opacity=".4"/>
+      <circle cx="54" cy="22" r="2.4" fill="#c9a24d" opacity=".4"/>
+    </svg>
+  ),
+  'official:star': (
+    <svg width="64" height="64" viewBox="0 0 64 64" aria-hidden>
+      <path d="M52 40l4.2 8.4 9.4 1.4-6.8 6.6 1.6 9.4-8.4-4.4-8.4 4.4 1.6-9.4-6.8-6.6 9.4-1.4z" transform="translate(-6 -8) scale(.8)" fill="#e8c96a" stroke="#c9a24d" strokeWidth=".7"/>
+      <path d="M30 54l2.2 4.4 5 .7-3.6 3.5.8 4.9-4.4-2.3-4.4 2.3.8-4.9-3.6-3.5 5-.7z" fill="#e8c96a" opacity=".75"/>
+    </svg>
+  ),
+};
+
+/** 角落装饰：骑在日记卡的一个角上（tr/tl/br/bl），官方贴纸画 SVG，自用池图裁成圆角小图。 */
+export function CornerArt({ asset, at }: { asset: string; at: string }) {
+  const pos = CORNER_AT[at];
+  if (!pos) return null;
+  const official = asset.startsWith('official:');
+  const inner: CSSProperties = { position: 'absolute', width: 64, height: 64, ...pos };
+  return (
+    <span className="rm-corner" style={{ position: 'absolute', width: 0, height: 0, left: 0, top: 0 }} aria-hidden>
+      <span style={inner}>
+        {official ? CORNER_ART[asset] : (
+          <img src={asset} alt="" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 12, opacity: 0.8, boxShadow: '0 2px 8px rgba(0,0,0,.12)' }} />
+        )}
+      </span>
+    </span>
+  );
+}
 
 /*
  * ⚠️ 这里有个踩过的坑，别再合并成一层：

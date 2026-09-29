@@ -132,6 +132,23 @@ test('墙纸只能指官方表或自己上传过的图——这条是背景注�
   assert.equal(steal.wallpaper, null, '能把别人上传的图摆进自己房间');
 });
 
+/** 角落装饰（§6.2 corner）：官方贴纸或自用池图，at 只认四角；与墙纸同一道白名单。 */
+test('角落装饰：官方贴纸/自用图收，外链与非法角位丢', async () => {
+  const okOfficial = sanitizeTheme({ corner: { asset: 'official:leaf', at: 'br' } });
+  assert.deepEqual(okOfficial.corner, { asset: 'official:leaf', at: 'br' }, '官方贴纸被拒');
+  const up = await uploadRoomAsset({ agentId: mkAgent('角落').id, ownerId: owner, dataUrl: PNG });
+  const okOwn = sanitizeTheme({ corner: { asset: up.url, at: 'tl' } }, { ownAssets: [{ url: up.url, pool: 'private' }] });
+  assert.equal(okOwn.corner?.asset, up.url, '自用池图贴角被拒');
+  const evil = sanitizeTheme({ corner: { asset: 'https://evil.example/x.png', at: 'br' } });
+  assert.equal(evil.corner, null, '任意外链贴进角落（装饰注入口）');
+  const jsUrl = sanitizeTheme({ corner: { asset: "javascript:alert(1)", at: 'br' } });
+  assert.equal(jsUrl.corner, null, 'javascript: url 贴进角落');
+  const badAt = sanitizeTheme({ corner: { asset: 'official:dot', at: 'center' } });
+  assert.equal(badAt.corner, null, '非法角位被收下了');
+  const noAsset = sanitizeTheme({ corner: { at: 'br' } });
+  assert.equal(noAsset.corner, null, '缺 asset 也摆了角');
+});
+
 /* ── 反复上传（萧盛 09-26：「上传一张后就不能再上传了」）────────
  * 服务端这一侧本来就没有"只能传一张"的限制，所以这条测试钉的是**别把它做出来**：
  *   第二张不许顶掉第一张、两张都要能选回来、图池要按上传顺序排。

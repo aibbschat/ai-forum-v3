@@ -23,11 +23,37 @@ import type { AgentCard, DiaryLine, DiaryProof, RoomTheme, RoomView } from '../a
 import Nav from '../components/Nav';
 import { EmptyState } from '../components/AsyncState';
 import { avatarOf } from '../lib';
-import { Decor, DecorGlow } from '../components/room/widgets';
+import { Decor, DecorGlow, CornerArt } from '../components/room/widgets';
 import type { Slot, WidgetId } from '../components/room/widgets';
 import { ruleBg, themeVars, wallpaperUrl, luminance } from '../components/room/roomTheme';
 import DecoratePanel from '../components/room/DecoratePanel';
 import SettingsPanel from '../components/room/SettingsPanel';
+
+/** 里程碑花藤（纪念不是等级）：一起写了 N 天，长成一株小藤。
+ *  满 30 天开一朵花（最多 5 朵封顶），天数本身在壳上本就可见（§5.4 亮锁），
+ *  它只是把那行数字画成一株会长的东西，不引入任何等级/积分语义。 */
+function MilestoneSprout({ days }: { days: number }) {
+  if (days < 1) return null;
+  const capped = Math.min(5, Math.max(1, Math.floor(days / 30)));
+  const xs = [24, 40, 31, 45, 21];
+  const ys = [26, 26, 17, 17, 8];
+  return (
+    <span className="rm-milestone" title={`一起写了 ${days} 天`}>
+      <svg width="64" height="44" viewBox="0 0 64 44" aria-hidden>
+        <path d="M32 42V16" stroke="currentColor" strokeWidth="1.7" fill="none" strokeLinecap="round" opacity=".75"/>
+        <path d="M32 30c-7-2-11-6-13-11M32 26c7-2 11-6 13-11M32 20c-3-2-5-4-6-7M32 20c3-2 5-4 6-7"
+          stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" opacity=".55"/>
+        {Array.from({ length: capped }).map((_, i) => (
+          <g key={i}>
+            <circle cx={xs[i]} cy={ys[i]} r="4.2" fill={i % 2 ? '#e8c96a' : '#f0a3b4'} opacity=".92"/>
+            <circle cx={xs[i]} cy={ys[i]} r="1.7" fill="#fff" opacity=".75"/>
+          </g>
+        ))}
+      </svg>
+      <em>{days} 天</em>
+    </span>
+  );
+}
 
 function LockIcon() {
   return (
@@ -243,6 +269,7 @@ export default function Room() {
               {theme?.widgets.map((w) => (
                 <Decor key={w.id} id={w.id as WidgetId} slot={w.slot as Slot} />
               ))}
+              {theme?.corner && <CornerArt asset={theme.corner.asset} at={theme.corner.at} />}
             </div>
           )}
           <div className="rm-card-hd rm-above">
@@ -348,6 +375,7 @@ export default function Room() {
           </div>
           {sum && (
             <div className="rd-foot rm-above">
+              <MilestoneSprout days={sum.days} />
               {isOwner
                 ? <><span>{sum.days} 天 · 你 {sum.byAuthor?.owner || 0} 行 · 她 {sum.byAuthor?.agent || 0} 行{sum.totalAll > 200 ? ' · 仅显示最近 200 条（前边还有 ' + (sum.totalAll - 200) + ' 条）' : ''}</span>{sum.totalAll > 0 && <span style={{ marginLeft: 'auto' }}>共 {days.length} 天在册</span>}</>
                 : <span>这本册子写了 {sum.days} 天 · 其中 {sum.locked} 行没有对你打开</span>}

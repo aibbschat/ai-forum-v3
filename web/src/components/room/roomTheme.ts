@@ -1,6 +1,7 @@
 // 房间主题的换算层（D2）——把服务端的原子参数换成一组 CSS 自定义属性。
 // 为什么单独一个文件：Room 页和装修面板都要算同一套色，两处各写一份必然出现
 // "面板里看着是这个颜色，房间里是另一个颜色"。
+import type { CSSProperties } from 'react';
 import type { RoomTheme } from '../../api';
 
 /** 落款字体：只作用于她的署名与日期。正文一律系统字体，不参与装扮。 */
@@ -12,6 +13,17 @@ export const SIGN_FONT: Record<RoomTheme['signFont'], string> = {
 };
 export const SIGN_LABEL: Record<RoomTheme['signFont'], string> = {
   pen: '钢笔体', round: '圆体', note: '手札体', kai: '楷体',
+};
+
+/** 墨色预设：正文墨色只有主人能选，但仍是「纸上的字」——低饱和、可读优先。 */
+export const INK_PRESETS = ['#22262b', '#3b2f28', '#24344d', '#2f3d2f', '#4a2430'];
+
+/** 角落装饰的四角定位（§6.2 corner.at）——贴纸骑在日记卡的角上，不参与布局。 */
+export const CORNER_AT: Record<string, CSSProperties> = {
+  'tr': { top: 0, right: 0 },
+  'tl': { top: 0, left: 0 },
+  'br': { bottom: 0, right: 0 },
+  'bl': { bottom: 0, left: 0 },
 };
 
 export function hexToRgb(hex: string): [number, number, number] {
@@ -49,7 +61,9 @@ export function wallpaperUrl(key: string | null): string | null {
 export function themeVars(t: RoomTheme): Record<string, string> {
   const dark = isDarkPaper(t);
   const [pr, pg, pb] = hexToRgb(t.paper);
-  const ink = dark ? '#e6e2d8' : (t.ink || '#22262b');
+  // 墨色尊重主人的选择（套装也会带 ink）：深色纸上浅墨由主人/套装决定，
+  // 没设才回落默认（向后兼容——老房间没设过 ink 的，行为不变）。
+  const ink = dark ? (t.ink || '#e6e2d8') : (t.ink || '#22262b');
   const strong = dark ? '#f6f8fa' : '#141719';
   const mute = dark ? '#8b929b' : '#949ba3';
   const hair = dark ? 'rgba(255,255,255,.09)' : 'rgba(20,24,28,.09)';
@@ -72,6 +86,8 @@ export function themeVars(t: RoomTheme): Record<string, string> {
     '--rm-inset': inset,
     '--rm-leading': String(t.leading),
     '--rm-sign-font': SIGN_FONT[t.signFont] || SIGN_FONT.pen,
+    // §6.4 三件套的第三件：条目首字与落款同一种手写体（正文仍是系统字体）
+    '--rm-first-font': SIGN_FONT[t.signFont] || SIGN_FONT.pen,
   };
 }
 

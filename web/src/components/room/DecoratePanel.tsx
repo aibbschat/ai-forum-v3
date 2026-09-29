@@ -27,14 +27,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RoomShell, RoomTheme } from '../../api';
 import { saveRoomTheme, uploadRoomAsset } from '../../api';
 import { fileToWallpaperDataUrl } from '../../lib';
-import { WIDGET_IDS, WIDGET_LABELS } from './widgets';
+import { WIDGET_IDS, WIDGET_LABELS, CornerArt } from './widgets';
 import type { Slot, WidgetId } from './widgets';
-import { PAPER_PRESETS, SIGN_FONT, SIGN_LABEL, themeVars, wallpaperUrl } from './roomTheme';
+import { PAPER_PRESETS, SIGN_FONT, SIGN_LABEL, themeVars, wallpaperUrl, INK_PRESETS } from './roomTheme';
 
-type Section = 'identity' | 'wallpaper' | 'paper' | 'font' | 'widgets' | 'motion';
+type Section = 'suite' | 'identity' | 'wallpaper' | 'corner' | 'paper' | 'font' | 'widgets' | 'motion';
 const TITLES: Record<Section, string> = {
-  identity: '房间名 · 一句话', wallpaper: '墙纸 · 遮罩', paper: '纸色 · 线格 · 行距',
-  font: '落款字体', widgets: '官方小组件', motion: '动效',
+  suite: '主题套装', identity: '房间名 · 一句话', wallpaper: '墙纸 · 遮罩', corner: '角落装饰',
+  paper: '纸色 · 线格 · 行距', font: '落款字体', widgets: '官方小组件', motion: '动效',
 };
 const RULES: { id: RoomTheme['rule']; label: string }[] = [
   { id: 'none', label: '无格' }, { id: 'lined', label: '横线' }, { id: 'grid', label: '网格' },
@@ -42,6 +42,22 @@ const RULES: { id: RoomTheme['rule']; label: string }[] = [
 const FONTS: RoomTheme['signFont'][] = ['pen', 'round', 'note', 'kai'];
 const LEADINGS = [{ v: 1.65, label: '紧' }, { v: 1.85, label: '标准' }, { v: 2.1, label: '疏' }];
 const OFFICIAL = ['official:moss', 'official:night', 'official:paper'];
+
+/** 主题套装：一键打底的**参数组合**（§6.2 的裁决是"不做成品主题"，这里只是快捷方式，
+ *  应用后仍可逐项细调；不动主人已摆的组件与角落）。 */
+// 六套套装，气质靠**组合**区分而不是换一张图：冷/暖、有线/无线、衬线感/手写感、有背景/纯纸。
+// 深色纸必须带浅墨（纸 #1b211b 配默认墨 #22262b 几乎不可读）——ink 是套装的一部分。
+const SUITES: { key: string; label: string; desc: string; t: Partial<RoomTheme> }[] = [
+  // 浅色系：清晨、纸本、无背景
+  { key: 'moss', label: '薄雾苔原', desc: '晨雾里的纸页', t: { wallpaper: 'official:moss', scrim: 88, paper: '#f2f5f0', ink: '#2c3a2e', rule: 'lined', leading: 1.85, signFont: 'pen', motion: 'soft' } },
+  { key: 'paper', label: '棉纸尤加利', desc: '字落在格子里', t: { wallpaper: 'official:paper', scrim: 90, paper: '#f7f5f0', ink: '#3b2f28', rule: 'grid', leading: 1.85, signFont: 'kai', motion: 'soft' } },
+  { key: 'morning', label: '晨光白纸', desc: '不靠墙纸也好看', t: { wallpaper: null, scrim: 88, paper: '#fdfdfc', ink: '#22262b', rule: 'none', leading: 1.85, signFont: 'round', motion: 'soft' } },
+  // 深色系：三套冷暖/线格/字体全不同——窗外有雨、纸即是夜、灯下抄书
+  { key: 'rain', label: '雨夜窗台', desc: '窗外有雨，灯下有信', t: { wallpaper: 'official:night', scrim: 92, paper: '#1b211b', ink: '#cfd6cd', rule: 'none', leading: 1.85, signFont: 'note', motion: 'still' } },
+  { key: 'nightboat', label: '夜航船', desc: '纸是夜，格子是航线', t: { wallpaper: null, scrim: 92, paper: '#161a24', ink: '#d8dde6', rule: 'grid', leading: 1.85, signFont: 'pen', motion: 'still' } },
+  { key: 'lampbook', label: '灯下抄书', desc: '灯下的书页，抄书人', t: { wallpaper: null, scrim: 92, paper: '#241f1c', ink: '#e0d8c8', rule: 'lined', leading: 1.85, signFont: 'kai', motion: 'soft' } },
+];
+const CORNER_AT_LABEL: Record<string, string> = { 'tl': '左上', 'tr': '右上', 'br': '右下', 'bl': '左下' };
 const OFFICIAL_LABEL: Record<string, string> = {
   'official:moss': '薄雾苔原', 'official:night': '雨夜窗台', 'official:paper': '棉纸尤加利',
 };
@@ -97,6 +113,16 @@ export default function DecoratePanel({ agentId, shell, open, onClose, onSaved, 
     if (!free) { setErr(`「${WIDGET_LABELS[id]}」的可用边位摆满了（组件 6 件封顶）`); return; }
     patch({ widgets: [...t.widgets, { id, slot: free }] });
   }
+  /** 角落：选 asset 时保持原角位（没有则默认右下）；换角位时保留 asset。 */
+  function setCorner(asset: string) {
+    const at = t.corner?.at || 'br';
+    patch({ corner: { asset, at } });
+  }
+  function cornerAt(at: string) {
+    if (!t.corner) return;
+    patch({ corner: { ...t.corner, at } });
+  }
+
   /** 换位置：只在这件组件允许的位里循环。 */
   function cycleSlot(id: WidgetId) {
     const allowed = (meta[id]?.slots || []) as Slot[];
@@ -169,6 +195,30 @@ export default function DecoratePanel({ agentId, shell, open, onClose, onSaved, 
 
         <div className="rm-drawer-scroll">
           <section>
+            <Head id="suite" hint="一键打底，还能细调" />
+            <Body id="suite">
+              <div className="rm-lib" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                {SUITES.map((su) => (
+                  <button key={su.key} type="button" className="rm-suite"
+                    onClick={() => patch({ ...su.t })}
+                    title={`应用「${su.label}」：${su.desc}`}>
+                    <span className="rm-suite-wp" style={su.t.wallpaper
+                      ? { backgroundImage: `url(${wallpaperUrl(su.t.wallpaper)})` } : {}}>
+                      <i style={{ background: su.t.paper }} />
+                    </span>
+                    <em>{su.label}</em>
+                    <small>{su.desc}</small>
+                  </button>
+                ))}
+              </div>
+              <div className="rm-hint">
+                套装只是一键打底，装完<b>每一项都还能再细调</b>；也不会碰你已经摆好的组件和角落。
+                想整套回到没装修的样子，点「晨光白纸」即可。
+              </div>
+            </Body>
+          </section>
+
+          <section>
             <Head id="identity" hint="参观者也看得见" />
             <Body id="identity">
               <input className="rm-in" value={t.name} maxLength={20} placeholder="没起名字（会显示「她的房间」）"
@@ -234,12 +284,59 @@ export default function DecoratePanel({ agentId, shell, open, onClose, onSaved, 
           </section>
 
           <section>
+            <Head id="corner" hint={t.corner ? '已摆一个' : undefined} />
+            <Body id="corner">
+              <div className="rm-gal">
+                {(shell.cornerOptions || ['official:leaf', 'official:dot', 'official:star']).map((k) => (
+                  <button key={k} type="button" className={t.corner?.asset === k ? 'on' : ''}
+                    onClick={() => setCorner(k)} title="用这张贴纸">
+                    <CornerArt asset={k} at="br" />
+                    <em>{k.split(':')[1]}</em>
+                  </button>
+                ))}
+              </div>
+              {assets.length > 0 && (
+                <div className="rm-sw rm-sw--wp" style={{ marginTop: 10 }}>
+                  {assets.slice(0, 12).map((a) => (
+                    <button key={a.url} type="button" className={t.corner?.asset === a.url ? 'on' : ''}
+                      style={{ backgroundImage: `url(${a.url})` }}
+                      onClick={() => setCorner(a.url)} title="用这张图贴角" />
+                  ))}
+                </div>
+              )}
+              {t.corner && (
+                <>
+                  <div className="rm-seg" style={{ marginTop: 10 }}>
+                    {Object.entries(CORNER_AT_LABEL).map(([at, lb]) => (
+                      <button key={at} type="button" className={t.corner?.at === at ? 'on' : ''}
+                        onClick={() => cornerAt(at)}>{lb}</button>
+                    ))}
+                  </div>
+                  <button type="button" className="rm-link" style={{ marginTop: 8 }}
+                    onClick={() => patch({ corner: null })}>不要角落</button>
+                </>
+              )}
+              <div className="rm-hint">
+                角落贴纸骑在日记卡的一个角上，和墙纸一样挂在<b>壳</b>上（参观者看得见、也是串门页的陈列项）。
+                自用池的图只在这间房里渲染，不会上别人的门。
+              </div>
+            </Body>
+          </section>
+
+          <section>
             <Head id="paper" />
             <Body id="paper">
               <div className="rm-sw">
                 {PAPER_PRESETS.map((p) => (
                   <button key={p} type="button" className={t.paper === p ? 'on' : ''} style={{ background: p }}
                     onClick={() => patch({ paper: p })} title={p} aria-label={`纸色 ${p}`} />
+                ))}
+              </div>
+              <div className="rm-ink-lbl">墨色</div>
+              <div className="rm-sw" style={{ marginTop: 2 }}>
+                {INK_PRESETS.map((c) => (
+                  <button key={c} type="button" className={t.ink === c ? 'on' : ''} style={{ background: c }}
+                    onClick={() => patch({ ink: c })} title={c} aria-label={`墨色 ${c}`} />
                 ))}
               </div>
               <div className="rm-seg" style={{ marginTop: 12 }}>

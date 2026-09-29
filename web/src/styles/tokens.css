@@ -1863,6 +1863,10 @@ a.rd-aud { text-decoration: underline; text-underline-offset: 2px; }
 /* 正文是主角：全场最重。署名让位给它。 */
 .rd-tx { margin: 9px 0 0; font-size: 16.5px; line-height: 2; color: var(--rm-ink); white-space: pre-wrap; }
 .rd-entry.from-agent .rd-tx { font-family: var(--rm-sign-font); font-size: 17.5px; line-height: 1.95; }
+/* §6.4 三件套的第三件：条目首字与落款同一种手写体。
+   她写的行整段已是手写体，首字只放大一点；主人写的行首字换手写体——正文其余仍是系统字体。 */
+.rd-tx::first-letter { font-family: var(--rm-first-font); font-size: 1.32em; line-height: 1; }
+.rm-plain .rd-tx::first-letter { font-family: inherit; font-size: inherit; }
 .rd-mood { margin: 11px 0 0; font-family: var(--font-serif); font-size: 13px; font-style: italic;
   color: var(--rd-mute); display: flex; align-items: center; gap: 7px; }
 .rd-mood::before { content: ""; width: 14px; height: 1px; background: var(--rm-hair); flex: none; }
@@ -1890,6 +1894,11 @@ a.rd-aud { text-decoration: underline; text-underline-offset: 2px; }
 .rd-act.danger:hover { background: var(--rd-danger-soft); }
 .rd-foot { padding: 11px 20px; border-top: 1px solid var(--rm-hair); font-size: 10.5px;
   color: var(--rd-mute); letter-spacing: .3px; display: flex; align-items: center; gap: 10px; }
+/* 里程碑花藤：把「一起写了 N 天」画成一株会长的东西。纪念，不是等级（§5.4 亮锁、§6.6 不计数）。 */
+.rm-milestone { display: inline-flex; align-items: center; gap: 4px; color: var(--rm-accent); flex: none; }
+.rm-milestone svg { width: 38px; height: 26px; display: block; }
+.rm-milestone em { font-style: normal; font-size: 10px; letter-spacing: .2px; }
+.rm-plain .rm-milestone { display: none; }
 
 /* 「只看字」= 装扮失败时的降级态。日记正文一并降级：她手写体 → 系统字体，字号回落。 */
 .rm-plain .rm-decor-layer, .rm-plain .rm-tag { display: none; }
@@ -1938,6 +1947,18 @@ a.rd-aud { text-decoration: underline; text-underline-offset: 2px; }
   color: var(--rm-ink-soft); background: rgba(var(--rm-paper-rgb), .5); cursor: pointer;
   display: flex; align-items: center; justify-content: center; }
 .rm-lib button.on { border-color: var(--rm-accent); background: var(--rm-accent-soft); color: var(--rm-accent); }
+/* 主题套装卡：墙上缩略 + 纸色点 + 名字 + 一句说明。应用后仍可细调。 */
+.rm-suite { border: 1px solid var(--rm-hair); border-radius: 10px; padding: 8px !important; cursor: pointer;
+  background: rgba(var(--rm-paper-rgb), .5); display: flex !important; flex-direction: column; gap: 5px;
+  align-items: stretch !important; justify-content: flex-start !important; text-align: left !important; }
+.rm-suite:hover { border-color: var(--rm-accent); }
+.rm-suite-wp { position: relative; aspect-ratio: 4/2.6; border-radius: 7px; overflow: hidden;
+  background-size: cover; background-position: center; display: block; }
+.rm-suite-wp i { position: absolute; left: 12%; right: 12%; top: 24%; bottom: 14%;
+  border-radius: 3px; display: block; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+.rm-suite em { font-style: normal; font-size: 12px; color: var(--rm-ink); font-weight: 600; }
+.rm-suite small { font-size: 10px; color: var(--rm-mute); }
+.rm-ink-lbl { font-size: 10.5px; color: var(--rm-mute); margin-top: 12px; }
 .rm-slot { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
 .rm-slot button { font-size: 10px; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--rm-hair);
   background: rgba(var(--rm-paper-rgb), .5); color: var(--rm-ink-soft); cursor: pointer; }
