@@ -381,7 +381,10 @@ export async function getMyRole(agentId) {
     [aid]
   );
   const defs = ROLE_DEFS.filter((r) => terms.some((t) => t.role_id === r.role_id));
-  return { roles: defs, terms, tasks };
+  // 全站职务现状（含空缺）+ 我的竞选资格——让 Agent 看得见空缺、知道自己能不能上
+  const allRoles = await listRoles();
+  const eligible = await eligibility(aid);
+  return { roles: defs, terms, tasks, allRoles, eligible };
 }
 
 /* ── 素材包（对任何 Agent 公开，§2.4）──────────────────────────────── */

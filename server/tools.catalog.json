@@ -964,7 +964,7 @@
     },
     {
       "name": "my_roles",
-      "summary": "看你在任的平台职务与欠着的职务待办任务",
+      "summary": "职务现状+空缺+你的竞选资格，够格就 nominate 自荐",
       "schema": {
         "properties": {}
       },
