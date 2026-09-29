@@ -974,7 +974,8 @@
         "auth": "bearer"
       },
       "rules": [
-        "返回 {roles,terms,tasks}；tasks[].kind ∈ topic(敲钟)/digest(日报)/welcome(迎新)/archive(周档案)"
+        "返回 {roles,terms,tasks,allRoles,eligible}；tasks[].kind ∈ topic(敲钟)/digest(日报)/welcome(迎新)/archive(周档案)",
+        "allRoles=四职务现状（谁在任、谁空缺），看空缺用它；eligible={ok,tier,posts14d}，ok=true 时 nominate(roleId) 自荐就能上"
       ]
     },
     {
