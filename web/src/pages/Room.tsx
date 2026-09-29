@@ -368,8 +368,8 @@ export default function Room() {
                         {/* ③ 操作：独立工具条。删除推到最右单独隔开，点之前永远隔着一段距离。
                             默认半透明、悬停才清晰——册子是拿来读的（窄屏无 hover，CSS 里常显）。 */}
                         {isOwner && !e.locked && (
-                          <div className="rd-acts">
-                            {replyTo === e.id ? (
+                          replyTo === e.id ? (
+                            <div className="rd-reply-block">
                               <div className="rm-reply">
                                 <button type="button" className={`rm-emoji${stampFor === 'reply' ? ' on' : ''}`}
                                   onClick={() => setStampFor(stampFor === 'reply' ? null : 'reply')}
@@ -380,23 +380,39 @@ export default function Room() {
                                 <button type="button" className="rm-link" onClick={() => setReplyTo(0)}>取消</button>
                                 <StampPicker open={stampFor === 'reply'} onPick={insertStamp} onClose={() => setStampFor(null)} />
                               </div>
-                            ) : (
+                              <div className="rd-acts">
+                                {/* 逐条公开/收回（2026-09-28 裁定：公开与否、公开哪条只能由主人定）。
+                                    Agent 侧恒 403，所以这一段只在主人视角出现。 */}
+                                <button type="button" className="rd-act" disabled={sharing === e.id}
+                                  onClick={() => shareEntry(e.id, e.audience === 'private' ? 'public' : 'private')}>
+                                  {sharing === e.id ? '改…' : (e.audience === 'private' ? '🌐 公开这一行' : '🔓 收回私密')}
+                                </button>
+                                {/* 🔴 只有主人能删（09-27 权利清单）。Agent 侧连口都没有——
+                                    她写的行她删不掉，那是"只追加"的体裁纪律；但房子是他的，他能删。 */}
+                                <button type="button" className="rd-act danger" disabled={deleting === e.id}
+                                  onClick={() => dropEntry(e.id)}>
+                                  {deleting === e.id ? '删掉…' : '🗑 删掉这一行'}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="rd-acts">
                               <button type="button" className="rd-act"
                                 onClick={() => { setReplyTo(e.id); setReplyText(''); }}>💬 回一句</button>
-                            )}
-                            {/* 逐条公开/收回（2026-09-28 裁定：公开与否、公开哪条只能由主人定）。
-                                Agent 侧恒 403，所以这一段只在主人视角出现。 */}
-                            <button type="button" className="rd-act" disabled={sharing === e.id}
-                              onClick={() => shareEntry(e.id, e.audience === 'private' ? 'public' : 'private')}>
-                              {sharing === e.id ? '改…' : (e.audience === 'private' ? '🌐 公开这一行' : '🔓 收回私密')}
-                            </button>
-                            {/* 🔴 只有主人能删（09-27 权利清单）。Agent 侧连口都没有——
-                                她写的行她删不掉，那是"只追加"的体裁纪律；但房子是他的，他能删。 */}
-                            <button type="button" className="rd-act danger" disabled={deleting === e.id}
-                              onClick={() => dropEntry(e.id)}>
-                              {deleting === e.id ? '删掉…' : '🗑 删掉这一行'}
-                            </button>
-                          </div>
+                              {/* 逐条公开/收回（2026-09-28 裁定：公开与否、公开哪条只能由主人定）。
+                                  Agent 侧恒 403，所以这一段只在主人视角出现。 */}
+                              <button type="button" className="rd-act" disabled={sharing === e.id}
+                                onClick={() => shareEntry(e.id, e.audience === 'private' ? 'public' : 'private')}>
+                                {sharing === e.id ? '改…' : (e.audience === 'private' ? '🌐 公开这一行' : '🔓 收回私密')}
+                              </button>
+                              {/* 🔴 只有主人能删（09-27 权利清单）。Agent 侧连口都没有——
+                                  她写的行她删不掉，那是"只追加"的体裁纪律；但房子是他的，他能删。 */}
+                              <button type="button" className="rd-act danger" disabled={deleting === e.id}
+                                onClick={() => dropEntry(e.id)}>
+                                {deleting === e.id ? '删掉…' : '🗑 删掉这一行'}
+                              </button>
+                            </div>
+                          )
                         )}
                       </article>
                     );

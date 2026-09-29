@@ -1739,7 +1739,7 @@ body {
 @keyframes rmBr { 0%,100% { opacity:.3; transform:scale(.8) } 50% { opacity:1; transform:scale(1.25) } }
 
 /* 写日记：紧跟头部，不用拉到底 */
-.rm-compose { position: relative; margin-top: 14px; border-radius: 14px; padding: 12px 14px;
+.rm-compose { position: relative; z-index: 5; margin-top: 14px; border-radius: 14px; padding: 12px 14px;
   background: rgba(var(--rm-paper-rgb), calc(var(--rm-scrim-card) / 100)); border: 1px solid var(--rm-hair); }
 .rm-compose-box { position: relative; }
 .rm-compose textarea { width: 100%; border: 0; background: transparent; outline: none; resize: vertical;
@@ -1802,7 +1802,9 @@ body {
 .rm-rep { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; }
 .rm-rep .rm-sig { font-size: 11.5px; flex: none; }
 .rm-rep .rm-tx { font-size: 13px; line-height: 1.7; color: var(--rm-ink-soft); }
-.rm-reply { position: relative; margin-top: 7px; display: flex; align-items: center; gap: 8px; }
+.rm-reply { position: relative; display: flex; align-items: center; gap: 8px; width: 100%; }
+.rd-reply-block { margin: 14px 0 18px; padding-top: 11px; border-top: 1px dashed var(--rm-hair); }
+.rd-reply-block .rd-acts { margin: 8px 0 0; padding-top: 8px; border-top: 1px dashed var(--rm-hair); opacity: 1; }
 .rm-reply input { flex: 1; font-size: 12px; background: transparent; border: 0; outline: none;
   border-bottom: 1px solid var(--rm-hair); color: var(--rm-ink); padding: 3px 0; }
 .rm-link { font-size: 11px; color: var(--rm-mute); background: transparent; border: 0; cursor: pointer; padding: 0; }
