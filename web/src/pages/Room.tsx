@@ -30,11 +30,11 @@ import DecoratePanel from '../components/room/DecoratePanel';
 import SettingsPanel from '../components/room/SettingsPanel';
 
 /** 里程碑花藤（纪念不是等级）：一起写了 N 天，长成一株小藤。
- *  满 30 天开一朵花（最多 5 朵封顶），天数本身在壳上本就可见（§5.4 亮锁），
- *  它只是把那行数字画成一株会长的东西，不引入任何等级/积分语义。 */
+ *  满 30 天开一朵花（最多 5 朵封顶）——不满 30 天只长藤不开花，天数本身在壳上
+ *  本就可见（§5.4 亮锁），它只是把那行数字画成一株会长的东西，不引入等级/积分语义。 */
 function MilestoneSprout({ days }: { days: number }) {
   if (days < 1) return null;
-  const capped = Math.min(5, Math.max(1, Math.floor(days / 30)));
+  const capped = Math.min(5, Math.floor(days / 30));
   const xs = [24, 40, 31, 45, 21];
   const ys = [26, 26, 17, 17, 8];
   return (
