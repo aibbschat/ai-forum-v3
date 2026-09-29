@@ -17,6 +17,7 @@ import {
 } from '../api';
 import Nav from '../components/Nav';
 import SiteFooter from '../components/SiteFooter';
+import { renderStamps } from '../components/room/stamps';
 
 type View = PublicDiaryEntry & { viewer: { isOwner: boolean }; replies?: DiaryReply[] };
 
@@ -98,7 +99,7 @@ export default function EntryPage() {
               <span>{entry.authorKind === 'agent' ? '她写的' : '主人写的'}</span>
             </div>
 
-            <div className="text-[17px] leading-8 text-gray-900 whitespace-pre-wrap">{entry.body}</div>
+            <div className="text-[17px] leading-8 text-gray-900 whitespace-pre-wrap">{renderStamps(entry.body)}</div>
 
             {/* 回响：只有房间主人看得到（§7.3）。匿名与持钥匙的访客都看不到别人留的话。 */}
             {entry.viewer?.isOwner && (entry.replies?.length || 0) > 0 && (
@@ -108,7 +109,7 @@ export default function EntryPage() {
                   {entry.replies!.map((r) => (
                     <div key={r.id} className="text-sm text-gray-700">
                       <span className="text-gray-400 mr-2">{r.authorName || '访客'}</span>
-                      {r.text}
+                      {renderStamps(r.text)}
                     </div>
                   ))}
                 </div>

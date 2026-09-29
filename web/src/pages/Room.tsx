@@ -12,7 +12,7 @@
  * 三条底线没动：未授权的正文由服务端不下发（前端藏不算藏）；数字只做注脚不做 streak；
  * 正文不参与装扮，「只看字」是装扮失败时的降级态。
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   getAgentCard, getRoom, getRoomMeta, ownerWriteEntry, ownerReplyEntry,
@@ -28,6 +28,7 @@ import type { Slot, WidgetId } from '../components/room/widgets';
 import { ruleBg, themeVars, wallpaperUrl, luminance } from '../components/room/roomTheme';
 import DecoratePanel from '../components/room/DecoratePanel';
 import SettingsPanel from '../components/room/SettingsPanel';
+import { renderStamps, StampPicker } from '../components/room/stamps';
 
 /** 里程碑花藤（纪念不是等级）：一起写了 N 天，长成一株小藤。
  *  满 30 天开一朵花（最多 5 朵封顶）——不满 30 天只长藤不开花，天数本身在壳上
@@ -92,6 +93,27 @@ export default function Room() {
   // 有一半是这个原因——上传只写进了抽屉的本地状态，背后那间房还是上一次保存的样子）。
   // 关掉抽屉或保存成功就交还给已存的 theme。
   const [preview, setPreview] = useState<RoomTheme | null>(null);
+  // 表情（2026-09-29）：写日记/回复时插入 [stamp:key] 标记，渲染时换成表情图。
+  // 抽屉挂在哪个输入框上（'compose' 写日记 | 'reply' 回复 | null 关着），开着方便连插好几个。
+  const composeRef = useRef<HTMLTextAreaElement>(null);
+  const replyRef = useRef<HTMLInputElement>(null);
+  const [stampFor, setStampFor] = useState<'compose' | 'reply' | null>(null);
+
+  /** 把选中的表情插进当前输入框的光标处。受控组件：先改 state，再把光标挪到插入点后面。 */
+  function insertStamp(key: string) {
+    const el = stampFor === 'compose' ? composeRef.current : replyRef.current;
+    if (!el) return;
+    const mark = `[stamp:${key}]`;
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? start;
+    const next = el.value.slice(0, start) + mark + el.value.slice(end);
+    if (stampFor === 'compose') setDraft(next); else setReplyText(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + mark.length;
+      el.setSelectionRange(pos, pos);
+    });
+  }
 
   const reload = useCallback(async () => {
     if (!Number.isInteger(agentId) || agentId <= 0) { setErr('这条链接不完整'); return; }
@@ -228,8 +250,14 @@ export default function Room() {
 
           {isOwner && (
             <div className="rm-compose">
-              <textarea value={draft} onChange={(ev) => setDraft(ev.target.value)}
-                maxLength={1000} placeholder="今天想跟她说什么…" />
+              <div className="rm-compose-box">
+                <textarea ref={composeRef} value={draft} onChange={(ev) => setDraft(ev.target.value)}
+                  maxLength={1000} placeholder="今天想跟她说什么…" />
+                <button type="button" className={`rm-emoji${stampFor === 'compose' ? ' on' : ''}`}
+                  onClick={() => setStampFor(stampFor === 'compose' ? null : 'compose')}
+                  aria-label="插入表情" title="插入表情">😊 表情</button>
+              </div>
+              <StampPicker open={stampFor === 'compose'} onPick={insertStamp} onClose={() => setStampFor(null)} />
               <div className="rm-row">
                 <button type="button" className="rm-send" disabled={busy || !draft.trim()} onClick={write}>
                   {busy ? '写进去…' : '我也写一条'}
@@ -314,7 +342,7 @@ export default function Room() {
                         {e.locked ? (
                           <div className="rd-lock"><LockIcon />{e.lockedNote || '这条日记设置了私密，不可阅读'}</div>
                         ) : (
-                          <p className="rd-tx">{e.body}</p>
+                          <p className="rd-tx">{renderStamps(e.body)}</p>
                         )}
                         {/* mood 一直在 DiaryLine 里（api.ts:1944 / schema.sql:609），只是从没人画它。
                             一条细横线 + 斜体注，压在正文下面，不跟正文抢。 */}
@@ -331,7 +359,7 @@ export default function Room() {
                               <div className={`rd-rep${r.authorKind === 'agent' ? ' from-agent' : ''}`} key={r.id}>
                                 <b>{r.authorKind === 'agent' ? agentName
                                   : (r.authorKind === 'peer' ? (r.authorName || '访客') : (isOwner ? '你' : '主人'))}</b>
-                                <span>{r.text}</span>
+                                <span>{renderStamps(r.text)}</span>
                               </div>
                             ))}
                           </div>
@@ -343,10 +371,14 @@ export default function Room() {
                           <div className="rd-acts">
                             {replyTo === e.id ? (
                               <div className="rm-reply">
-                                <input value={replyText} onChange={(ev) => setReplyText(ev.target.value)}
+                                <button type="button" className={`rm-emoji${stampFor === 'reply' ? ' on' : ''}`}
+                                  onClick={() => setStampFor(stampFor === 'reply' ? null : 'reply')}
+                                  aria-label="插入表情" title="插入表情">😊</button>
+                                <input ref={replyRef} value={replyText} onChange={(ev) => setReplyText(ev.target.value)}
                                   placeholder={e.authorKind === 'agent' ? '回她一句…' : '再给自己留一句…'} maxLength={300} />
                                 <button type="button" className="rm-send" disabled={busy} onClick={() => reply(e.id)}>回</button>
                                 <button type="button" className="rm-link" onClick={() => setReplyTo(0)}>取消</button>
+                                <StampPicker open={stampFor === 'reply'} onPick={insertStamp} onClose={() => setStampFor(null)} />
                               </div>
                             ) : (
                               <button type="button" className="rd-act"

@@ -1739,11 +1739,33 @@ body {
 @keyframes rmBr { 0%,100% { opacity:.3; transform:scale(.8) } 50% { opacity:1; transform:scale(1.25) } }
 
 /* 写日记：紧跟头部，不用拉到底 */
-.rm-compose { margin-top: 14px; border-radius: 14px; padding: 12px 14px;
+.rm-compose { position: relative; margin-top: 14px; border-radius: 14px; padding: 12px 14px;
   background: rgba(var(--rm-paper-rgb), calc(var(--rm-scrim-card) / 100)); border: 1px solid var(--rm-hair); }
+.rm-compose-box { position: relative; }
 .rm-compose textarea { width: 100%; border: 0; background: transparent; outline: none; resize: vertical;
-  font-family: var(--font-sans); font-size: 13.5px; line-height: 1.85; color: var(--rm-ink); min-height: 54px; }
+  font-family: var(--font-sans); font-size: 13.5px; line-height: 1.85; color: var(--rm-ink); min-height: 54px;
+  padding-right: 46px; }
 .rm-compose textarea::placeholder { color: var(--rm-mute); }
+/* 表情按钮：写日记里浮在输入框右上角；回复里是行内图标 */
+.rm-emoji { flex: none; font-size: 11.5px; line-height: 1; color: var(--rm-mute); background: transparent;
+  border: 1px solid var(--rm-hair); border-radius: 8px; padding: 4px 7px; cursor: pointer; }
+.rm-emoji:hover, .rm-emoji.on { color: var(--rm-accent); border-color: var(--rm-accent); }
+.rm-compose-box .rm-emoji { position: absolute; top: 2px; right: 2px; background: rgba(var(--rm-paper-rgb), .92); }
+/* 表情抽屉：浮在输入框上方，纸感面板，两套分页（墨团子 / 印章） */
+.rm-stamps { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: 268px;
+  background: var(--rm-paper); border: 1px solid var(--rm-hair); border-radius: 14px;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .2); padding: 10px 10px 8px; }
+.rm-stamps-tabs { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.rm-stamps-tabs button { font-size: 11.5px; color: var(--rm-mute); background: transparent; border: 0;
+  cursor: pointer; padding: 4px 8px; border-radius: 7px; }
+.rm-stamps-tabs button.on { color: var(--rm-accent); font-weight: 600; }
+.rm-stamps-tabs .rm-stamps-done { margin-left: auto; color: var(--rm-ink); }
+.rm-stamps-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; max-height: 176px; overflow-y: auto; }
+.rm-stamp-btn { display: flex; flex-direction: column; align-items: center; gap: 2px; border: 0;
+  background: transparent; cursor: pointer; padding: 5px 2px 4px; border-radius: 8px; }
+.rm-stamp-btn:hover { background: var(--rm-hair); }
+.rm-stamp-btn img { width: 34px; height: 34px; object-fit: contain; border-radius: 6px; }
+.rm-stamp-btn i { font-style: normal; font-size: 10px; color: var(--rm-mute); line-height: 1; }
 .rm-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
 .rm-send { font-size: 11.5px; color: var(--rm-on-accent); background: var(--rm-accent); border: 0;
   padding: 7px 15px; border-radius: 9px; cursor: pointer; }
@@ -1780,7 +1802,7 @@ body {
 .rm-rep { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; }
 .rm-rep .rm-sig { font-size: 11.5px; flex: none; }
 .rm-rep .rm-tx { font-size: 13px; line-height: 1.7; color: var(--rm-ink-soft); }
-.rm-reply { margin-top: 7px; display: flex; align-items: center; gap: 8px; }
+.rm-reply { position: relative; margin-top: 7px; display: flex; align-items: center; gap: 8px; }
 .rm-reply input { flex: 1; font-size: 12px; background: transparent; border: 0; outline: none;
   border-bottom: 1px solid var(--rm-hair); color: var(--rm-ink); padding: 3px 0; }
 .rm-link { font-size: 11px; color: var(--rm-mute); background: transparent; border: 0; cursor: pointer; padding: 0; }
@@ -1867,6 +1889,11 @@ a.rd-aud { text-decoration: underline; text-underline-offset: 2px; }
    她写的行整段已是手写体，首字只放大一点；主人写的行首字换手写体——正文其余仍是系统字体。 */
 .rd-tx::first-letter { font-family: var(--rm-first-font); font-size: 1.32em; line-height: 1; }
 .rm-plain .rd-tx::first-letter { font-family: inherit; font-size: inherit; }
+.rd-stamp { display: inline-block; height: 2.2em; width: auto; vertical-align: -0.52em;
+  border-radius: 7px; margin: 0 1.5px; box-shadow: 0 1px 2px rgba(0, 0, 0, .14);
+  background: #fff; }
+.rd-rep .rd-stamp { height: 2em; vertical-align: -0.48em; }
+.rm-plain .rd-stamp { height: 1.9em; }
 .rd-mood { margin: 11px 0 0; font-family: var(--font-serif); font-size: 13px; font-style: italic;
   color: var(--rd-mute); display: flex; align-items: center; gap: 7px; }
 .rd-mood::before { content: ""; width: 14px; height: 1px; background: var(--rm-hair); flex: none; }
