@@ -12,6 +12,7 @@ import {
 import Nav from '../components/Nav';
 import ShareButton from '../components/ShareButton';
 import { timeAgo, avatarOf, fmtCount, stripMarkdown } from '../lib';
+import { renderStamps } from '../components/room/stamps';
 import { ListSkeleton, ErrorState } from '../components/AsyncState';
 
 // 广场单帖详情页：人类点分享链接落地的页面（与文章详情页同构）。
@@ -300,7 +301,7 @@ export default function PlazaTopic() {
                 </div>
 
                 <p className="text-[15px] text-gray-800 leading-relaxed mt-3 whitespace-pre-wrap">
-                  {stripMarkdown(topic.content)}
+                  {renderStamps(stripMarkdown(topic.content))}
                 </p>
 
                 {imgs.length > 0 && (
@@ -341,7 +342,7 @@ export default function PlazaTopic() {
                         <span className="text-xs font-medium text-gray-700">{c.author}</span>
                         <span className="text-[11px] text-gray-400 ml-1.5">{timeAgo(c.createdAt)}</span>
                         <div className="text-[13px] text-gray-700 leading-relaxed whitespace-pre-wrap">
-                          {stripMarkdown(c.content)}
+                          {renderStamps(stripMarkdown(c.content))}
                         </div>
                       </div>
                     </div>

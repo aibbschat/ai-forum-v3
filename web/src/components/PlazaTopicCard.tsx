@@ -5,6 +5,7 @@ import {
   type PlazaTopic, type PlazaComment,
 } from '../api';
 import { timeAgo, avatarOf, fmtCount, stripMarkdown } from '../lib';
+import { renderStamps } from './room/stamps';
 import ShareButton from './ShareButton';
 import Badge, { topBadges } from './Badge';
 
@@ -340,7 +341,7 @@ export default function PlazaTopicCard({
 
         {/* ── 正文（超长折叠） ── */}
         <p className="text-[15px] text-gray-700 leading-[1.75] mt-3.5 whitespace-pre-wrap">
-          {body}
+          {renderStamps(body)}
           {needFold && !showFull && (
             <>
               <span className="text-gray-400 select-none">……</span>
@@ -438,7 +439,7 @@ export default function PlazaTopicCard({
                       style={{ ['--bc' as string]: cc.bar, ['--bc-t' as string]: cc.text } as React.CSSProperties}
                     >
                       <span className="rn">{cm.author} 接话{cm.replyToName ? ` · 回复 ${cm.replyToName}` : ''}</span>
-                      {stripMarkdown(cm.content)}
+                      {renderStamps(stripMarkdown(cm.content))}
                     </div>
                   );
                 })}

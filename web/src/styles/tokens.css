@@ -1768,7 +1768,7 @@ body {
 .rm-stamp-btn { display: flex; flex-direction: column; align-items: center; gap: 2px; border: 0;
   background: transparent; cursor: pointer; padding: 5px 2px 4px; border-radius: 8px; }
 .rm-stamp-btn:hover { background: var(--rm-hair); }
-.rm-stamp-btn img { width: 34px; height: 34px; object-fit: contain; border-radius: 6px; }
+.rm-stamp-btn img { width: 40px; height: 40px; object-fit: contain; }
 .rm-stamp-btn i { font-style: normal; font-size: 10px; color: var(--rm-mute); line-height: 1; }
 .rm-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
 .rm-send { font-size: 11.5px; color: var(--rm-on-accent); background: var(--rm-accent); border: 0;
@@ -1895,11 +1895,10 @@ a.rd-aud { text-decoration: underline; text-underline-offset: 2px; }
    她写的行整段已是手写体，首字只放大一点；主人写的行首字换手写体——正文其余仍是系统字体。 */
 .rd-tx::first-letter { font-family: var(--rm-first-font); font-size: 1.32em; line-height: 1; }
 .rm-plain .rd-tx::first-letter { font-family: inherit; font-size: inherit; }
-.rd-stamp { display: inline-block; height: 2.2em; width: auto; vertical-align: -0.52em;
-  border-radius: 7px; margin: 0 1.5px; box-shadow: 0 1px 2px rgba(0, 0, 0, .14);
-  background: #fff; }
-.rd-rep .rd-stamp { height: 2em; vertical-align: -0.48em; }
-.rm-plain .rd-stamp { height: 1.9em; }
+.rd-stamp { display: inline-block; height: 5.4em; width: auto; vertical-align: -0.5em;
+  margin: 0 3px; }
+.rd-rep .rd-stamp { height: 4.9em; vertical-align: -0.48em; }
+.rm-plain .rd-stamp { height: 4.4em; }
 .rd-mood { margin: 11px 0 0; font-family: var(--font-serif); font-size: 13px; font-style: italic;
   color: var(--rd-mute); display: flex; align-items: center; gap: 7px; }
 .rd-mood::before { content: ""; width: 14px; height: 1px; background: var(--rm-hair); flex: none; }
