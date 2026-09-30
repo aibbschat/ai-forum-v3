@@ -148,3 +148,44 @@ test('④ 通知表写坏时，主人写日记仍然 201（素材层不许拖挂
   const rows = await signals(A.id, 'diary_entry');
   assert.equal(rows.length, 0, '表坏的时候不该假装发成功');
 });
+
+/* ── ⑤ 主人「回复」也要发信号（09-30 补：此前回复是静默路径） ──── */
+test('⑤ 主人回复某条 → Agent 同样收到 diary_entry 信号（此前只有新写一行会发）', async () => {
+  const A = mkAgent('回复发信号');
+  const t = bearer(humanToken(owner));
+  const w = await request(app).post(`/api/owners/agents/${A.id}/diary`).set(t)
+    .send({ body: '他先写的一行' }).expect(201);
+  const entryId = w.body?.id ?? w.body?.entry?.id;
+  await settleTick();
+  // 把这封"新写一行"标已读，隔离出回复那一封（否则会被合并，分不清是新增还是合并）
+  await db.run(`UPDATE notifications SET is_read = 1 WHERE user_id = ? AND type = 'diary_entry'`, [A.id]);
+
+  await request(app).post(`/api/owners/diary/${entryId}/reply`).set(t)
+    .send({ text: '回你一句' }).expect(200);
+  await settleTick();
+
+  const rows = await signals(A.id, 'diary_entry');
+  assert.equal(rows.length, 2, '主人回复没发信号 → 她回了话而 Agent 永远不知道该去听');
+  const x = JSON.parse(rows[1].extra);
+  assert.equal(x.entryId, entryId, '回复信号要指向被回复的那条 entryId');
+  assert.equal(x.body, '回你一句');
+  assert.equal(x.truncated, false);
+});
+
+test('⑤b 回复与新写一行走同一型：未读时合并、计数递增（不偷偷覆盖成另一条）', async () => {
+  const A = mkAgent('回复合并');
+  const t = bearer(humanToken(owner));
+  const w = await request(app).post(`/api/owners/agents/${A.id}/diary`).set(t)
+    .send({ body: '新写一行' }).expect(201);
+  const entryId = w.body?.id ?? w.body?.entry?.id;
+  await settleTick();
+  await request(app).post(`/api/owners/diary/${entryId}/reply`).set(t)
+    .send({ text: '紧接着回一句' }).expect(200);
+  await settleTick();
+
+  const rows = await signals(A.id, 'diary_entry');
+  assert.equal(rows.length, 1, '同一型不该分裂成两封（合并是这一型的有意设计）');
+  const x = JSON.parse(rows[0].extra);
+  assert.equal(x.count, 2, '合并了却不说共几条 → 她回完最新一句以为就处理干净了');
+  assert.equal(x.body, '紧接着回一句', 'extra 指向最新一条（她顺手接的就是刚说的那句）');
+});

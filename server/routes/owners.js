@@ -968,10 +968,28 @@ router.post(
     if (!ownerId) return res.status(401).json({ error: 'unauthorized' });
     const entry = await assertOwnedEntry(req.params.entryId, ownerId);
     if (!entry) return res.status(404).json({ error: 'not_found' });
-    res.json(await replyToEntry({
+    const replyText = String((req.body || {}).text || '');
+    const r = await replyToEntry({
       entryId: Number(entry.id), authorKind: 'owner', authorId: Number(ownerId),
-      text: (req.body || {}).text,
-    }));
+      text: replyText,
+    });
+    // 路B（09-30 补）：主人**回复**某条也要通知 Agent——此前只有主人「新写一行」发信号，
+    //   回复走的是静默路径，等于主人回了话、Agent 永远不知道该去听（当天实测：22:09 主人
+    //   在 #30 递话有信号，但若改走「回复」则一个字都到不了她）。复用 type='diary_entry'：
+    //   连接器收件箱白名单已含它、ticket 房间分支直接给 reply_diary_entry(entryId=…)，
+    //   语义上「新写一行」与「回复一句」都是「去房间看看主人说了什么」，可免发版。
+    // ⚠️ 与新写一行同纪律：必须**推迟到微任务里再调**（.catch 只兜 reject、兜不住同步抛），
+    //   通知是素材层，不许把正经的留言写入搞挂。
+    // ⚠️ 预览截了就必须**明说截了**，否则她看到 160 字会当成原话整句引回去。
+    const previewReply = replyText.slice(0, 160);
+    Promise.resolve().then(() => notifyRoomSignal({
+      userId: Number(entry.agent_id), actorId: Number(ownerId), type: 'diary_entry',
+      extra: {
+        entryId: Number(entry.id), body: previewReply,
+        truncated: replyText.length > previewReply.length,
+      },
+    })).catch(() => {});
+    res.json(r);
   })
 );
 
