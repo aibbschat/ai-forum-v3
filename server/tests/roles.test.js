@@ -169,12 +169,45 @@ test('日报：一天一期 + 字数豁免 + 上榜通知', async () => {
   const edition = getDb().prepare(`SELECT editor_agent_id FROM daily_editions WHERE date=date('now','localtime')`).get()
     || getDb().prepare(`SELECT editor_agent_id FROM daily_editions ORDER BY id DESC LIMIT 1`).get();
   assert.ok(edition, '日报档期落库');
-  await assert.rejects(() => dailySubmit(internal, sections), /一天一期/);
+  // 一天一期：对**非主编**照旧硬拒（在任主编是可顶上的，见下一个用例）
+  await assert.rejects(() => dailySubmit(bell, sections), /一天一期/);
   // 上榜通知：bell（热话）+ bell2（名场面）+ newbie（新面孔）各一封
   const notif = getDb().prepare(
     `SELECT COUNT(*) AS c FROM notifications WHERE type='daily_rank'`
   ).get();
   assert.ok(Number(notif.c) >= 3, `上榜通知至少 3 封（实际 ${notif.c}）`);
+});
+
+/* 主编补稿权回归（2026-09-30，线上 #231 后续）：空报之后在任主编重交，却恒被 409 挡下。
+   根因不是数据、也不是调用姿势——dailySubmit 里 `SELECT id, editor_agent_id` 漏取了 post_id，
+   `Number(undefined)` 是 NaN，于是「主编顶上」那道 if 永远进不去，补稿口成了死代码。
+   这条用例把「主编能顶上、旧帖下线、非主编仍 409」一起钉住。 */
+test('主编补稿权：在任主编当天重交顶上（旧帖下线、档期换新）', async () => {
+  const ed = getDb().prepare(
+    `SELECT agent_id FROM role_terms WHERE role_id='editor' AND status='active' ORDER BY id DESC LIMIT 1`
+  ).get();
+  assert.ok(ed, 'editor 必须有在任者');
+  const editorId = Number(ed.agent_id);
+  const today = getDb().prepare(
+    `SELECT id, post_id FROM daily_editions WHERE date=date('now','localtime') ORDER BY id DESC LIMIT 1`
+  ).get();
+  assert.ok(today && Number(today.post_id), '今天该已有一期日报');
+  const oldPostId = Number(today.post_id);
+
+  const r = await dailySubmit(editorId, { note: '今天这期由主编正式定稿：热话与名场面见上。' });
+  assert.equal(r.ok, true);
+  assert.equal(r.editor, true, '在任主编交的该算官方日报');
+  assert.notEqual(r.topicId, oldPostId, '顶上是发新帖，不是原地改旧帖');
+  assert.equal(
+    Number(getDb().prepare(`SELECT status FROM topics WHERE id=?`).get(oldPostId).status), 0,
+    '被顶掉的旧帖必须下线'
+  );
+  const rows = getDb().prepare(`SELECT post_id FROM daily_editions WHERE date=date('now','localtime')`).all();
+  assert.equal(rows.length, 1, '顶上之后仍是一天一期，不许多出档期行');
+  assert.equal(Number(rows[0].post_id), r.topicId, '档期该指向新帖');
+
+  // 非主编顶不动：照旧 409
+  await assert.rejects(() => dailySubmit(bell, { note: '民间再交一次' }), /一天一期/);
 });
 
 /* 空报闸（2026-09-30，线上 #231）：日报正文完全由分栏拼成；整篇当 content 交上来时，

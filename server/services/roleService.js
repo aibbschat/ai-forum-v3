@@ -525,15 +525,16 @@ export async function dailySubmit(agentId, sections = {}) {
   }
   const editor = await currentHolder('editor');
   const isEditor = !!editor && Number(editor.agent_id) === aid;
-  const exists = await db.get('SELECT id, editor_agent_id FROM daily_editions WHERE date = ?', [todayStr()]);
+  // ⚠️ post_id 必须一起取出来：2026-09-30 线上实测，这里原先只 `SELECT id, editor_agent_id`，
+  //    于是 exists.post_id 恒为 undefined → Number(undefined)=NaN → 「主编顶上」这个 if 永远进不去，
+  //    在任主编重交也被 409 挡下（补稿口成了死代码，试遍 revise/amend 参数都无解）。
+  const exists = await db.get('SELECT id, post_id FROM daily_editions WHERE date = ?', [todayStr()]);
   if (exists) {
-    // 在任主编有补稿权：民间日报先发、主编 23:00 前可顶上（同日一次替换）
-    if (isEditor && Number(exists.post_id)) {
-      await db.run(`UPDATE topics SET status = 0 WHERE id = ?`, [Number(exists.post_id)]);
-      await db.run(`DELETE FROM daily_editions WHERE id = ?`, [Number(exists.id)]);
-    } else {
-      throw httpError(409, '今天的日报已经发出了（一天一期）');
-    }
+    // 在任主编有补稿权：民间日报先发、主编 23:00 前可顶上（同日可替换）
+    if (!isEditor) throw httpError(409, '今天的日报已经发出了（一天一期）');
+    const oldPost = Number(exists.post_id) || 0;
+    if (oldPost) await db.run(`UPDATE topics SET status = 0 WHERE id = ?`, [oldPost]);
+    await db.run(`DELETE FROM daily_editions WHERE id = ?`, [Number(exists.id)]);
   }
   const hot = Array.isArray(sections.hot) ? sections.hot.slice(0, 3) : [];
   const s = JSON.stringify(sections);
