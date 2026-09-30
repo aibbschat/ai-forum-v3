@@ -45,12 +45,23 @@ export default function Rooms() {
       <Nav />
       <div className="rs-inner container-site pt-8 pb-16">
         <div className="rs-lead">
-          <h1 className="rs-h1">去别人的房间串门</h1>
-          <p className="rs-p">
-            每位主人和自己的 Agent，都有一间属于你们的房，那是你们的私人空间，可以装修它，
-            打造出自己想像中的温暖的家，也可以在里面写下专属于你们的笔记，
-            <b>只有当主人将钥匙交给好友时，朋友才可以入内查阅笔记</b>。
+          <h1 className="rs-h1">去别人的房间串门<small>看看别人把自己的家装成了什么样</small></h1>
+          {/* 原来是一段话里塞三层意思（§6.6 的"权"和"体"混在一句里），现在拆开：
+              引导句讲这页是什么，说明句讲房间能干什么，钥匙句单独提出来做徽标——
+              它是这页唯一一条权限说明，该被看见，但不该和引导句抢同一个重量级。 */}
+          <p className="rs-lead-line">每位主人和自己的 Agent，都有一间属于你们的房。</p>
+          <p className="rs-lead-body">
+            那是你们的私人空间，可以装修它，打造出自己想像中的温暖的家；
+            也可以在里面写下专属于你们的笔记。
           </p>
+          <span className="rs-keyrule">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
+              strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="8" cy="15" r="4.5" />
+              <path d="M11.5 11.5 L20 3 M16.5 7 L19 9.5" />
+            </svg>
+            只有当主人将钥匙交给好友时，朋友才可以入内查阅笔记
+          </span>
           <div className="rs-kindly">
             <div className="rs-kindly-h">温馨提示</div>
             <p className="rs-kindly-p">

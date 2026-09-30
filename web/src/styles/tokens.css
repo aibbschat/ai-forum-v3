@@ -2165,36 +2165,75 @@ a.rd-aud { text-decoration: underline; text-underline-offset: 2px; }
    卡片的一切颜色都来自 themeVars()（和房间里同一套换算），这里不写死任何一间房的色。
    ⚠️ 组件层是 absolute：装扮不参与布局，这是 09-26 那条"摆一件小东西把房间撑开一大截空白"
    的教训，别在这里改成 padding/margin 让位。 */
-.rs-page { min-height: 100vh; background: #14171c; }
-/* 一点点暖光从走廊尽头漏出来：整屏纯黑会显得这是个月黑风高的地方，不是家 */
-.rs-page::before { content: ""; position: fixed; inset: 0; pointer-events: none;
-  background: radial-gradient(120% 60% at 50% -10%, rgba(147,187,169,.10), transparent 60%),
-              radial-gradient(80% 40% at 85% 110%, rgba(220,190,150,.07), transparent 65%); }
+/* 走廊改成**暖色浅底 + 黏土背景图**（2026-09-30 改造，见 rooms-redesign/ 预览稿）：
+   原来的暗底走廊要的就是"每间房一张纸压在暗处才读得出"，现在反过来——底是浅的，
+   纸卡（--rm-paper 不透明）压在上头依然清晰，而页面整体从"月黑风高"回到"有人的地方"。
+   --ink/--sage/--warm-card 只在 .rs-page 作用域内定义：不进 :root，避免和全站 token 抢名。 */
+.rs-page {
+  min-height: 100vh;
+  --ink: #2e2419; --ink-body: #6f6152; --ink-soft: #98897a;
+  --sage: #3a7d5f; --sage-soft: rgba(58,125,95,.10);
+  --warm-card: rgba(255,251,244,.86);
+  /* 底色兜底：图没加载出来也不该是白纸黑字以外的任何一种错 */
+  background-color: #f2ece3;
+  background-image:
+    linear-gradient(90deg, rgba(255,250,244,.9) 0%, rgba(255,250,244,.66) 26%, rgba(255,250,244,.3) 44%, rgba(255,250,244,0) 58%),
+    linear-gradient(180deg, rgba(255,250,244,.42) 0%, rgba(255,250,244,0) 26%),
+    url('/assets/rooms-bg.webp');
+  background-size: auto, auto, cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: scroll, scroll, fixed;
+}
+/* 移动端降级必须保留：background-attachment:fixed 在 iOS Safari 上会整段失效并卡住滚动，
+   所以窄屏改成 scroll + 200% 宽度缩放（预算是背景图本身，不是文字）。 */
+@media (max-width: 768px) {
+  .rs-page { background-attachment: scroll, scroll, scroll; background-size: auto, auto, 200% auto;
+    background-position: center 0; }
+}
 .rs-inner { position: relative; z-index: 1; }
 
 .rs-lead { padding: 10px 0 22px; max-width: 62ch; }
-.rs-h1 { font-size: 26px; font-weight: 600; letter-spacing: .3px; color: #f6f8fa; margin: 0; }
-.rs-p { font-size: 13px; line-height: 1.95; color: #949ba3; margin: 10px 0 0; }
-.rs-p b { color: #c9d1d9; font-weight: 600; }
+/* 暗底时代的 #f6f8fa/#949ba3 在浅底上几乎看不见 → 翻成暖墨色系（--ink / --ink-body）。
+   .rs-p 已随 rs-lead 拆三段而退役，样式换成 rs-lead-line / rs-lead-body / rs-keyrule。 */
+.rs-h1 { font-size: 26px; font-weight: 600; letter-spacing: .3px; color: var(--ink); margin: 0; }
+.rs-h1 small { display: block; font-size: 12px; font-weight: 500; letter-spacing: 2px;
+  color: var(--sage); margin: 10px 0 0; }
+.rs-h1 small::before { content: ""; display: inline-block; width: 18px; height: 2px; border-radius: 2px;
+  background: var(--sage); vertical-align: middle; margin-right: 8px; }
+.rs-lead-line { margin: 16px 0 0; font-size: 16.5px; font-weight: 600; line-height: 1.75; color: #3d3226; }
+.rs-lead-body { margin: 8px 0 0; font-size: 13px; line-height: 1.95; color: var(--ink-body); }
+/* 钥匙那一句原来是 .rs-p 里的 <b>，现在提出来做徽标：它是这页唯一一条"权限"说明，
+   该被看见，但不该和引导句抢同一个重量级——所以是软底小徽标，不是大标题。 */
+.rs-keyrule { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px;
+  padding: 8px 13px; border-radius: 12px; background: var(--sage-soft); color: var(--sage);
+  font-size: 12.5px; font-weight: 600; line-height: 1.6; }
+.rs-keyrule svg { width: 15px; height: 15px; flex: none; }
 /* 排序只有两档，且和站内其它 chip 同一套语言（选中态=强调色描边+底色，不做实心大按钮） */
 .rs-sort { display: flex; gap: 8px; margin-top: 16px; }
-/* 温馨提示：这段是说给主人听的，所以它要像门框上别着的一张便条，不像一段免责声明 */
-.rs-kindly { margin-top: 16px; padding: 13px 15px; border-radius: 12px; max-width: 62ch;
-  background: rgba(247,245,240,.05); border: 1px solid rgba(255,255,255,.08);
-  border-left: 2px solid #93bba9; }
-.rs-kindly-h { font-size: 11px; letter-spacing: 1.2px; color: #93bba9; margin-bottom: 6px; }
-.rs-kindly-p { font-size: 12.5px; line-height: 1.9; color: #b6bec7; margin: 0; }
-.rs-say { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
-.rs-say > span { font-size: 13.5px; color: #f0efe9; font-family: var(--font-hand); letter-spacing: .3px; }
-.rs-copy { font-size: 11px; padding: 4px 10px; border-radius: 8px; cursor: pointer;
-  border: 1px solid rgba(147,187,169,.4); background: rgba(147,187,169,.1); color: #93bba9; }
-.rs-copy:hover { background: rgba(147,187,169,.18); }
-.rs-sbtn { font-size: 11.5px; padding: 6px 13px; border-radius: 10px; cursor: pointer;
-  border: 1px solid rgba(255,255,255,.11); background: transparent; color: #949ba3;
+/* 温馨提示：这段是说给主人听的，所以它要像门框上别着的一张便条，不像一段免责声明。
+   暗底时代的"半透明深色 + 白字"在浅底上会糊掉 → 翻成暖白半透明 + 左侧绿描边，
+   顺带加一层很轻的投影，让它从背景图上浮起来（"轻"就靠这两样）。 */
+.rs-kindly { margin-top: 18px; padding: 14px 16px; border-radius: 14px; max-width: 60ch;
+  background: var(--warm-card); border: 1px solid rgba(255,255,255,.8);
+  border-left: 2.5px solid var(--sage);
+  box-shadow: 0 12px 30px -20px rgba(74,48,24,.35); backdrop-filter: blur(6px); }
+.rs-kindly-h { font-size: 11px; letter-spacing: 1.2px; color: var(--sage); margin-bottom: 7px; }
+.rs-kindly-p { font-size: 12.5px; line-height: 1.9; color: #7a6b5a; margin: 0; }
+.rs-say { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0; }
+.rs-say > span { font-size: 13px; color: var(--ink); font-family: var(--font-hand); letter-spacing: .3px;
+  padding: 5px 12px; border-radius: 9px; background: rgba(255,255,255,.8);
+  border: 1px dashed rgba(58,125,95,.5); }
+.rs-copy { font-size: 11px; padding: 4px 11px; border-radius: 8px; cursor: pointer;
+  border: 1px solid rgba(58,125,95,.4); background: rgba(58,125,95,.07); color: var(--sage); }
+.rs-copy:hover { background: rgba(58,125,95,.16); }
+/* 排序钮：暗底的半透明白描边在浅底上看不见 → 换成暖墨描边 + 纸色底，选中态是实心暖墨 */
+.rs-sbtn { font-size: 11.5px; padding: 7px 15px; border-radius: 999px; cursor: pointer;
+  border: 1px solid rgba(46,36,25,.2); background: var(--warm-card); color: var(--ink-body);
   transition: color .18s ease, border-color .18s ease, background .18s ease; }
-.rs-sbtn:hover { color: #dfe5ea; border-color: rgba(255,255,255,.2); }
-.rs-sbtn.on { color: #93bba9; border-color: rgba(147,187,169,.5); background: rgba(147,187,169,.12); }
-.rs-tip { font-size: 12.5px; color: #7c848d; padding: 40px 0; text-align: center; }
+.rs-sbtn:hover { border-color: rgba(46,36,25,.45); color: var(--ink); }
+.rs-sbtn.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.rs-tip { font-size: 12.5px; color: #8a7f72; padding: 40px 0; text-align: center; }
 
 .rs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(316px, 1fr)); gap: 20px; }
 /* overflow: hidden 不是顺手加的：组件锚点带负偏移，不裁就飘到邻居卡上，
@@ -2257,9 +2296,9 @@ a.rd-aud { text-decoration: underline; text-underline-offset: 2px; }
 .rs-foot-note em { font-style: normal; color: var(--rm-ink-soft); }
 .rs-go { margin-left: auto; font-size: 11.5px; color: var(--rm-accent); text-decoration: none;
   transition: transform .18s ease; }
-.rs-note { font-size: 11px; line-height: 1.9; color: #6f7780; margin: 30px 0 0; max-width: 66ch; }
-/* EmptyState 自带的是浅色底文案（text-gray-500），放到走廊这块暗底上要提亮一档才读得见 */
-.rs-empty p { color: #949ba3; }
+.rs-note { font-size: 11px; line-height: 1.9; color: #8a7a6a; margin: 30px 0 0; max-width: 66ch; }
+/* EmptyState 自带 text-gray-500（冷灰 #6b7280），浅底上够读，但和这一页的暖墨不同族 → 拉回暖调 */
+.rs-empty p { color: var(--ink-body); }
 /* Agent 主页那一栏：浅色底、横排，与「广场短帖」「署名文章」同一个 ap-module 外壳 */
 .rs-rowwrap { display: flex; align-items: stretch; gap: 14px; padding: 16px 18px; border-radius: 14px;
   background: rgba(var(--rm-paper-rgb), 1); border: 1px solid var(--rm-hair); }
@@ -2297,6 +2336,7 @@ a.rd-aud { text-decoration: underline; text-underline-offset: 2px; }
 }
 @media (max-width: 640px) {
   .rs-h1 { font-size: 21px; }
+  .rs-lead-line { font-size: 15.5px; }
   .rs-grid { gap: 16px; }
 }
 
