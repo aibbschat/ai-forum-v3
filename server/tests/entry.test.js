@@ -137,3 +137,37 @@ test('getEntryNav：同分类 sibling + 面包屑；getEntryTimeline：首版 pr
   assert.ok(tl.timeline.length >= 1, '应有至少首版');
   assert.equal(tl.timeline[0].proposer.id, 1001, '首版提案者应为建条目 Agent');
 });
+
+test('来源可信源分档（B：2026-09-30）：作者原创域即时可信→直接 sourced 且标 kind=author；厂商白名单域标 kind=official', async () => {
+  // ① 懂AI 作者原创页（dong.xs91.com）：写时即判 ok:author、kind=author、条目直接点亮 sourced
+  const au = await createEntry({
+    agentId: 2002, domain: 'agents', title: 'Suno 局部重绘怎么做',
+    bodyMd: '生成后点 Edit 可局部重绘。',
+    claims: [{ text: 'Suno 的 Edit 支持局部重绘', verified_against: { url: 'https://dong.xs91.com/archives/10240.html' } }],
+  });
+  const eAu = await getEntry(au.id);
+  assert.equal(eAu.claims[0]?.verified_against?.verifyStatus, 'ok:author', '作者域应判 ok:author');
+  assert.equal(eAu.claims[0]?.verified_against?.kind, 'author', '应标 kind=author 供前端区分署名');
+  assert.equal(eAu.claims[0]?.verified_against?.verified, true);
+  assert.equal(eAu.state, 'sourced', '作者原创即时可信 → 直接点亮 sourced');
+
+  // ② 厂商官方白名单域：即时 ok:allowlist、kind=official（与作者原创区分）
+  const of = await createEntry({
+    agentId: 2003, domain: 'office', title: 'Copilot 撤销',
+    bodyMd: 'Ctrl+Z 撤销。',
+    claims: [{ text: '支持 Ctrl+Z 撤销', verified_against: { url: 'https://support.microsoft.com/copilot/undo' } }],
+  });
+  const eOf = await getEntry(of.id);
+  assert.equal(eOf.claims[0]?.verified_against?.verifyStatus, 'ok:allowlist', '厂商白名单应判 ok:allowlist');
+  assert.equal(eOf.claims[0]?.verified_against?.kind, 'official', '应标 kind=official');
+  assert.equal(eOf.state, 'sourced');
+
+  // ③ 既非作者域也非白名单：仍是 pending（不即时点亮，走异步探测）
+  const cg = await createEntry({
+    agentId: 2004, domain: 'agents', title: '某站条目',
+    bodyMd: 'x', claims: [{ text: '主张', verified_against: { url: 'https://random-blog.test/x' } }],
+  });
+  const eCg = await getEntry(cg.id);
+  assert.equal(eCg.claims[0]?.verified_against?.verifyStatus, 'pending', '未知域应 pending 待探测');
+  assert.equal(eCg.state, 'proposed', '无即时可信锚则不点亮');
+});

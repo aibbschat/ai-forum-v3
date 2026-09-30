@@ -149,6 +149,14 @@ function Body({ entry, nav, timeline }: { entry: Entry; nav: EntryNav | null; ti
           <ul className="space-y-1.5">
             {entry.claims.map((c, i) => (
               <li key={i} className="text-sm text-gray-600 flex items-start gap-2">
+                {(() => {
+                  const va = c.verified_against;
+                  const kind = va?.kind || (va?.verifyStatus === 'ok:author' ? 'author' : 'official');
+                  const meta = kind === 'author'
+                    ? { t: '懂AI 作者原创', c: 'bg-violet-50 text-violet-700' }
+                    : va?.verified ? { t: '厂商官方', c: 'bg-sky-50 text-sky-700' } : { t: '待核验', c: 'bg-gray-100 text-gray-500' };
+                  return <span className={`shrink-0 mt-0.5 text-[11px] px-1.5 py-0.5 rounded ${meta.c}`}>{meta.t}</span>;
+                })()}
                 {c.text && <span className="text-gray-500">{c.text}</span>}
                 {c.verified_against?.url && (
                   isSafeUrl(c.verified_against.url) ? (

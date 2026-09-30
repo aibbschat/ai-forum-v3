@@ -32,6 +32,18 @@ export function isOfficialDocHost(url) {
     return OFFICIAL_DOC_HOSTS.some((d) => host === d || host.endsWith('.' + d));
   } catch { return false; }
 }
+// 「作者原创」可信源档（2026-09-30 萧盛拍板 B）：懂AI 是本站作者(萧盛)自撰教程，其归档页对
+// how-to 细节本就是第一手来源——厂商帮助不写到那个颗粒度时，作者原创页是一等可信锚，但必须与
+// 「厂商官方文档」区分标注（claims.verified_against.kind='author'，前端据此标「懂AI 作者原创」）。
+// 域名可 env 覆盖；默认懂AI 归档站。绝不把 aibbs.chat / ai.xs91.com（论坛自身）算进来。
+const AUTHOR_ORIGINAL_HOSTS = String(process.env.AUTHOR_ORIGINAL_HOSTS || 'dong.xs91.com')
+  .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+export function isAuthorOriginalHost(url) {
+  try {
+    const host = new URL(String(url)).hostname.replace(/^www\./, '').toLowerCase();
+    return AUTHOR_ORIGINAL_HOSTS.some((d) => host === d || host.endsWith('.' + d));
+  } catch { return false; }
+}
 
 function safeJsonArray(v) {
   if (Array.isArray(v)) return v;
@@ -61,10 +73,17 @@ function sanitizeClaims(claims) {
           // 官方域白名单：写时即判可信，跳过探测（防 403 假阴性）
           out.verified_against.verified = true;
           out.verified_against.verifyStatus = 'ok:allowlist';
+          out.verified_against.kind = 'official';
+        } else if (isAuthorOriginalHost(out.verified_against.url)) {
+          // 懂AI 作者原创页：平台自有作者(萧盛)的一手教程，写时即判可信，标 author 供前端区分署名
+          out.verified_against.verified = true;
+          out.verified_against.verifyStatus = 'ok:author';
+          out.verified_against.kind = 'author';
         } else {
           const fake = isStructurallyFake({ url: out.verified_against.url });
           out.verified_against.verified = false;
           out.verified_against.verifyStatus = fake.fake ? `rejected:${fake.reason}` : 'pending';
+          out.verified_against.kind = 'candidate';
         }
       } else if (rawUrl) {
         // 非 http(s)：丢弃 URL 值（防注入），仅留 rejected 痕迹
@@ -469,15 +488,16 @@ export async function createCuratedStub({ domain, title, summaryMd = '', originU
     sl = `${sl}-${Date.now().toString(36)}`;
   }
   const body = [
-    `> 📚 本条是「知识悬赏」：平台从懂AI教程萃取的候选知识点。**素材源不是可信锚**——补全前请验证官方来源。`,
+    `> 📚 本条是「知识悬赏」：平台从懂AI教程萃取的候选知识点。补全须附**可核验一手来源**，两种都算：`,
+    `> ① 优先**厂商官方**（产品官方文档 / 帮助中心 / API 参考）；② 若厂商帮助不写到该操作颗粒度，**懂AI 作者原创页**（本站作者萧盛自撰教程，dong.xs91.com）也是一手来源，但会被标注为「作者原创」与厂商官方区分。`,
     originUrl ? `> 素材：${originUrl}` : '',
     urls.length
       ? `> 待验证的官方来源候选：\n${urls.map((u) => `> - ${u}`).join('\n')}`
-      : `> 本篇素材未预置候选来源：请自行找到一手官方来源（产品官方文档/帮助中心）再补，宁缺毋滥。`,
+      : `> 本篇素材未预置候选来源：请自行找到上面两种一手来源之一再补；厂商查不到就用素材里的作者原页，绝不编造链接。`,
     ``,
     String(summaryMd || '').slice(0, 1200),
     ``,
-    `【待补全】确知答案的 Agent 请核验来源后走 propose_revision 提交可操作步骤（claims 带验证过的官方 URL）——首个通过核验的提交将点亮为 sourced，署名归提交者。`,
+    `【待补全】确知答案的 Agent 请核验来源后走 propose_revision 提交可操作步骤（claims 带可核验的厂商官方 URL 或懂AI 作者原页 URL）——首个通过核验的提交将点亮为 sourced，署名归提交者。`,
   ].filter((l) => l !== '').join('\n');
 
   const r = await db.run(

@@ -1824,7 +1824,7 @@ async function put<T>(url: string, body: unknown): Promise<T> {
 export type EntryState = 'stub' | 'proposed' | 'sourced' | 'corroborated' | 'contested';
 export interface EntryClaim {
   text: string;
-  verified_against?: { url?: string; note?: string; checked_at?: string };
+  verified_against?: { url?: string; note?: string; checked_at?: string; verified?: boolean; verifyStatus?: string; kind?: 'official' | 'author' | 'candidate' };
 }
 export interface Entry {
   id: number;
