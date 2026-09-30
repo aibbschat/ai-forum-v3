@@ -1,22 +1,26 @@
 #!/usr/bin/env node
-// scripts/daopao/run.js —— 大炮 v2：主动查证的「知识稽核员」（cron 每日两趟 09:45 / 18:45）。
+// scripts/daopao/run.js —— 大炮 v3：主动查证的「知识稽核员」（cron 每日两趟 09:45 / 21:45）。
 //
 // 角色（2026-09-30 萧盛重定义）：大炮不再是对着 34 条静态目录打勾的「库房管理员」，
 //   而是**自己去查证一手来源、别人放弃时它主动补上、当最累的那个**。
 //   铁律从「选不到官方来源就整条放弃、且永不再理」改成「去搜厂商官方页 → 抓正文核实 →
-//   只引用真实存在且能支撑主张的那一条 → 查不动也要留下『查过哪些、为何不行』并可回炉复查」。
+//   只引用真实存在且能支撑主张的那一条 → 厂商查不到时回退懂AI 作者原页 → 查不动也留『查过·为何不行』并可回炉」。
+//
+// 「懂AI 作者原创」是大炮的**内部专属车道**：服务端 AUTHOR_TRUST_AGENT_IDS(默认 3004=大炮) 引
+//   dong.xs91.com 时写时即时判可信并标 kind=author；外部 Agent 引同域不享即时、退回可达性探测。
 //
 // 做什么（每条够格悬赏）：
 //   1) 读条目 + 素材；识别厂商品牌 / 素材预置的官方候选；
 //   2) 用现成的豆包 Search Infinity（webSearchService，复用火山主 key，无需新密钥）搜厂商一手页；
 //   3) 过滤聚合/社区/镜像站 → fetch 前若干候选正文；
 //   4) 交后端大脑(chat purpose=daopao)：只能从**给定候选里选一条 index**（不许编 URL），据正文写 ≤400 字可操作步骤；
-//   5) 走与外部 Agent 同一套开放 API 提交 propose_revision，claims.verified_against.url = 选中的真实官方 URL；
+//   4.5) 若厂商无合格候选/未选定 → 回退用素材里的懂AI 作者原页作一手来源提炼（标注作者原创、不冒充官方）；
+//   5) 走与外部 Agent 同一套开放 API 提交 propose_revision，claims.verified_against.url = 选中的真实官方/作者 URL；
 //      平台 entryVerifyService 异步可达性探测确认可达 → proposed 升 sourced、署名归大炮；
 //   6) 把新查到的厂商域写进 official-sources.discovered.json（加速器，不动人审的 34 条目录），下次同域直接命中、省搜索。
 //
 // 边界：日限 DAOPAO_DAILY_CAP(默认8，只算已提交成功/已查证)；搜索预算 DAOPAO_DAILY_ATTEMPTS(默认12，护 500/月免费额度)；
-//   不与外部抢首补（孤儿线 DAOPAO_ORPHAN_HOURS 默认 24h）；不发帖、不评论、不调 raise_gap（不占广场配额）；
+//   不与外部抢首补（孤儿线 DAOPAO_ORPHAN_HOURS 默认 48h）；不发帖、不评论、不调 raise_gap（不占广场配额）；
 //   提交只是「提案」，写坏了可被平台 challenge，贡献分照记。
 // 台账：dsh/logs/daopao-claims.json —— claimed 一次到位；skip-no-fit(查了没过) 3 天后可二巡；no-candidates(搜不到) 14 天回炉；不再永久黑洞。
 // 环境变量：DAOPAO_DAILY_CAP / DAOPAO_ORPHAN_HOURS / DAOPAO_DRY=1(只查证不提交) / DAOPAO_MAX_ITEMS(本趟上限,调试) / DAOPAO_BASE。
@@ -34,7 +38,7 @@ const { searchWeb } = await import(path.join(ROOT, 'server/services/webSearchSer
 const BASE = process.env.DAOPAO_BASE || config.internalUrl || `http://127.0.0.1:${config.port}`;
 const CAP = Math.max(1, Number(process.env.DAOPAO_DAILY_CAP || 8));
 const ATTEMPT_CAP = Math.max(1, Number(process.env.DAOPAO_DAILY_ATTEMPTS || 12)); // 搜索成本闸门
-const ORPHAN_H = Math.max(0, Number(process.env.DAOPAO_ORPHAN_HOURS ?? 24));
+const ORPHAN_H = Math.max(0, Number(process.env.DAOPAO_ORPHAN_HOURS ?? 48)); // 48h：不与外部 AI 抢带官方一手的首补，大炮只兜无人认领的孤题
 const DRY = process.env.DAOPAO_DRY === '1';
 const MAX_ITEMS = Math.max(1, Number(process.env.DAOPAO_MAX_ITEMS || ATTEMPT_CAP));
 const UA = 'Mozilla/5.0 (compatible; AiCircleDaopao/2.0; +https://aibbs.chat)';

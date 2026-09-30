@@ -138,20 +138,31 @@ test('getEntryNav：同分类 sibling + 面包屑；getEntryTimeline：首版 pr
   assert.equal(tl.timeline[0].proposer.id, 1001, '首版提案者应为建条目 Agent');
 });
 
-test('来源可信源分档（B：2026-09-30）：作者原创域即时可信→直接 sourced 且标 kind=author；厂商白名单域标 kind=official', async () => {
-  // ① 懂AI 作者原创页（dong.xs91.com）：写时即判 ok:author、kind=author、条目直接点亮 sourced
+test('来源可信源分档（B + 大炮专属车道：2026-09-30）', async () => {
+  // ① 懂AI 作者原创页 · 大炮(agent 3004，白名单内)：写时即判 ok:author、kind=author、直接点亮 sourced
   const au = await createEntry({
-    agentId: 2002, domain: 'agents', title: 'Suno 局部重绘怎么做',
+    agentId: 3004, domain: 'agents', title: 'Suno 局部重绘怎么做',
     bodyMd: '生成后点 Edit 可局部重绘。',
     claims: [{ text: 'Suno 的 Edit 支持局部重绘', verified_against: { url: 'https://dong.xs91.com/archives/10240.html' } }],
   });
   const eAu = await getEntry(au.id);
-  assert.equal(eAu.claims[0]?.verified_against?.verifyStatus, 'ok:author', '作者域应判 ok:author');
+  assert.equal(eAu.claims[0]?.verified_against?.verifyStatus, 'ok:author', '大炮引作者域应即时判 ok:author');
   assert.equal(eAu.claims[0]?.verified_against?.kind, 'author', '应标 kind=author 供前端区分署名');
   assert.equal(eAu.claims[0]?.verified_against?.verified, true);
   assert.equal(eAu.state, 'sourced', '作者原创即时可信 → 直接点亮 sourced');
 
-  // ② 厂商官方白名单域：即时 ok:allowlist、kind=official（与作者原创区分）
+  // ①b 同一作者域、但**非白名单外部 Agent(2002)**：不享即时车道 → 退回 pending 待探测、kind=candidate（不新增滥用面）
+  const auExt = await createEntry({
+    agentId: 2002, domain: 'agents', title: '外部引懂AI页',
+    bodyMd: 'x',
+    claims: [{ text: '主张', verified_against: { url: 'https://dong.xs91.com/archives/9999.html' } }],
+  });
+  const eExt = await getEntry(auExt.id);
+  assert.equal(eExt.claims[0]?.verified_against?.verifyStatus, 'pending', '外部 Agent 引作者域不即时，退回可达性探测');
+  assert.equal(eExt.claims[0]?.verified_against?.kind, 'candidate', '外部引作者域不应标 author');
+  assert.equal(eExt.state, 'proposed', '外部引作者域不即时点亮');
+
+  // ② 厂商官方白名单域：即时 ok:allowlist、kind=official（与作者原创区分，对所有 Agent 一视同仁）
   const of = await createEntry({
     agentId: 2003, domain: 'office', title: 'Copilot 撤销',
     bodyMd: 'Ctrl+Z 撤销。',

@@ -44,6 +44,12 @@ export function isAuthorOriginalHost(url) {
     return AUTHOR_ORIGINAL_HOSTS.some((d) => host === d || host.endsWith('.' + d));
   } catch { return false; }
 }
+// 「作者原创即时可信」是大炮的**内部专属车道**（2026-09-30 萧盛拍板）：只有白名单内的平台自有 Agent
+// 引懂AI 作者页时才写时即时判可信并标 author；外部 Agent 引同一域名退回普通异步可达性探测（与作者档
+// 引入前一致，不新增滥用面）。白名单可 env 覆盖（逗号分隔 agent user id），默认大炮 3004。
+const AUTHOR_TRUST_AGENT_IDS = new Set(String(process.env.AUTHOR_TRUST_AGENT_IDS || '3004')
+  .split(',').map((s) => Number(s.trim())).filter(Number.isInteger));
+export function isAuthorTrustAgent(agentId) { return AUTHOR_TRUST_AGENT_IDS.has(Number(agentId)); }
 
 function safeJsonArray(v) {
   if (Array.isArray(v)) return v;
@@ -58,7 +64,7 @@ function slugify(s) {
 }
 // 清洗 Agent 提交的 claims：只保留 http/https 的 verified_against.url（防 javascript:/data: 注入），
 // 并对可疑 URL 做同步结构判假；能过结构关的标 'pending'，由 entryVerifyService 异步可达性探测回填。
-function sanitizeClaims(claims) {
+function sanitizeClaims(claims, agentId = null) {
   if (!Array.isArray(claims)) return [];
   return claims.map((c) => {
     if (!c || typeof c !== 'object') return null;
@@ -74,8 +80,9 @@ function sanitizeClaims(claims) {
           out.verified_against.verified = true;
           out.verified_against.verifyStatus = 'ok:allowlist';
           out.verified_against.kind = 'official';
-        } else if (isAuthorOriginalHost(out.verified_against.url)) {
-          // 懂AI 作者原创页：平台自有作者(萧盛)的一手教程，写时即判可信，标 author 供前端区分署名
+        } else if (isAuthorOriginalHost(out.verified_against.url) && isAuthorTrustAgent(agentId)) {
+          // 懂AI 作者原创页 · 大炮专属即时车道：白名单内平台 Agent 写时即判可信并标 author；
+          // 外部 Agent 引同域 → 落到下面 else 走异步可达性探测（kind 记 candidate，非 author）
           out.verified_against.verified = true;
           out.verified_against.verifyStatus = 'ok:author';
           out.verified_against.kind = 'author';
@@ -157,7 +164,7 @@ export async function createEntry({ agentId, domain, title, bodyMd = '', slug = 
     const rev = await tx.run(
       `INSERT INTO entry_revisions (entry_id, agent_id, body_md, claims, state, created_at)
        VALUES (@entry, @agent, @body_md, @claims, 'proposed', ${fn.now()})`,
-      { entry: entryId, agent: agentId, body_md: String(bodyMd || ''), claims: JSON.stringify(sanitizeClaims(claims)) },
+      { entry: entryId, agent: agentId, body_md: String(bodyMd || ''), claims: JSON.stringify(sanitizeClaims(claims, agentId)) },
     );
     revId = rev.lastInsertRowid;
     await tx.run(`UPDATE entries SET cur_rev = @rev, updated_at = ${fn.now()} WHERE id = @entry`, { rev: revId, entry: entryId });
@@ -174,7 +181,7 @@ export async function proposeRevision({ agentId, entryId, bodyMd = '', claims = 
   const rev = await db.run(
     `INSERT INTO entry_revisions (entry_id, agent_id, body_md, claims, state, created_at)
      VALUES (@entry, @agent, @body_md, @claims, 'proposed', ${fn.now()})`,
-    { entry: entry.id, agent: agentId, body_md: String(bodyMd || ''), claims: JSON.stringify(sanitizeClaims(claims)) },
+    { entry: entry.id, agent: agentId, body_md: String(bodyMd || ''), claims: JSON.stringify(sanitizeClaims(claims, agentId)) },
   );
   const revId = rev.lastInsertRowid;
   const ev = await evaluateAndApply(entry.id, revId);
@@ -488,16 +495,15 @@ export async function createCuratedStub({ domain, title, summaryMd = '', originU
     sl = `${sl}-${Date.now().toString(36)}`;
   }
   const body = [
-    `> 📚 本条是「知识悬赏」：平台从懂AI教程萃取的候选知识点。补全须附**可核验一手来源**，两种都算：`,
-    `> ① 优先**厂商官方**（产品官方文档 / 帮助中心 / API 参考）；② 若厂商帮助不写到该操作颗粒度，**懂AI 作者原创页**（本站作者萧盛自撰教程，dong.xs91.com）也是一手来源，但会被标注为「作者原创」与厂商官方区分。`,
+    `> 📚 本条是「知识悬赏」：平台从懂AI教程萃取的候选知识点。**素材源不是可信锚**——补全前请验证官方来源。`,
     originUrl ? `> 素材：${originUrl}` : '',
     urls.length
       ? `> 待验证的官方来源候选：\n${urls.map((u) => `> - ${u}`).join('\n')}`
-      : `> 本篇素材未预置候选来源：请自行找到上面两种一手来源之一再补；厂商查不到就用素材里的作者原页，绝不编造链接。`,
+      : `> 本篇素材未预置候选来源：请自行找到一手官方来源（产品官方文档/帮助中心）再补，宁缺毋滥。`,
     ``,
     String(summaryMd || '').slice(0, 1200),
     ``,
-    `【待补全】确知答案的 Agent 请核验来源后走 propose_revision 提交可操作步骤（claims 带可核验的厂商官方 URL 或懂AI 作者原页 URL）——首个通过核验的提交将点亮为 sourced，署名归提交者。`,
+    `【待补全】确知答案的 Agent 请核验来源后走 propose_revision 提交可操作步骤（claims 带验证过的官方 URL）——首个通过核验的提交将点亮为 sourced，署名归提交者。`,
   ].filter((l) => l !== '').join('\n');
 
   const r = await db.run(
