@@ -1932,21 +1932,39 @@ export function getEntryTimeline(id: number | string) {
  * `entries` 的内容按 audience + 阅读钥匙判定，未授权时服务端**根本不下发 body 字段**
  * ——所以这里的类型里 body 是可选的，前端按 `locked` 分支渲染，不参与"藏不藏"的决策。
  */
+/** 统一饰品（2026-09-30：旧 widgets + corner 合并为 decorations）。 */
+export interface RoomDecoration {
+  /** 注册表 id（灯笼/风铃/…/official:leaf…）；自用池图当贴纸时 id='img' 并带 asset */
+  id: string;
+  /** 挂区：卡边 / 卡角 / 门牌带 / 页面角 */
+  zone: 'card-edge' | 'card-corner' | 'band-corner' | 'page-corner';
+  /** 挂区内落位（卡边 8 锚 / 四角 tl·tr·bl·br） */
+  at: string;
+  /** 仅自用池图贴纸带：图片 URL（官方件与矢量件没有） */
+  asset?: string;
+}
 export interface RoomTheme {
   /** 房间名与一句话挂在**公开的房间壳**上，所以服务端对它们走严格预检（不是进门轻那套） */
   name: string; motto: string;
-  paper: string; rule: 'none' | 'lined' | 'grid'; signFont: 'pen' | 'round' | 'note' | 'kai';
+  paper: string; rule: 'none' | 'lined' | 'grid' | 'dot' | 'square';
+  signFont: 'pen' | 'round' | 'note' | 'kai';
   ink: string; leading: number; wallpaper: string | null; scrim: number;
-  motion: 'soft' | 'still'; widgets: { id: string; slot: string }[];
-  /** 角落装饰（§6.2）：asset 认官方贴纸或自用池图，at 认四角；两者缺一不摆 */
-  corner: { asset: string; at: string } | null;
+  motion: 'soft' | 'still';
+  /** 2026-09-30 主题风格杠杆（与墙纸彻底解耦）：纸面质感 / 卡片形态 / 门牌样式 / 强调色 */
+  paperFeel: 'none' | 'paper' | 'kraft' | 'letter';
+  cardShape: 'round' | 'square' | 'torn';
+  bandStyle: 'tag' | 'wood' | 'neon' | 'terminal' | 'pixel' | 'seal';
+  accent: string | null;
+  decorations: RoomDecoration[];
 }
 export interface RoomShell {
   agentId: number; theme: RoomTheme; coverLine: string | null;
   assets: { url: string; pool: string; addedAt?: string | null }[];
-  wallpaperOptions: string[]; cornerOptions: string[]; widgetOptions: string[]; slotOptions: string[];
-  /** 每件组件能挂哪些位由服务端定（吊挂类只能在上沿），前端不另写一份规则 */
-  widgetMeta?: { id: string; label: string; kind: string; slots: string[] }[];
+  wallpaperOptions: string[];
+  decorOptions: string[];
+  /** 每件饰品能挂哪些挂区由服务端注册表定（吊挂类只能上沿），前端不另写一份规则 */
+  decorMeta?: { id: string; label: string; kind: 'hang' | 'pin' | 'corner'; zones: string[] }[];
+  zones?: Record<string, { label: string; max: number; at: string[] }>;
   updatedBy?: string | null; updatedAt?: string | null;
 }
 /**

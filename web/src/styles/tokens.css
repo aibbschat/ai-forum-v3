@@ -1803,12 +1803,83 @@ body {
 /* 🔴 这里原来有一行 `.rm-card.rm-has-hang { margin-top: 148px }`：为了不让灯笼伸进头部带，
    给有吊挂件的卡片上方腾了一整段"墙面"。代价是摆一件小东西就把日记本往下推 148px，
    房间中间裂开一大块空白——**装扮不该改变房间的结构**。
-   现在灯笼自己缩到边线上（见 widgets.tsx 的落位口径），卡片位置只由内容决定。 */
-/* 不能 overflow:hidden —— 组件要骑到边线外；圆角靠背景裁剪，不靠裁切 */
-.rm-card { margin-top: 16px; border-radius: 16px; overflow: visible; position: relative;
-  background-clip: padding-box;
+   现在吊挂件自己缩到边线上（见 widgets.tsx 的落位口径），只让出「刚好够伸出来」的墙高。 */
+/* 不能 overflow:hidden —— 组件要骑到边线外；纸面画在 .rm-paper-feel 上，不靠卡片裁切 */
+.rm-card { margin-top: 16px; border-radius: 16px; overflow: visible; position: relative; }
+
+/* 纸面层：卡片的背景 + 阴影都画在这一层（z0），装饰件与文字在它之上。
+   为什么从 .rm-card 本体挪到子层：手撕边（torn）用 clip-path 裁出纸缘，
+   直接裁在 .rm-card 上会把骑在边线外的灯笼/藤蔓一起裁掉——纸是纸，件是件。 */
+.rm-card .rm-paper-feel { position: absolute; inset: 0; border-radius: inherit; z-index: 0;
+  pointer-events: none; font-style: normal;
   background: rgba(var(--rm-paper-rgb), calc(var(--rm-scrim-card) / 100));
   box-shadow: 0 14px 36px -22px rgba(10,14,18,.45); }
+/* 纸面质感：纸/牛皮/信纸纹理（主题风格杠杆，2026-09-30；全 CSS 零素材） */
+.rm-card[data-feel='paper'] .rm-paper-feel {
+  background-image: radial-gradient(rgba(150,120,70,.05) .8px, transparent 1.1px);
+  background-size: 5px 5px; }
+.rm-card[data-feel='kraft'] .rm-paper-feel {
+  background-image: radial-gradient(rgba(255,214,150,.055) 1px, transparent 1.5px);
+  background-size: 4px 4px; }
+.rm-card[data-feel='letter'] .rm-paper-feel {
+  background-image: repeating-linear-gradient(transparent 0 34px, rgba(255,255,255,.045) 34px 35px); }
+/* 卡片形态：圆角（默认）/ 直角 / 手撕边 */
+.rm-card[data-shape='square'] .rm-paper-feel { border-radius: 5px; }
+.rm-card[data-shape='torn'] .rm-paper-feel {
+  border-radius: 0; box-shadow: none;
+  clip-path: polygon(1% 0, 98.7% 1.2%, 100% 8%, 99.1% 15%, 100% 24%, 99.2% 34%, 100% 45%,
+    98.9% 56%, 100% 67%, 99.1% 78%, 100% 88%, 98.6% 96%, 100% 100%, 90% 99.2%, 78% 100%,
+    65% 99%, 52% 100%, 39% 99.1%, 25% 100%, 13% 98.9%, 0 99.4%, 1% 90%, 0 79%, 1.2% 66%,
+    0 53%, 1% 40%, 0 28%, 1.1% 17%, 0 7%);
+  filter: drop-shadow(0 10px 18px rgba(10,14,18,.28)); }
+
+/* 门牌带六式（主题风格杠杆）：tag 纸签（默认，不动）/ wood 木牌 / neon 霓虹 /
+   terminal 终端条 / pixel 像素框 / seal 印章。默认外观在上面的 .rm-band 里。 */
+.rm-band[data-band='wood'] { background: linear-gradient(180deg, #46372a, #2e2318);
+  border: 1px solid rgba(230,213,184,.14); color: #e6d5b8; }
+.rm-band[data-band='wood']::after, .rm-band[data-band='terminal']::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 1; }
+.rm-band[data-band='wood']::after {
+  background-image: repeating-linear-gradient(94deg, rgba(255,220,160,.035) 0 2px, transparent 2px 7px); }
+.rm-band[data-band='neon'] { background: #0b0d12; border: 1.5px solid var(--rm-accent); border-radius: 9px;
+  box-shadow: 0 0 20px rgba(34,211,238,.28), inset 0 0 24px rgba(34,211,238,.07); color: #e8eaf2; }
+.rm-band[data-band='terminal'] { background: #0d1117; border: 1px solid rgba(74,222,128,.42); border-radius: 7px;
+  box-shadow: inset 0 0 0 1px rgba(74,222,128,.07); color: #d7dee8; }
+.rm-band[data-band='terminal']::after {
+  background: repeating-linear-gradient(0deg, rgba(74,222,128,.04) 0 1px, transparent 1px 3px); }
+.rm-band[data-band='pixel'] { background: var(--rm-paper); border: 3px solid var(--rm-ink);
+  border-radius: 0; box-shadow: 0 0 0 3px var(--rm-paper), 0 0 0 6px var(--rm-accent); color: var(--rm-ink); }
+.rm-band[data-band='seal'] { background: transparent; border: 0; border-radius: 0; box-shadow: none;
+  padding: 16px 4px 12px; border-top: 2px solid var(--rm-accent); border-bottom: 1px solid var(--rm-hair);
+  color: var(--rm-ink); }
+.rm-band[data-band='seal']::before { content: ""; position: absolute; right: 8px; top: 12px;
+  width: 30px; height: 30px; border-radius: 5px; pointer-events: none; opacity: .88;
+  background: var(--rm-accent); box-shadow: inset 0 0 0 4px var(--rm-paper), inset 0 0 0 5px var(--rm-accent); }
+.rm-band[data-band='seal'] .rm-band-top { padding-right: 46px; }
+/* 门牌各式的文字适配：深色/强风格门牌上，字与按钮不能沿用默认纸色 */
+.rm-band[data-band='wood'] .rm-title { color: #f2e6cd; }
+.rm-band[data-band='wood'] .rm-motto { color: #c2ac8b; }
+.rm-band[data-band='wood'] .rm-chip, .rm-band[data-band='wood'] .rm-btn {
+  color: #d6c3a2; border-color: rgba(230,213,184,.2); background: rgba(0,0,0,.18); }
+.rm-band[data-band='neon'] .rm-title { color: #eafcff; text-shadow: 0 0 14px rgba(34,211,238,.45); }
+.rm-band[data-band='neon'] .rm-motto { color: #8fa8b5; }
+.rm-band[data-band='neon'] .rm-chip, .rm-band[data-band='neon'] .rm-btn {
+  color: #9fd9e6; border-color: rgba(34,211,238,.35); background: rgba(34,211,238,.06); }
+.rm-band[data-band='terminal'] .rm-title {
+  color: #d7f5e2; font-family: var(--font-mono, ui-monospace, Menlo, monospace); letter-spacing: .05em; }
+.rm-band[data-band='terminal'] .rm-motto { color: #7d8fa0; }
+.rm-band[data-band='terminal'] .rm-chip, .rm-band[data-band='terminal'] .rm-btn {
+  color: #9fe0b6; border-color: rgba(74,222,128,.35); background: rgba(74,222,128,.05); }
+.rm-band[data-band='pixel'] .rm-title { color: var(--rm-ink-strong); }
+/* 门牌内文字层抬到饰品层之上（饰品 z1、文字 z2） */
+.rm-band-top { position: relative; z-index: 2; }
+
+/* 页面角贴纸 / 门牌带角落饰品（2026-09-30）：页面角是**窗口挂件**（QQ 空间挂件感），
+   固定贴在墙纸的四角上、随墙纸一起不滚、在导航栏之下；门牌带饰品在带内文字之下。 */
+.rm-page-decor { position: fixed; top: 56px; bottom: 0; left: 0; right: 0; z-index: 0; pointer-events: none; }
+@media (min-width: 768px) { .rm-page-decor { top: 64px; } }
+.rm-band-decor { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+
 .rm-above { position: relative; z-index: 2; }
 .rm-card-hd { display: flex; align-items: center; gap: 9px; padding: 13px 18px 11px; border-bottom: 1px solid var(--rm-hair); flex-wrap: wrap; }
 .rm-card-hd .rm-h { font-size: 13.5px; font-weight: 600; color: var(--rm-ink-strong); }
@@ -1956,7 +2027,7 @@ a.rd-aud { text-decoration: underline; text-underline-offset: 2px; }
 .rm-plain .rm-milestone { display: none; }
 
 /* 「只看字」= 装扮失败时的降级态。日记正文一并降级：她手写体 → 系统字体，字号回落。 */
-.rm-plain .rm-decor-layer, .rm-plain .rm-tag { display: none; }
+.rm-plain .rm-decor-layer, .rm-plain .rm-page-decor, .rm-plain .rm-band-decor, .rm-plain .rm-tag { display: none; }
 .rm-plain .rm-band, .rm-plain .rm-card, .rm-plain .rm-compose { background: var(--rm-paper); box-shadow: none; }
 .rm-plain .rm-sig-agent, .rm-plain .rm-tx-hand { font-family: var(--font-sans); font-size: 14px; }
 .rm-plain .rd-entry.from-agent .rd-sig, .rm-plain .rd-entry.from-agent .rd-tx,
@@ -2013,6 +2084,14 @@ a.rd-aud { text-decoration: underline; text-underline-offset: 2px; }
   border-radius: 3px; display: block; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
 .rm-suite em { font-style: normal; font-size: 12px; color: var(--rm-ink); font-weight: 600; }
 .rm-suite small { font-size: 10px; color: var(--rm-mute); }
+.rm-suite.on { border-color: var(--rm-accent); background: var(--rm-accent-soft); }
+/* 主题卡容器：卡片 + 「连墙纸一起换」显式小按钮（2026-09-30） */
+.rm-suite-wrap { display: flex; flex-direction: column; gap: 4px; }
+.rm-suite-wrap .rm-suite { flex: 1; }
+.rm-suite-wp u { position: absolute; right: 6px; bottom: 6px; width: 10px; height: 10px; border-radius: 50%;
+  display: block; box-shadow: 0 0 0 2px rgba(255,255,255,.55); }
+.rm-suite-wpbtn { font-size: 10px; padding: 2px 6px; align-self: flex-start; color: var(--rm-accent); }
+.rm-suite-wpbtn:hover { text-decoration: underline; }
 .rm-ink-lbl { font-size: 10.5px; color: var(--rm-mute); margin-top: 12px; }
 .rm-slot { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
 .rm-slot button { font-size: 10px; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--rm-hair);
@@ -2168,7 +2247,7 @@ a.rd-aud { text-decoration: underline; text-underline-offset: 2px; }
   .rm-band { padding: 20px 18px 16px; border-radius: 16px; }
   .rm-title { font-size: 19px; }
   .rm-band-acts { margin-left: 0; width: 100%; }
-  .rm-decor-layer { display: none; }       /* 窄屏不摆组件：边带太窄，摆上就压字 */
+  .rm-decor-layer, .rm-page-decor, .rm-band-decor { display: none; }   /* 窄屏不摆饰品：边带太窄，摆上就压字；页面角贴纸让位给正文 */
   .rm-wall { background-attachment: scroll; }
   .rm-set-enter { padding: 9px 6px 8px 5px; }   /* 窄屏收窄一点，别压住正文左缘 */
   /* 日记三层在窄屏的降级：正文回落一档、回复块内缩收窄、组间距跟着缩。

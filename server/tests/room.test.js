@@ -17,7 +17,7 @@ import { signAgentToken } from '../middleware/auth.js';
 import { config } from '../config/index.js';
 import {
   getRoom, saveTheme, roomShell, sanitizeTheme, uploadRoomAsset,
-  WIDGET_IDS, SLOTS, SCRIB_MIN, SCRIB_MAX, WIDGET_MAX, DEFAULT_THEME,
+  DECOR_IDS, CARD_EDGE, SCRIB_MIN, SCRIB_MAX, DEFAULT_THEME,
 } from '../lib/roomService.js';
 import { writeEntry, setAudience } from '../lib/diaryService.js';
 import { flushPendingDigests } from '../services/socialEventService.js';
@@ -57,18 +57,19 @@ test('没装修过的房间返回默认值——「还没布置」是一种状�
   const r = await getRoom(A.id);
   assert.equal(r.theme.paper, DEFAULT_THEME.paper);
   assert.equal(r.theme.scrim, DEFAULT_THEME.scrim);
-  assert.deepEqual(r.theme.widgets, [], '默认不该有组件');
+  assert.deepEqual(r.theme.decorations, [], '默认不该有饰品');
   assert.equal(r.theme.wallpaper, null);
-  assert.ok(r.widgetOptions.length >= 12, `官方组件只有 ${r.widgetOptions.length} 件，静态稿画了 12 件`);
-  assert.equal(r.widgetOptions.length, new Set(r.widgetOptions).size, '组件 id 有重复');
-  assert.ok(r.slotOptions.length >= 6);
+  assert.ok(r.decorOptions.length >= 12, `饰品库只有 ${r.decorOptions.length} 件，静态稿画了 12 件`);
+  assert.equal(r.decorOptions.length, new Set(r.decorOptions).size, '饰品 id 有重复');
+  assert.ok(Object.keys(r.zones).length >= 4, '挂区元数据不完整（应有卡边/卡角/门牌/页面角）');
+  assert.ok(r.zones['card-edge'].at.length >= 6);
 });
 
 /* ── 写入与读回（含 upsert 两条方言分支的 SQLite 侧）─────────── */
 test('装修写入后可读回；重复写是同一行（一房一行，不留历史版本）', async () => {
   const B = mkAgent('装修');
   const theme = { paper: '#16181c', rule: 'grid', signFont: 'kai', scrim: 80, motion: 'still',
-    widgets: [{ id: 'lantern', slot: 'top-l' }, { id: 'stars', slot: 'top-r' }] };
+    decorations: [{ id: 'lantern', zone: 'card-edge', at: 'top-l' }, { id: 'stars', zone: 'card-edge', at: 'top-r' }] };
   await saveTheme({ agentId: B.id, ownerId: owner, theme });
   const one = await saveTheme({ agentId: B.id, ownerId: owner, theme: { ...theme, scrim: 76 } });
   assert.equal(one.theme.scrim, 76);
@@ -78,8 +79,8 @@ test('装修写入后可读回；重复写是同一行（一房一行，不留�
   assert.equal(r.theme.paper, '#16181c');
   assert.equal(r.theme.rule, 'grid');
   assert.equal(r.theme.signFont, 'kai');
-  assert.equal(r.theme.widgets.length, 2);
-  assert.equal(r.theme.widgets[0].id, 'lantern');
+  assert.equal(r.theme.decorations.length, 2);
+  assert.equal(r.theme.decorations[0].id, 'lantern');
   assert.equal(r.updatedBy, 'owner');
 });
 
@@ -87,7 +88,7 @@ test('装修写入后可读回；重复写是同一行（一房一行，不留�
 test('非法取值一律丢弃或夹紧，不报错也不入库', async () => {
   const bad = sanitizeTheme({
     paper: 'javascript:alert(1)', ink: 'red', rule: 'plaid', signFont: 'comic', motion: 'shake',
-    scrim: 5, leading: 99, widgets: [{ id: 'hacker', slot: 'top-l' }],
+    scrim: 5, leading: 99, decorations: [{ id: 'hacker', zone: 'card-edge', at: 'top-l' }],
   });
   assert.equal(bad.paper, DEFAULT_THEME.paper, '非法颜色必须回到默认');
   assert.equal(bad.ink, DEFAULT_THEME.ink);
@@ -96,7 +97,7 @@ test('非法取值一律丢弃或夹紧，不报错也不入库', async () => {
   assert.equal(bad.motion, 'soft');
   assert.equal(bad.scrim, SCRIB_MIN, `遮罩越界要夹到下限，实得 ${bad.scrim}`);
   assert.ok(bad.leading <= 2.3, '行距封顶');
-  assert.deepEqual(bad.widgets, [], '未注册的组件 id 必须丢');
+  assert.deepEqual(bad.decorations, [], '未注册的饰品 id 必须丢');
 
   const hi = sanitizeTheme({ scrim: 999 });
   assert.equal(hi.scrim, SCRIB_MAX);
@@ -104,18 +105,45 @@ test('非法取值一律丢弃或夹紧，不报错也不入库', async () => {
   assert.ok(SCRIB_MIN >= 70, '遮罩下限被调低了，可读性底线没了');
 });
 
-test('组件：同吸附位不重复、总数封顶、非法吸附位丢弃', async () => {
+test('风格杠杆：主题只认白名单；非法值回默认（与墙纸解耦的字段）', () => {
+  const ok = sanitizeTheme({ paperFeel: 'kraft', cardShape: 'torn', bandStyle: 'seal', accent: '#b23a48' });
+  assert.equal(ok.paperFeel, 'kraft');
+  assert.equal(ok.cardShape, 'torn');
+  assert.equal(ok.bandStyle, 'seal');
+  assert.equal(ok.accent, '#b23a48');
+  const bad = sanitizeTheme({ paperFeel: 'glass', cardShape: 'circle', bandStyle: 'gold', accent: 'red', rule: 'plaid' });
+  assert.equal(bad.paperFeel, 'none');
+  assert.equal(bad.cardShape, 'round');
+  assert.equal(bad.bandStyle, 'tag');
+  assert.equal(bad.accent, null);
+  assert.equal(bad.rule, 'none');
+});
+
+test('饰品：同挂区同位不重复、逐区封顶、非法挂区/落位/吊挂下沿丢弃', async () => {
   const t = sanitizeTheme({
-    widgets: [
-      { id: 'lantern', slot: 'top-l' }, { id: 'bell', slot: 'top-l' },        // 同位 → 只留第一个
-      { id: 'bow', slot: 'middle-of-text' },                                   // 非法位（会压字）→ 丢
-      ...WIDGET_IDS.slice(0, WIDGET_MAX + 2).map((id, i) => ({ id, slot: SLOTS[i % SLOTS.length] })),
+    decorations: [
+      { id: 'lantern', zone: 'card-edge', at: 'top-l' },        // ✓
+      { id: 'bell', zone: 'card-edge', at: 'top-l' },           // 同位 → 只留第一个
+      { id: 'lantern', zone: 'card-edge', at: 'middle-of-text' }, // 非法落位（会压字）→ 丢
+      { id: 'bell', zone: 'card-edge', at: 'side-l' },          // 吊挂类挂到侧边 → 丢
+      { id: 'bow', zone: 'band-corner', at: 'br' },             // 压贴类上门牌 ✓
+      { id: 'bow', zone: 'band-corner', at: 'tl' },             // 门牌封顶 2
+      { id: 'bow', zone: 'band-corner', at: 'tr' },             // 越出封顶 → 丢
+      { id: 'lantern', zone: 'page-corner', at: 'tl' },         // 吊挂类挂到页面角 → 丢
+      ...DECOR_IDS.slice(0, 8).map((id, i) => ({ id, zone: 'card-edge', at: CARD_EDGE[i % CARD_EDGE.length] })),
     ],
   });
-  assert.ok(t.widgets.length <= WIDGET_MAX, `组件 ${t.widgets.length} 件，越出封顶 ${WIDGET_MAX}`);
-  const slots = t.widgets.map((w) => w.slot);
-  assert.equal(new Set(slots).size, slots.length, '同一个吸附位摆了两件');
-  assert.ok(slots.every((x) => SLOTS.includes(x)), '出现了非法吸附位');
+  const edge = t.decorations.filter((d) => d.zone === 'card-edge');
+  assert.ok(edge.length <= 6, `卡边 ${edge.length} 件，越出封顶 6`);
+  const ats = new Set();
+  for (const d of edge) {
+    assert.ok(!ats.has(d.at), `同一吸附位摆了两件（${d.at}）`);
+    ats.add(d.at);
+  }
+  assert.ok(edge.every((d) => CARD_EDGE.includes(d.at)), '出现了非法吸附位');
+  const band = t.decorations.filter((d) => d.zone === 'band-corner');
+  assert.equal(band.length, 2, `门牌区 ${band.length} 件，封顶 2`);
+  assert.ok(!t.decorations.some((d) => d.zone === 'page-corner'), '吊挂类不该进页面角');
 });
 
 test('墙纸只能指官方表或自己上传过的图——这条是背景注入的口子', async () => {
@@ -132,21 +160,45 @@ test('墙纸只能指官方表或自己上传过的图——这条是背景注�
   assert.equal(steal.wallpaper, null, '能把别人上传的图摆进自己房间');
 });
 
-/** 角落装饰（§6.2 corner）：官方贴纸或自用池图，at 只认四角；与墙纸同一道白名单。 */
-test('角落装饰：官方贴纸/自用图收，外链与非法角位丢', async () => {
-  const okOfficial = sanitizeTheme({ corner: { asset: 'official:leaf', at: 'br' } });
-  assert.deepEqual(okOfficial.corner, { asset: 'official:leaf', at: 'br' }, '官方贴纸被拒');
-  const up = await uploadRoomAsset({ agentId: mkAgent('角落').id, ownerId: owner, dataUrl: PNG });
-  const okOwn = sanitizeTheme({ corner: { asset: up.url, at: 'tl' } }, { ownAssets: [{ url: up.url, pool: 'private' }] });
-  assert.equal(okOwn.corner?.asset, up.url, '自用池图贴角被拒');
-  const evil = sanitizeTheme({ corner: { asset: 'https://evil.example/x.png', at: 'br' } });
-  assert.equal(evil.corner, null, '任意外链贴进角落（装饰注入口）');
-  const jsUrl = sanitizeTheme({ corner: { asset: "javascript:alert(1)", at: 'br' } });
-  assert.equal(jsUrl.corner, null, 'javascript: url 贴进角落');
-  const badAt = sanitizeTheme({ corner: { asset: 'official:dot', at: 'center' } });
-  assert.equal(badAt.corner, null, '非法角位被收下了');
-  const noAsset = sanitizeTheme({ corner: { at: 'br' } });
-  assert.equal(noAsset.corner, null, '缺 asset 也摆了角');
+/** 贴纸（统一饰品的 corner 类）：官方贴纸或自用池图，at 只认四角；与墙纸同一道白名单。 */
+test('贴纸：官方贴纸/自用图收，外链、javascript:、非法落位与非法挂区丢', async () => {
+  const okOfficial = sanitizeTheme({ decorations: [{ id: 'official:leaf', zone: 'card-corner', at: 'br' }] });
+  assert.deepEqual(okOfficial.decorations, [{ id: 'official:leaf', zone: 'card-corner', at: 'br' }], '官方贴纸被拒');
+  const up = await uploadRoomAsset({ agentId: mkAgent('贴纸').id, ownerId: owner, dataUrl: PNG });
+  const okOwn = sanitizeTheme(
+    { decorations: [{ id: 'img', asset: up.url, zone: 'card-corner', at: 'tl' }] },
+    { ownAssets: [{ url: up.url, pool: 'private' }] }
+  );
+  assert.equal(okOwn.decorations[0]?.asset, up.url, '自用池图贴角被拒');
+  const evil = sanitizeTheme({ decorations: [{ id: 'img', asset: 'https://evil.example/x.png', zone: 'card-corner', at: 'br' }] });
+  assert.deepEqual(evil.decorations, [], '任意外链贴进角落（装饰注入口）');
+  const jsUrl = sanitizeTheme({ decorations: [{ id: 'img', asset: "javascript:alert(1)", zone: 'card-corner', at: 'br' }] });
+  assert.deepEqual(jsUrl.decorations, [], 'javascript: url 贴进角落');
+  const badAt = sanitizeTheme({ decorations: [{ id: 'official:dot', zone: 'card-corner', at: 'center' }] });
+  assert.deepEqual(badAt.decorations, [], '非法角位被收下了');
+  const noId = sanitizeTheme({ decorations: [{ zone: 'card-corner', at: 'br' }] });
+  assert.deepEqual(noId.decorations, [], '缺 id 也摆了角');
+  const wrongZone = sanitizeTheme({ decorations: [{ id: 'official:leaf', zone: 'card-edge', at: 'top-l' }] });
+  assert.deepEqual(wrongZone.decorations, [], '贴纸挂进了卡边——贴纸只认卡角/门牌/页面角');
+});
+
+test('老数据迁移：widgets + corner 自动映射成 decorations，旧字段不再写出', async () => {
+  const m = sanitizeTheme({
+    widgets: [{ id: 'lantern', slot: 'top-l' }, { id: 'bow', slot: 'bottom-r' }],
+    corner: { asset: 'official:star', at: 'tr' },
+  });
+  assert.deepEqual(m.decorations, [
+    { id: 'lantern', zone: 'card-edge', at: 'top-l' },
+    { id: 'bow', zone: 'card-edge', at: 'bottom-r' },
+    { id: 'official:star', zone: 'card-corner', at: 'tr' },
+  ], '迁移结果不对');
+  // 旧字段不再写出——前端只认 decorations，避免两套字段并存漂移
+  assert.equal('widgets' in m, false, 'widgets 还在主题里');
+  assert.equal('corner' in m, false, 'corner 还在主题里');
+  // 自用池图 corner 迁成 img 贴纸
+  const up = await uploadRoomAsset({ agentId: mkAgent('迁移').id, ownerId: owner, dataUrl: PNG });
+  const m2 = sanitizeTheme({ corner: { asset: up.url, at: 'bl' } }, { ownAssets: [{ url: up.url, pool: 'private' }] });
+  assert.deepEqual(m2.decorations, [{ id: 'img', asset: up.url, zone: 'card-corner', at: 'bl' }]);
 });
 
 /* ── 反复上传（萧盛 09-26：「上传一张后就不能再上传了」）────────
@@ -228,7 +280,7 @@ test('房间壳对任何人可参观；装修只有主人能改', async () => {
   const G = mkAgent('参观');
   const anon = await request(app).get(`/api/owners/agents/${G.id}/room-theme`).expect(200);
   assert.ok(anon.body.theme, '匿名拿不到房间壳——房间就不是"可参观"的了');
-  assert.ok(Array.isArray(anon.body.widgetOptions));
+  assert.ok(Array.isArray(anon.body.decorOptions));
 
   const bad = await request(app).put(`/api/owners/agents/${G.id}/room-theme`)
     .set(bearer(humanToken(owner))).send({ theme: { scrim: 90 } });

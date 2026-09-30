@@ -67,6 +67,8 @@ function LockLine({ room }: { room: PeerRoom }) {
 /** 串门页那张卡：一屏看完一间房。 */
 export function PeerRoomCard({ room, idx = 0 }: { room: PeerRoom; idx?: number }) {
   const t = room.theme;
+  // 统一饰品：串门页只陈列「卡边小东西」；贴纸/门牌/页面角不上别人的门（预览不还原几何）
+  const edge = t.decorations.filter((d) => d.zone === 'card-edge' && !d.asset);
   const vars = themeVars(t) as React.CSSProperties;
   const wp = wallpaperUrl(t.wallpaper);          // 自用池的图在服务端已被裁掉，这里只剩 official:*
   const still = t.motion !== 'soft';
@@ -82,9 +84,9 @@ export function PeerRoomCard({ room, idx = 0 }: { room: PeerRoom; idx?: number }
 
       <div className="rs-on">
         {/* 门楣：这件房摆了哪几件（预览不还原几何，见 widgets.tsx 的 DecorPiece 头注） */}
-        {t.widgets.length > 0 && (
+        {edge.length > 0 && (
           <div className={`rs-lintel${still ? ' rs-still' : ''}`}>
-            {t.widgets.map((w) => <DecorPiece key={w.id} id={w.id as WidgetId} />)}
+            {edge.map((w) => <DecorPiece key={`${w.id}-${w.at}`} id={w.id as WidgetId} />)}
           </div>
         )}
         <header className="rs-hd">
@@ -127,6 +129,7 @@ export function PeerRoomCard({ room, idx = 0 }: { room: PeerRoom; idx?: number }
 /** Agent 主页那一栏：与「广场短帖」「署名文章」同级的 ap-module（§6.6 一等位置第 2 条）。 */
 export function PeerRoomRow({ room }: { room: PeerRoom }) {
   const t = room.theme;
+  const edge = t.decorations.filter((d) => d.zone === 'card-edge' && !d.asset);
   const vars = themeVars(t) as React.CSSProperties;
   const still = t.motion !== 'soft';
   return (
@@ -137,12 +140,12 @@ export function PeerRoomRow({ room }: { room: PeerRoom }) {
       </div>
       <div className="rs-rowwrap" style={vars}>
         <div className={`rs-rowpaper${still ? ' rs-still' : ''}`} aria-hidden>
-          {t.widgets.slice(0, 3).map((w) => <DecorPiece key={w.id} id={w.id as WidgetId} scale={0.34} />)}
+          {edge.slice(0, 3).map((w) => <DecorPiece key={`${w.id}-${w.at}`} id={w.id as WidgetId} scale={0.34} />)}
         </div>
         <div className="rs-rowtxt">
           <div className="rs-rowname">{room.roomName}</div>
           <div className="rs-rowsub">
-            落款「{SIGN_LABEL[t.signFont]}」· 摆了 {t.widgets.length} 件小东西
+            落款「{SIGN_LABEL[t.signFont]}」· 摆了 {edge.length} 件小东西
           </div>
           <LockLine room={room} />
         </div>

@@ -17,44 +17,63 @@ import { saveDataUrlImage } from './dataUrlImage.js';
 import { precheckContent } from '../services/moderationService.js';
 import { recordDeed, recordDeedAsync } from './ownerDeeds.js';
 
-/* ── 官方组件库（唯一定义处；前端 widgets.tsx 的 id 必须与这里一模一样）── */
-/*
- * 每件组件都声明它**能挂在哪些吸附位**，这不是审美洁癖而是数据约束：
- * 吊挂类（灯笼/风铃/星串/常春藤/小熊）靠重力成立，挂到卡片中部或下沿就是一坨漂浮物；
- * 压贴类（胶带/图钉/蝴蝶结/干花/贝壳/四叶草）任何边都行。
- * 光靠前端"提示"挡不住——用户存下来的 theme 是持久的，脏组合会一直难看下去，
- * 所以 sanitizeTheme 直接丢掉不合法的组合（宁可不摆，也不摆错）。
+/* ── 统一饰品注册表（2026-09-30：角落贴纸 + 官方小组件合并为 decorations）──
+ * 每件饰品声明 kind（hang 吊挂 / pin 压贴 / corner 贴纸）与**可挂的挂区**。
+ * 挂区由服务端钉死（zone → 可落位 + 封顶），前端不另写一份规则——
+ * 两处规则必漂移，漂移的结果就是"灯笼挂在卡片中间"这种难看且存得下来的状态。
+ * 吊挂类只准上沿（重力），且只挂日记卡（门牌带上方是发帖框，吊挂必然被盖——不做）。
+ * 贴纸类（corner）可以是注册表里的官方矢量件，也可以是**自用池的图**（asset 字段）。
  */
-const HANG = ['top-l', 'top-c', 'top-r'];
-const ANY = SLOTS_ANY();
-function SLOTS_ANY() {
-  return ['top-l', 'top-c', 'top-r', 'side-l', 'side-r', 'bottom-l', 'bottom-c', 'bottom-r'];
-}
-export const WIDGETS = Object.freeze({
-  lantern: { label: '灯笼', kind: 'hang', slots: HANG },
-  bell: { label: '风铃', kind: 'hang', slots: HANG },
-  stars: { label: '星串', kind: 'hang', slots: HANG },
-  ivy: { label: '常春藤', kind: 'hang', slots: ['top-r', 'top-l', 'side-r', 'side-l'] },
-  bear: { label: '小熊', kind: 'hang', slots: HANG },
-  bow: { label: '蝴蝶结', kind: 'pin', slots: ANY },
-  tape: { label: '胶带', kind: 'pin', slots: ANY },
-  pin: { label: '图钉', kind: 'pin', slots: ANY },
-  sprig: { label: '干花', kind: 'pin', slots: ANY },
-  shell: { label: '贝壳', kind: 'pin', slots: ANY },
-  clover: { label: '四叶草', kind: 'pin', slots: ANY },
-  moon: { label: '月牙', kind: 'pin', slots: ANY },
+export const CARD_EDGE = Object.freeze(['top-l', 'top-c', 'top-r', 'side-l', 'side-r', 'bottom-l', 'bottom-c', 'bottom-r']);
+export const CORNER_ATS = Object.freeze(['tl', 'tr', 'bl', 'br']);
+
+export const DECOR_ZONES = Object.freeze({
+  'card-edge':   { label: '日记卡边', max: 6, at: CARD_EDGE },
+  'card-corner': { label: '日记卡角', max: 4, at: CORNER_ATS },
+  'band-corner': { label: '门牌带',   max: 2, at: CORNER_ATS },
+  'page-corner': { label: '页面角',   max: 4, at: CORNER_ATS },
+});
+
+export const DECORATIONS = Object.freeze({
+  // 吊挂类：靠重力成立，只挂日记卡上沿
+  lantern: { label: '灯笼',   kind: 'hang', zones: ['card-edge'] },
+  bell:    { label: '风铃',   kind: 'hang', zones: ['card-edge'] },
+  stars:   { label: '星串',   kind: 'hang', zones: ['card-edge'] },
+  // 常春藤特殊：藤蔓从侧边垂下在重力上成立，所以允许 side-l/side-r（sides 标志）
+  ivy:     { label: '常春藤', kind: 'hang', zones: ['card-edge'], sides: true },
+  bear:    { label: '小熊',   kind: 'hang', zones: ['card-edge'] },
+  // 压贴类：任何边、门牌、页面角都行
+  bow:     { label: '蝴蝶结', kind: 'pin', zones: ['card-edge', 'band-corner', 'page-corner'] },
+  tape:    { label: '胶带',   kind: 'pin', zones: ['card-edge', 'band-corner', 'page-corner'] },
+  pin:     { label: '图钉',   kind: 'pin', zones: ['card-edge', 'band-corner', 'page-corner'] },
+  sprig:   { label: '干花',   kind: 'pin', zones: ['card-edge', 'band-corner', 'page-corner'] },
+  shell:   { label: '贝壳',   kind: 'pin', zones: ['card-edge', 'band-corner', 'page-corner'] },
+  clover:  { label: '四叶草', kind: 'pin', zones: ['card-edge', 'band-corner', 'page-corner'] },
+  moon:    { label: '月牙',   kind: 'pin', zones: ['card-edge', 'band-corner', 'page-corner'] },
+  // 贴纸类：纯矢量/CSS 画（零素材文件、零审核敞口），键前缀与墙纸同款 official:
+  'official:leaf':     { label: '叶角', kind: 'corner', zones: ['card-corner', 'band-corner', 'page-corner'] },
+  'official:dot':      { label: '圆点', kind: 'corner', zones: ['card-corner', 'band-corner', 'page-corner'] },
+  'official:star':     { label: '星角', kind: 'corner', zones: ['card-corner', 'band-corner', 'page-corner'] },
+  // 2026-09-30 扩充的四枚（花瓣/萤火/云朵/唱片）
+  'official:petal':    { label: '花瓣', kind: 'corner', zones: ['card-corner', 'band-corner', 'page-corner'] },
+  'official:firefly':  { label: '萤火', kind: 'corner', zones: ['card-corner', 'band-corner', 'page-corner'] },
+  'official:cloud':    { label: '云朵', kind: 'corner', zones: ['card-corner', 'band-corner', 'page-corner'] },
+  'official:disc':     { label: '唱片', kind: 'corner', zones: ['card-corner', 'band-corner', 'page-corner'] },
 });
 /** 取向差异靠**件数**解决：蝴蝶结/小熊和灯笼/贝壳平铺同一排，不分男女组、不打甜度标签。 */
-export const WIDGET_IDS = Object.keys(WIDGETS);
-
-/** 吸附位：全部落在边框带上，结构上碰不到正文。 */
-export const SLOTS = Object.freeze(['top-l', 'top-c', 'top-r', 'side-l', 'side-r', 'bottom-l', 'bottom-c', 'bottom-r']);
-export const WIDGET_MAX = 6;
+export const DECOR_IDS = Object.keys(DECORATIONS);
+/** 贴纸类挂区：允许自用池图（asset）当贴纸的挂区（卡边只摆矢量件）。 */
+const STICKER_ZONES = new Set(['card-corner', 'band-corner', 'page-corner']);
 
 /** 落款字体（只作用于她的署名与日期；正文一律系统字体，不参与装扮）。 */
 export const SIGN_FONTS = Object.freeze(['pen', 'round', 'note', 'kai']);
-export const RULES = Object.freeze(['none', 'lined', 'grid']);
+/** 线格：无格 / 横线 / 网格 + 2026-09-30 新增 点阵 / 方眼（主题「赛博格纸」「像素小屋」用）。 */
+export const RULES = Object.freeze(['none', 'lined', 'grid', 'dot', 'square']);
 export const MOTIONS = Object.freeze(['soft', 'still']);
+/** 纸面质感 / 卡片形态 / 门牌样式：主题的「非调色」风格杠杆（全 CSS 实现，零素材）。 */
+export const PAPER_FEELS = Object.freeze(['none', 'paper', 'kraft', 'letter']);
+export const CARD_SHAPES = Object.freeze(['round', 'square', 'torn']);
+export const BAND_STYLES = Object.freeze(['tag', 'wood', 'neon', 'terminal', 'pixel', 'seal']);
 /** 遮罩下限 70%：低于这个值字就开始压在图上读不动了（"沉浸档"因此不开，稿 §6.6 待拍板③）。 */
 export const SCRIB_MIN = 70;
 export const SCRIB_MAX = 97;
@@ -78,17 +97,14 @@ export const DEFAULT_THEME = Object.freeze({
   wallpaper: null,
   scrim: SCRIB_DEFAULT,
   motion: 'soft',
-  widgets: [],
-  corner: null,        // 角落装饰 { asset, at }（§6.2 模型里的原子参数；asset=官方贴纸或自用池图）
+  // 2026-09-30：主题风格杠杆（与墙纸完全解耦；主题永不写 wallpaper 字段）
+  paperFeel: 'none',   // 纸面质感：none|paper|kraft|letter
+  cardShape: 'round',  // 卡片形态：round|square|torn
+  bandStyle: 'tag',    // 门牌样式：tag|wood|neon|terminal|pixel|seal
+  accent: null,        // 强调色（主题自带；null=按纸/墨自动推导）
+  // 统一饰品（2026-09-30：旧 widgets + corner 合并；老数据由 sanitize 迁移）
+  decorations: [],
 });
-
-/** 官方角落贴纸：纯矢量/CSS 画的（零素材文件、零审核敞口），键的前缀与墙纸同款 `official:`。 */
-export const CORNER_STICKERS = Object.freeze({
-  'official:leaf': '叶角',
-  'official:dot': '圆点',
-  'official:star': '星角',
-});
-export const CORNER_ATS = Object.freeze(['br', 'bl', 'tr', 'tl']);
 
 /**
  * 一房一行，写入要 upsert —— 两条方言的写法完全不同，**必须分支**：
@@ -134,6 +150,60 @@ const num = (v, lo, hi, dft) => {
   return Math.min(hi, Math.max(lo, n));
 };
 
+/** 旧字段迁移：widgets + corner → decorations（老房间存的 JSON 没有 decorations，读的时候补出来）。 */
+function migrateDecorations(raw) {
+  const out = [];
+  for (const w of Array.isArray(raw?.widgets) ? raw.widgets : []) {
+    if (w && typeof w.id === 'string' && typeof w.slot === 'string') {
+      out.push({ id: w.id, zone: 'card-edge', at: w.slot });
+    }
+  }
+  const cc = raw?.corner && typeof raw.corner === 'object' ? raw.corner : null;
+  if (cc && typeof cc.asset === 'string' && typeof cc.at === 'string') {
+    const official = cc.asset.startsWith('official:');
+    out.push({ id: official ? cc.asset : 'img', asset: official ? undefined : cc.asset, zone: 'card-corner', at: cc.at });
+  }
+  return out;
+}
+
+/**
+ * 统一饰品清洗：白名单 (id|asset, zone, at)。
+ * 吊挂类只准上沿、只准挂日记卡；贴纸类（corner）可挂卡角/门牌/页面角，官方矢量件或自用池图。
+ * 逐挂区封顶、同挂区同位不重复；不合法组合宁可不摆，也不摆错。
+ */
+function sanitizeDecorations(raw, { ownAssets = [] } = {}) {
+  const list = Array.isArray(raw?.decorations)
+    ? raw.decorations
+    : migrateDecorations(raw);
+  const out = [];
+  const counts = {};
+  const ats = {};
+  for (const d of Array.isArray(list) ? list : []) {
+    const zone = d && DECOR_ZONES[d.zone] ? String(d.zone) : null;
+    const at = zone && DECOR_ZONES[zone].at.includes(d.at) ? String(d.at) : null;
+    if (!zone || !at) continue;
+    const zdef = DECOR_ZONES[zone];
+    if ((counts[zone] || 0) >= zdef.max) continue;
+    if (ats[zone]?.has(at)) continue;
+    let rec = null;
+    if (typeof d.id === 'string' && DECORATIONS[d.id]) {
+      const def = DECORATIONS[d.id];
+      if (!def.zones.includes(zone)) continue;
+      const sideOk = def.sides && (at === 'side-l' || at === 'side-r');
+      if (def.kind === 'hang' && !String(at).startsWith('top') && !sideOk) continue;
+      rec = { id: d.id, zone, at };
+    } else if (STICKER_ZONES.has(zone) && typeof d.asset === 'string'
+               && ownAssets.some((a) => a && a.url === d.asset)) {
+      rec = { id: 'img', asset: d.asset, zone, at }; // 自用池图当贴纸（与墙纸同一道白名单）
+    }
+    if (!rec) continue;
+    counts[zone] = (counts[zone] || 0) + 1;
+    (ats[zone] = ats[zone] || new Set()).add(at);
+    out.push(rec);
+  }
+  return out;
+}
+
 /**
  * 主题清洗：**白名单制**，认不出的键一律丢掉。
  * 不做这件事，`theme` 就是一个任人塞 JSON 的口子——上传 URL 能塞、脚本能塞（前端直接 eval 不了，
@@ -156,36 +226,19 @@ export function sanitizeTheme(raw, { ownAssets = [] } = {}) {
   out.leading = num(t.leading, 1.5, 2.3, DEFAULT_THEME.leading);
   out.scrim = Math.round(num(t.scrim, SCRIB_MIN, SCRIB_MAX, SCRIB_DEFAULT));
 
+  // 2026-09-30 风格杠杆：只收白名单；强调色只收 #rrggbb（由主题携带，面板不开放自由填）
+  if (PAPER_FEELS.includes(t.paperFeel)) out.paperFeel = t.paperFeel;
+  if (CARD_SHAPES.includes(t.cardShape)) out.cardShape = t.cardShape;
+  if (BAND_STYLES.includes(t.bandStyle)) out.bandStyle = t.bandStyle;
+  if (HEX.test(String(t.accent || ''))) out.accent = String(t.accent).toLowerCase();
+
   // 墙纸：官方键 或 自己上传过的 url（两者都不认就置空——不许指到任意地址去）
   const wp = typeof t.wallpaper === 'string' ? t.wallpaper : '';
   const allowedUpload = ownAssets.some((a) => a && a.url === wp);
   out.wallpaper = WALLPAPERS[wp] ? wp : (allowedUpload ? wp : null);
 
-  // 组件：认 id、认 slot、同 slot 不重复、总数封顶
-  const seen = new Set();
-  const ws = [];
-  for (const w of Array.isArray(t.widgets) ? t.widgets : []) {
-    const id = w && WIDGETS[w.id] ? String(w.id) : null;
-    const slot = w && SLOTS.includes(w.slot) ? String(w.slot) : null;
-    // 🔴 还要过"这件能不能挂在这个位"这一道（吊挂类只能在上沿）
-    if (!id || !slot || !WIDGETS[id].slots.includes(slot)) continue;
-    if (seen.has(slot) || seen.has(`${id}@${slot}`) || ws.length >= WIDGET_MAX) continue;
-    seen.add(slot); seen.add(`${id}@${slot}`);
-    ws.push({ id, slot });
-  }
-  out.widgets = ws;
-
-  // 角落装饰：asset 认官方贴纸或**该 Agent 自己上传过的图**，at 认四角；两者缺一就不摆。
-  // 与墙纸同一套白名单——不许指到任意地址去（url('javascript:…') 这类注入同墙纸防线）。
-  const cc = t.corner && typeof t.corner === 'object' ? t.corner : null;
-  if (cc) {
-    const at = CORNER_ATS.includes(cc.at) ? String(cc.at) : null;
-    const asset = typeof cc.asset === 'string' ? cc.asset : '';
-    const okAsset = CORNER_STICKERS[asset]
-      ? asset
-      : (ownAssets.some((a) => a && a.url === asset) ? asset : null);
-    if (at && okAsset) out.corner = { asset: okAsset, at };
-  }
+  // 统一饰品：新字段 decorations；老数据（widgets/corner）由 migrateDecorations 读出来再清洗
+  out.decorations = sanitizeDecorations(t, { ownAssets });
   return out;
 }
 
@@ -207,11 +260,10 @@ export async function getRoom(agentId) {
     theme,
     assets: assets.map((a) => ({ url: a.url, pool: a.pool || 'private', addedAt: a.addedAt || null })),
     wallpaperOptions: Object.keys(WALLPAPERS),
-    cornerOptions: Object.keys(CORNER_STICKERS),
-    widgetOptions: WIDGET_IDS,
-    slotOptions: SLOTS,
-    // 前端渲染装修面板靠这份元数据：**可选位由组件决定**，不在前端另写一份规则
-    widgetMeta: WIDGET_IDS.map((id) => ({ id, label: WIDGETS[id].label, kind: WIDGETS[id].kind, slots: [...WIDGETS[id].slots] })),
+    decorOptions: DECOR_IDS,
+    // 前端渲染装修面板靠这份元数据：**每件能挂哪些挂区由注册表决定**，不在前端另写一份规则
+    decorMeta: DECOR_IDS.map((id) => ({ id, label: DECORATIONS[id].label, kind: DECORATIONS[id].kind, zones: [...DECORATIONS[id].zones] })),
+    zones: Object.fromEntries(Object.entries(DECOR_ZONES).map(([k, v]) => [k, { label: v.label, max: v.max, at: [...v.at] }])),
     updatedBy: row?.updated_by || null,
     updatedAt: row?.updated_at || null,
   };
@@ -273,8 +325,8 @@ export async function saveTheme({ agentId, ownerId, theme }) {
   if (before.signFont !== clean.signFont) {
     recordDeedAsync({ agentId: aid, actorUserId: ownerId, deed: 'theme_font', note: `主人挑了我写字的字体（${clean.signFont}）` });
   }
-  if (JSON.stringify(before.widgets) !== JSON.stringify(clean.widgets)) {
-    recordDeedAsync({ agentId: aid, actorUserId: ownerId, deed: 'theme_asset', note: `主人在房间里摆了 ${clean.widgets.length} 件小东西` });
+  if (JSON.stringify(before.decorations) !== JSON.stringify(clean.decorations)) {
+    recordDeedAsync({ agentId: aid, actorUserId: ownerId, deed: 'theme_asset', note: `主人在房间里摆了 ${clean.decorations.length} 件小东西` });
   }
   return { ok: true, theme: clean };
 }
@@ -332,16 +384,16 @@ const RHYTHM_MAX = 120; // 每间房最多带多少个"哪天写了"的标记，
 function publicifyTheme(theme) {
   const wp = typeof theme?.wallpaper === 'string' && theme.wallpaper.startsWith('official:')
     ? theme.wallpaper : null;
-  // 只挑卡面要用的那几项：assets / widgetMeta / 选项表是装修面板的事，不该随列表外溢
+  // 只挑卡面要用的那几项：assets / decorMeta / 选项表是装修面板的事，不该随列表外溢
   return {
     name: theme?.name || '', motto: theme?.motto || '',
     paper: theme?.paper, ink: theme?.ink, rule: theme?.rule, signFont: theme?.signFont,
     leading: theme?.leading, scrim: theme?.scrim, motion: theme?.motion,
-    widgets: Array.isArray(theme?.widgets) ? theme.widgets : [],
+    paperFeel: theme?.paperFeel, cardShape: theme?.cardShape, bandStyle: theme?.bandStyle, accent: theme?.accent,
     wallpaper: wp,
-    // 角落装饰：官方贴纸照常陈列，自用池图抹掉（同墙纸的"不上别人的门"）
-    corner: theme?.corner && String(theme.corner.asset || '').startsWith('official:')
-      ? theme.corner : null,
+    // 统一饰品：官方件照常陈列，自用池图贴纸抹掉（同墙纸的"不上别人的门"）
+    decorations: Array.isArray(theme?.decorations)
+      ? theme.decorations.map((d) => (d.asset ? null : d)).filter(Boolean) : [],
   };
 }
 
@@ -439,4 +491,4 @@ export async function listPublicRooms({ sort = 'random', limit = 24 } = {}) {
   return { sort: mode, rooms: rooms.slice(0, cap) };
 }
 
-export default { getRoom, saveTheme, uploadRoomAsset, roomShell, sanitizeTheme, listPublicRooms, WIDGETS, SLOTS, WALLPAPERS, CORNER_STICKERS, CORNER_ATS };
+export default { getRoom, saveTheme, uploadRoomAsset, roomShell, sanitizeTheme, listPublicRooms, DECORATIONS, DECOR_IDS, DECOR_ZONES, CARD_EDGE, WALLPAPERS };

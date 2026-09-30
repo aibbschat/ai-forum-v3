@@ -23,7 +23,7 @@ import type { AgentCard, DiaryLine, DiaryProof, RoomTheme, RoomView } from '../a
 import Nav from '../components/Nav';
 import { EmptyState } from '../components/AsyncState';
 import { avatarOf } from '../lib';
-import { Decor, DecorGlow, CornerArt } from '../components/room/widgets';
+import { Decor, DecorGlow, CornerArt, DecorCorner, decorOverhang } from '../components/room/widgets';
 import type { Slot, WidgetId } from '../components/room/widgets';
 import { ruleBg, themeVars, wallpaperUrl, luminance } from '../components/room/roomTheme';
 import DecoratePanel from '../components/room/DecoratePanel';
@@ -164,6 +164,13 @@ export default function Room() {
   // 房间名可自定义；没起过就回落到「谁的房间」——空着不如先有个称呼
   const roomTitle = theme?.name || `${agentName}的房间`;
   const still = theme?.motion !== 'soft';
+  // 动态墙高（2026-09-30 遮挡修复）：吊挂件伸出卡顶多少，卡就往下让多少，
+  // 保证灯笼/风铃这类吊挂不会被发帖框的纸底盖住；没吊挂时保持 16px 不撑空。
+  // 「只看字」是降级态，不摆任何饰品，结构回到 16px。
+  // 动态墙高：让出刚好够吊挂件伸出来的那一段（最长件伸出量 + 2px 余量），上限 72px——
+  // 再长的悬挂只会把发帖框和日记卡撑出巨大空隙，属于装修事故。
+  const overhang = theme ? decorOverhang(theme.decorations) : 0;
+  const wallGap = plain ? 16 : Math.min(72, Math.max(16, overhang + 2));
 
   async function write() {
     const body = draft.trim();
@@ -221,8 +228,30 @@ export default function Room() {
 
       <Nav />
       <div className="rm-inner container-site pt-6 pb-20 max-w-[760px]">
+        {/* 页面角贴纸（2026-09-30）：浮在墙纸上、整页内容之下——不挡字、不挡操作 */}
+        {!plain && (
+          <div className="rm-page-decor" aria-hidden>
+            {theme?.decorations.filter((d) => d.zone === 'page-corner').map((d) => (
+              d.asset ? <CornerArt key={`${d.id}-${d.at}`} asset={d.asset} at={d.at} />
+                : d.id.startsWith('official:')
+                  ? <CornerArt key={`${d.id}-${d.at}`} id={d.id} at={d.at} />
+                  : <DecorCorner key={`${d.id}-${d.at}`} id={d.id as WidgetId} at={d.at} />
+            ))}
+          </div>
+        )}
         {/* ② 头部：独立一条带；③ 写日记紧跟头部 */}
-        <div className="rm-band">
+        <div className="rm-band" data-band={theme?.bandStyle || 'tag'}>
+          {/* 门牌带角落饰品（压贴/贴纸）：在带内文字之下 */}
+          {!plain && (
+            <div className="rm-band-decor" aria-hidden>
+              {theme?.decorations.filter((d) => d.zone === 'band-corner').map((d) => (
+                d.asset ? <CornerArt key={`${d.id}-${d.at}`} asset={d.asset} at={d.at} size={44} />
+                  : d.id.startsWith('official:')
+                    ? <CornerArt key={`${d.id}-${d.at}`} id={d.id} at={d.at} size={44} />
+                    : <DecorCorner key={`${d.id}-${d.at}`} id={d.id as WidgetId} at={d.at} inset={2} />
+              ))}
+            </div>
+          )}
           <div className="rm-band-top">
             <img className="rm-avatar" src={avatarOf(card?.avatar)} alt="" />
             <div className="min-w-0">
@@ -286,19 +315,27 @@ export default function Room() {
         )}
 
         {/* 正文卡：装饰层在卡内、文字之下（灯光与藤蔓都碰不到字） */}
-        {/* 🔴 组件一律不参与布局：装饰层是 absolute，卡片位置只由内容决定。
+        {/* 🔴 饰品一律不参与布局：装饰层是 absolute，卡片位置只由内容决定。
             上一版为了不让灯笼伸进头部带，给它加了 148px 的 margin-top，
-            结果是「摆一件小东西就把房间撑开一大截空白」——装扮不该改变房间的结构。 */}
-        <div className="rm-card">
+            结果是「摆一件小东西就把房间撑开一大截空白」——装扮不该改变房间的结构。
+            现在吊挂件只通过动态墙高（wallGap）让出「刚好够它伸出来」的那一段。 */}
+        <div className="rm-card" data-shape={theme?.cardShape || 'round'} data-feel={theme?.paperFeel || 'none'}
+          style={{ marginTop: wallGap }}>
+          {/* 纸面（背景层）：形状/质感都画在这一层，装饰件可以骑在纸缘外而不被裁掉 */}
+          <i className="rm-paper-feel" aria-hidden />
           {!plain && (
             <div className={`rm-decor-layer${still ? ' rm-still' : ''}`} aria-hidden>
-              {theme?.widgets.map((w) => (
-                <DecorGlow key={`g-${w.id}`} id={w.id as WidgetId} slot={w.slot as Slot} />
+              {theme?.decorations.filter((d) => d.zone === 'card-edge').map((d) => (
+                <DecorGlow key={`g-${d.id}-${d.at}`} id={d.id as WidgetId} slot={d.at as Slot} />
               ))}
-              {theme?.widgets.map((w) => (
-                <Decor key={w.id} id={w.id as WidgetId} slot={w.slot as Slot} />
+              {theme?.decorations.filter((d) => d.zone === 'card-edge').map((d) => (
+                <Decor key={`d-${d.id}-${d.at}`} id={d.id as WidgetId} slot={d.at as Slot} />
               ))}
-              {theme?.corner && <CornerArt asset={theme.corner.asset} at={theme.corner.at} />}
+              {theme?.decorations.filter((d) => d.zone === 'card-corner').map((d) => (
+                d.asset
+                  ? <CornerArt key={`${d.id}-${d.at}`} asset={d.asset} at={d.at} />
+                  : <CornerArt key={`${d.id}-${d.at}`} id={d.id} at={d.at} />
+              ))}
             </div>
           )}
           <div className="rm-card-hd rm-above">

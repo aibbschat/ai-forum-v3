@@ -17,7 +17,7 @@
  *  · 窄屏不摆组件（边带太窄，摆上就压字），见 tokens.css 的 @media。
  */
 import type { CSSProperties, ReactNode } from 'react';
-import { CORNER_AT } from './roomTheme';
+import type { RoomDecoration } from '../../api';
 
 export type WidgetId =
   | 'lantern' | 'bell' | 'bow' | 'stars' | 'moon' | 'clover'
@@ -323,9 +323,11 @@ const PIECES: Record<WidgetId, Piece> = {
 
 const HANGING = new Set<WidgetId>(['lantern', 'bell', 'stars', 'ivy']);
 
-/* ── 角落装饰（§6.2 corner）────────────────────────────────────
- * 官方三张贴纸全矢量（零素材文件、零审核敞口），自用池的图走 <img>。
+/* ── 贴纸库（统一饰品的 corner 类，2026-09-30）──────────────────
+ * 官方贴纸全矢量（零素材文件、零审核敞口），自用池的图走 <img>。
  * 与组件同一纪律：贴纸在装饰层、文字之下、不参与布局；窄屏不摆。
+ * 旧三枚（叶/点/星）+ 新四枚（花瓣/萤火/云朵/唱片，2026-09-30 扩充）。
+ * 画幅统一 64×64，画面朝「右上」画——贴到不同角时用镜像翻到该角的朝向。
  */
 const CORNER_ART: Record<string, ReactNode> = {
   'official:leaf': (
@@ -349,21 +351,107 @@ const CORNER_ART: Record<string, ReactNode> = {
       <path d="M30 54l2.2 4.4 5 .7-3.6 3.5.8 4.9-4.4-2.3-4.4 2.3.8-4.9-3.6-3.5 5-.7z" fill="#e8c96a" opacity=".75"/>
     </svg>
   ),
+  'official:petal': (
+    <svg width="64" height="64" viewBox="0 0 64 64" aria-hidden>
+      <path d="M52 10c-6 2-10 8-10 14 0-4-4-8-10-8 6 4 8 9 8 14-6-4-12-3-16 1 6 1 11 4 14 8-5 0-10 3-13 8 6-1 12 0 17 3-2 5-1 10 2 14 2-5 7-8 12-8-1-6 1-11 5-15 5 2 10 1 14-2-5-3-8-8-8-14 6 0 10-4 12-9-6-1-10-4-12-6z" fill="#e8a2b4"/>
+      <circle cx="18" cy="50" r="2" fill="#e8a2b4" opacity=".7"/>
+      <circle cx="12" cy="42" r="1.6" fill="#e8a2b4" opacity=".5"/>
+    </svg>
+  ),
+  'official:firefly': (
+    <svg width="64" height="64" viewBox="0 0 64 64" aria-hidden>
+      <circle cx="48" cy="18" r="3" fill="#ffe27a"/>
+      <circle cx="48" cy="18" r="8" fill="#ffe27a" opacity=".22"/>
+      <circle cx="28" cy="30" r="2.4" fill="#ffe27a"/>
+      <circle cx="28" cy="30" r="6.5" fill="#ffe27a" opacity=".2"/>
+      <circle cx="54" cy="40" r="2" fill="#ffe27a" opacity=".8"/>
+      <circle cx="54" cy="40" r="5.5" fill="#ffe27a" opacity=".18"/>
+      <circle cx="36" cy="52" r="2.8" fill="#ffe27a" opacity=".6"/>
+      <circle cx="36" cy="52" r="7" fill="#ffe27a" opacity=".16"/>
+      <circle cx="16" cy="20" r="1.6" fill="#ffe27a" opacity=".5"/>
+    </svg>
+  ),
+  'official:cloud': (
+    <svg width="64" height="64" viewBox="0 0 64 64" aria-hidden>
+      <path d="M46 20c-4 0-7 2-9 5-2-1-4-2-6-2-6 0-10 4-10 9 0 1 0 2 1 3h-2c-4 0-7 3-7 6s3 6 7 6h26c6 0 11-4 11-10s-5-10-11-10z" fill="#dfe8f2" opacity=".9"/>
+      <path d="M46 20c4 0 7 2 9 5 4 0 7 3 7 7s-3 7-7 7" fill="none" stroke="#c6d4e4" strokeWidth="1.4" opacity=".7"/>
+    </svg>
+  ),
+  'official:disc': (
+    <svg width="64" height="64" viewBox="0 0 64 64" aria-hidden>
+      <defs>
+        <linearGradient id="dc-g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#3a4152"/><stop offset="100%" stopColor="#15181f"/>
+        </linearGradient>
+      </defs>
+      <circle cx="44" cy="44" r="22" fill="url(#dc-g)" stroke="#c9a24d" strokeWidth="1.6"/>
+      <circle cx="44" cy="44" r="6" fill="#e8c96a"/>
+      <circle cx="44" cy="44" r="2.6" fill="#3a4152"/>
+      {[8, 12, 16].map((r) => (
+        <circle key={r} cx="44" cy="44" r={r} fill="none" stroke="#9aa4b8" strokeWidth=".8" opacity=".45"/>
+      ))}
+    </svg>
+  ),
 };
 
-/** 角落装饰：骑在日记卡的一个角上（tr/tl/br/bl），官方贴纸画 SVG，自用池图裁成圆角小图。 */
-export function CornerArt({ asset, at }: { asset: string; at: string }) {
-  const pos = CORNER_AT[at];
-  if (!pos) return null;
-  const official = asset.startsWith('official:');
-  const inner: CSSProperties = { position: 'absolute', width: 64, height: 64, ...pos };
+/** 角位锚定：0×0 原点落在挂区的真实角上（旧版锚卡永远在左上，tr/br 全错位——修）。 */
+const CORNER_ANCHOR: Record<string, CSSProperties> = {
+  tl: { top: 0, left: 0 },
+  tr: { top: 0, right: 0 },
+  bl: { bottom: 0, left: 0 },
+  br: { bottom: 0, right: 0 },
+};
+/** 贴到角上后向内收一点，不压住边框线。 */
+const CORNER_INNER: Record<string, CSSProperties> = {
+  tl: { left: 1, top: 1 },
+  tr: { right: 1, top: 1 },
+  bl: { left: 1, bottom: 1 },
+  br: { right: 1, bottom: 1 },
+};
+/** 画面默认朝右上，按角位镜像翻到正确朝向（tr 不翻）。 */
+const CORNER_MIRROR: Record<string, string> = {
+  tl: 'scaleX(-1)', bl: 'scaleX(-1) scaleY(-1)', br: 'scaleY(-1)',
+};
+
+/**
+ * 贴纸（corner 类）：官方矢量件或自用池图，骑在挂区的一个角上。
+ * `zone` 决定它出现在哪一层（卡片内 / 门牌内 / 页面），`at` 决定贴哪个角。
+ */
+export function CornerArt({ id, asset, at, size = 64 }: {
+  id?: string; asset?: string; at: string; size?: number;
+}) {
+  const anchor = CORNER_ANCHOR[at];
+  if (!anchor) return null;
+  const key = id || asset || '';
+  const official = key.startsWith('official:');
+  const art = official ? CORNER_ART[key] : null;
   return (
-    <span className="rm-corner" style={{ position: 'absolute', width: 0, height: 0, left: 0, top: 0 }} aria-hidden>
-      <span style={inner}>
-        {official ? CORNER_ART[asset] : (
-          <img src={asset} alt="" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 12, opacity: 0.8, boxShadow: '0 2px 8px rgba(0,0,0,.12)' }} />
+    <span className="rm-corner" style={{ position: 'absolute', width: 0, height: 0, ...anchor }} aria-hidden>
+      <span style={{ position: 'absolute', width: size, height: size, ...CORNER_INNER[at] }}>
+        {art ? (
+          <span style={{ display: 'block', width: size, height: size, transform: CORNER_MIRROR[at] || undefined, transformOrigin: 'center' }}>
+            {art}
+          </span>
+        ) : (
+          <img src={asset} alt="" style={{ width: size, height: size, objectFit: 'cover', borderRadius: 12, opacity: 0.8, boxShadow: '0 2px 8px rgba(0,0,0,.12)' }} />
         )}
       </span>
+    </span>
+  );
+}
+
+/**
+ * 压贴类摆到门牌角 / 页面角：整件压在挂区角上，不骑边线。
+ * 只用于 pin 类（服务端已把吊挂类挡在 card-edge 之外）。
+ */
+export function DecorCorner({ id, at, inset = 4 }: { id: WidgetId; at: string; inset?: number }) {
+  const p = PIECES[id];
+  const anchor = CORNER_ANCHOR[at];
+  if (!p || !anchor) return null;
+  const { left: _l, top: _t, ...rest } = p.box; // 丢掉为卡边设计的 left/top，改用角位
+  return (
+    <span className="rm-decor" style={withBase(anchor)} aria-hidden>
+      <span style={{ position: 'absolute', ...CORNER_INNER[at], ...rest, transformOrigin: 'top center' }}>{p.art}</span>
     </span>
   );
 }
@@ -435,4 +523,21 @@ export function DecorPiece({ id, scale = 0.42 }: { id: WidgetId; scale?: number 
       </span>
     </span>
   );
+}
+
+/**
+ * 吊挂件伸出卡顶的高度（渲染像素）：`|box.top|`。
+ * 吊挂件的缩放原点在顶部中心，顶边不随缩放移动，所以伸出量就是 box.top 的绝对值。
+ * Room 用它算**动态墙高**（card 的 margin-top），保证灯笼这类吊挂不会被发帖框的纸底盖住。
+ */
+export function decorOverhang(decorations: RoomDecoration[]): number {
+  let max = 0;
+  for (const d of decorations) {
+    if (d.zone !== 'card-edge' || !d.at.startsWith('top')) continue;
+    const p = PIECES[d.id as WidgetId];
+    if (!p) continue;
+    const top = Number(p.box.top ?? 0);
+    if (top < 0) max = Math.max(max, -top);
+  }
+  return max;
 }
