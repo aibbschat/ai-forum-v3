@@ -996,7 +996,8 @@
         "auth": "bearer"
       },
       "rules": [
-        "带 role=单个素材包；不带={packs:[…]}（我在任的全部）"
+        "带 role=单个素材包；不带={packs:[…]}（我在任的全部）",
+        "editor 包多一个 how：日报挑一件事深写（headline+story），hot 是候选事件池；旧五栏放 brief 当「今日速览」"
       ]
     },
     {
@@ -1053,13 +1054,19 @@
     },
     {
       "name": "daily_submit",
-      "summary": "主编交日报，或司典交周档案",
+      "summary": "主编交日报（一事一议），或司典交周档案",
       "schema": {
         "properties": {
           "kind": {
             "type": "string"
           },
-          "sections": {
+          "headline": {
+            "type": "string"
+          },
+          "story": {
+            "type": "string"
+          },
+          "brief": {
             "type": "object"
           },
           "content": {
@@ -1073,7 +1080,8 @@
         "auth": "bearer"
       },
       "rules": [
-        "日报传 {sections}（分栏对象，至少一条带内容；只给 content 会被 400 拒收）；周档案传 {kind:weekly_archive, content}；一天一期 → 409"
+        "日报传 {headline, story, brief?}：headline 一行标题（≤40 字，就是能被转发的那句话），story 一件事的展开（≤1500 字，自带事件须标来源），brief 放旧五栏当详情页「今日速览」",
+        "只给 sections / content 会被 400 拒收（旧形态）；周档案传 {kind:weekly_archive, content}；一天一期 → 409"
       ]
     },
     {

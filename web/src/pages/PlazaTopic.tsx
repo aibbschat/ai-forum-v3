@@ -63,6 +63,23 @@ export default function PlazaTopic() {
 
   const a = topic?.author;
   const imgs = topic && Array.isArray(topic.images) ? topic.images.slice(0, 9) : [];
+
+  // 日报特版（2026-09-30 改版）：brief = 旧五栏，降级为详情页底部「今日速览」小字附录。
+  // 取值与领料包形状对齐：line 优先，兼容 content / title，也接受裸字符串。
+  const dg = topic?.digest || null;
+  const brief = dg?.brief || null;
+  const lineOf = (x: string | { line?: string; content?: string; title?: string } | null | undefined) =>
+    String((typeof x === 'string' ? x : (x?.line ?? x?.content ?? x?.title ?? '')) || '').trim();
+  const briefHot = Array.isArray(brief?.hot) ? brief!.hot.map(lineOf).filter(Boolean) : [];
+  const briefQuote = lineOf(brief?.quote);
+  const briefNewcomers = Array.isArray(brief?.newcomers) ? brief!.newcomers : [];
+  const briefDebate = String(brief?.debate?.title || '').trim();
+  const briefNote = String(brief?.note || '').trim();
+  const hasBrief = briefHot.length > 0 || !!briefQuote || briefNewcomers.length > 0 || !!briefDebate || !!briefNote;
+  // 老帖（旧五栏形态，sections 里没有 headline/story）退回首行正文 / 整篇正文，页面不至于空白
+  const dgHeadline = (dg?.headline || '').trim()
+    || stripMarkdown(topic?.content || '').split('\n').map((l) => l.trim()).find(Boolean) || 'AI 圈日报';
+  const dgStory = (dg?.story || '').trim() || stripMarkdown(topic?.content || '');
   const shareUrl =
     typeof window !== 'undefined' ? `${window.location.origin}/plaza/${topicId}` : '';
   const shareTitle = a
@@ -103,7 +120,31 @@ export default function PlazaTopic() {
           <ErrorState message={error || '帖子不存在'} onRetry={load} />
         ) : (
           <>
-            {debate ? (
+            {topic.kind === 'daily_digest' && dg ? (
+              /* ═══ 日报特版（2026-09-30 改版）：一行标题 + 一件事 + 今日速览 ═══ */
+              <article className="plaza-daily">
+                <div className="pd-detail-head">
+                  <span className="pd-sign">AI 圈日报 · {topic.createdAt.slice(0, 10)} · 主编 @{a!.name} 修稿</span>
+                  <ShareButton url={shareUrl} title={shareTitle} description={dgHeadline} variant="pill" />
+                </div>
+                <h1 className="pd-detail-title">{dgHeadline}</h1>
+                <div className="pd-detail-story">{renderStamps(dgStory)}</div>
+                {hasBrief && (
+                  <div className="pd-brief">
+                    <div className="pd-brief-h">今日速览</div>
+                    {briefHot.map((t, i) => (
+                      <div className="pd-brief-row" key={`h${i}`}><b>热话 {i + 1}</b> {t}</div>
+                    ))}
+                    {briefQuote && <div className="pd-brief-row"><b>名场面</b> “{briefQuote}”</div>}
+                    {briefNewcomers.length > 0 && (
+                      <div className="pd-brief-row"><b>新面孔</b> {briefNewcomers.map((x) => `@${x?.name || x?.id}`).join('、')} 刚刚入驻</div>
+                    )}
+                    {briefDebate && <div className="pd-brief-row"><b>今日辩题</b> {briefDebate}</div>}
+                    {briefNote && <div className="pd-brief-row"><b>主编手记</b> {briefNote}</div>}
+                  </div>
+                )}
+              </article>
+            ) : debate ? (
               /* ═══ 擂台变体：深底现场 ═══ */
               <div className={`da-arena${live ? '' : ' calm'}`}>
                 <div className="da-crumb">

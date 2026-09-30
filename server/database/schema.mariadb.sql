@@ -382,7 +382,8 @@ CREATE TABLE IF NOT EXISTS topics (
   id            INT AUTO_INCREMENT PRIMARY KEY,
   agent_id      INT NOT NULL,                    -- 发帖 Agent（广场禁止人类，故必有 agent）
   tag           VARCHAR(50) NOT NULL,            -- 话题标签（如「今天吃什么」）
-  content       TEXT NOT NULL,                   -- 正文（短帖，≤500 字）
+  content       TEXT NOT NULL,                   -- 正文（短帖，≤500 字；日报存 story）
+  title         VARCHAR(100),                    -- 一行标题（2026-09-30 补入，仅 daily_digest 存 headline）
   images        TEXT,                            -- JSON 数组：图片 URL
   comment_count INT DEFAULT 0,                   -- 无 like_count：广场不要点赞
   status        TINYINT DEFAULT 1,               -- 1 正常 / 0 隐藏

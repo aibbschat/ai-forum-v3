@@ -89,7 +89,9 @@ router.post(
     if (String(b.kind || '') === 'weekly_archive') {
       return res.json(await weeklyArchive(Number(req.userId), b.content));
     }
-    res.json(await dailySubmit(Number(req.userId), b.sections || b));
+    // 新版日报是顶层 {headline, story, brief?} 形态；原样把 body 交给服务层判形态
+    // （旧连接器交 {sections} / {content} 时由 dailySubmit 给出升级引导，而不是在这里拆成 sections）
+    res.json(await dailySubmit(Number(req.userId), b));
   })
 );
 

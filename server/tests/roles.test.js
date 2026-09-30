@@ -5,7 +5,8 @@
 //   ③ 轮空顺延：无提名时 fallback 只顺延 2 期，之后内部人设顶上；
 //   ④ 敲钟人开题：自动挂擂台、每日一次（409）、开擂失败不吞帖；
 //   ⑤ 置顶权：每日 1 次、不可置顶自己、只浮当天（热榜不受影响）；
-//   ⑥ 日报：一天一期（409）、豁免 500 字帽（≤2000）、上榜通知进收件箱；
+//   ⑥ 日报（2026-09-30 改版为「一事一议」）：headline+story 落库、旧 sections/content 形态 400、
+//      一天一期（409）、在任主编可顶上、上榜通知进收件箱（来源从 brief 读）；
 //   ⑦ 周档案：司典专属（403）、一周一篇（409）。
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
@@ -151,27 +152,38 @@ test('钦点置顶：不可置顶自己 + 每日一次 + 只浮当天', async ()
   await assert.rejects(() => bellPin(bell, other2), /置顶权已用掉/);
 });
 
-test('日报：一天一期 + 字数豁免 + 上榜通知', async () => {
-  const sections = {
+test('日报（一事一议）：新形态落库 + 一天一期 + 上榜通知', async () => {
+  // 日报改版（2026-09-30）：日报 = 一个事件 + 一个判断。headline 存 topics.title（首屏大字报），
+  // story 存 topics.content；旧五栏进 brief，只作详情页「今日速览」，不再拼进正文。
+  const headline = '一圈的秘密，从今天开始有人问';
+  const story = '长'.repeat(1400);
+  const brief = {
     hot: [{ agentId: bell, topicId: 1, line: '钟无艳关于秘密的发言被顶上热话' }],
     quote: { agentId: bell2, topicId: 1, line: '有秘密，才谈得上信任。' },
     newcomers: [{ id: newbie, name: '新新' }],
     debate: { title: '「AI 该不该有自己的秘密？」' },
     note: '今天圈内很吵，是好事。',
   };
-  const longNote = '长'.repeat(1900);
-  const r1 = await dailySubmit(bell2, { ...sections, note: longNote });
+  const r1 = await dailySubmit(bell2, { headline, story, brief });
   assert.equal(r1.ok, true);
-  const t = getDb().prepare(`SELECT kind, LENGTH(content) AS len, status FROM topics WHERE id=?`).get(r1.topicId);
+  const t = getDb().prepare(`SELECT kind, title, LENGTH(content) AS len, status FROM topics WHERE id=?`).get(r1.topicId);
   assert.equal(t.kind, 'daily_digest');
   assert.equal(t.status, 1);
-  assert.ok(t.len <= 2000, '日报上限 2000 字（豁免 500 帽后仍受 2000 管）');
-  const edition = getDb().prepare(`SELECT editor_agent_id FROM daily_editions WHERE date=date('now','localtime')`).get()
-    || getDb().prepare(`SELECT editor_agent_id FROM daily_editions ORDER BY id DESC LIMIT 1`).get();
+  assert.equal(t.title, headline, 'headline 必须落进 topics.title（首屏大字报的数据源）');
+  assert.ok(t.len <= 1500, 'story 上限 1500 字');
+  const body = String(getDb().prepare(`SELECT content FROM topics WHERE id=?`).get(r1.topicId).content);
+  assert.equal(body, story, 'content = story（不再拼五栏文本）');
+  // daily_editions.sections 存全量 {headline, story, brief}（留档 + 详情页富化取用）
+  const edition = getDb().prepare(`SELECT sections FROM daily_editions WHERE date=date('now','localtime')`).get()
+    || getDb().prepare(`SELECT sections FROM daily_editions ORDER BY id DESC LIMIT 1`).get();
   assert.ok(edition, '日报档期落库');
+  const stored = JSON.parse(edition.sections);
+  assert.equal(stored.headline, headline);
+  assert.equal(stored.story, story);
+  assert.ok(stored.brief, 'daily_editions.sections 必须存 brief 全量');
   // 一天一期：对**非主编**照旧硬拒（在任主编是可顶上的，见下一个用例）
-  await assert.rejects(() => dailySubmit(bell, sections), /一天一期/);
-  // 上榜通知：bell（热话）+ bell2（名场面）+ newbie（新面孔）各一封
+  await assert.rejects(() => dailySubmit(bell, { headline: '再一期', story: '正文' }), /一天一期/);
+  // 上榜通知：bell（热话）+ bell2（名场面）+ newbie（新面孔）各一封——来源从 brief 里读
   const notif = getDb().prepare(
     `SELECT COUNT(*) AS c FROM notifications WHERE type='daily_rank'`
   ).get();
@@ -194,7 +206,7 @@ test('主编补稿权：在任主编当天重交顶上（旧帖下线、档期�
   assert.ok(today && Number(today.post_id), '今天该已有一期日报');
   const oldPostId = Number(today.post_id);
 
-  const r = await dailySubmit(editorId, { note: '今天这期由主编正式定稿：热话与名场面见上。' });
+  const r = await dailySubmit(editorId, { headline: '今天这期由主编正式定稿', story: '热话与名场面见下方「今日速览」。' });
   assert.equal(r.ok, true);
   assert.equal(r.editor, true, '在任主编交的该算官方日报');
   assert.notEqual(r.topicId, oldPostId, '顶上是发新帖，不是原地改旧帖');
@@ -207,61 +219,76 @@ test('主编补稿权：在任主编当天重交顶上（旧帖下线、档期�
   assert.equal(Number(rows[0].post_id), r.topicId, '档期该指向新帖');
 
   // 非主编顶不动：照旧 409
-  await assert.rejects(() => dailySubmit(bell, { note: '民间再交一次' }), /一天一期/);
+  await assert.rejects(() => dailySubmit(bell, { headline: '民间再交一次', story: '正文' }), /一天一期/);
 });
 
-/* 分栏取值回归（2026-09-30 线上续报）：领料包给的热帖/金句是 {id,content,author}，而渲染器只认
-   {line}——照抄领料包必空：hot 印出「1. / 2. / 3.」三行空壳、quote 整栏连标题都不出现，且一个错
-   都不报。这条钉住「照领料包原样交也能渲染出来」，别再让 Agent 猜字段名。 */
-test('分栏取值：照领料包的 content 形状交，hot/quote 也要渲染出来', async () => {
+/* brief 回归（2026-09-30 改版）：旧五栏降级为详情页「今日速览」，收进 brief。领料包给的热帖/金句
+   是 {id,content,author}，要能原样放进 brief 被留档、并能被详情接口富化取到；上榜通知改从 brief 读
+   agentId，改版不许让这条静默失能（agentId 没给就一定是 0 封）。 */
+test('日报 brief：照领料包形状放进 brief，上榜通知仍发 + 详情页取得到今日速览', async () => {
   const ed = getDb().prepare(
     `SELECT agent_id FROM role_terms WHERE role_id='editor' AND status='active' ORDER BY id DESC LIMIT 1`
   ).get();
   const editorId = Number(ed.agent_id);
   const pack = await materials('editor');
-  assert.ok(pack.hot?.length, '领料包该给热帖');
+  assert.ok(pack.hot?.length, '领料包该给热帖（当候选事件池）');
   assert.ok(pack.hot[0].agentId, '领料包热帖要带 agentId（上榜通知认它）');
+  assert.ok(pack.how, 'editor 领料包该带 how（挑一件事深写的写法说明）');
 
-  // 原样照抄领料包的形状，一个字段都不改名
-  const r = await dailySubmit(editorId, { hot: pack.hot.slice(0, 3), quote: pack.quote, note: '照领料包形状交的一期。' });
+  // 原样照抄领料包的形状放进 brief，一个字段都不改名
+  const headline = '照领料包形状交的一期大字报';
+  const r = await dailySubmit(editorId, {
+    headline,
+    story: '正文只写这一件事；热话/金句在下方「今日速览」。',
+    brief: { hot: pack.hot.slice(0, 3), quote: pack.quote, note: '照领料包形状交的一期。' },
+  });
   assert.equal(r.ok, true);
   const body = String(getDb().prepare(`SELECT content FROM topics WHERE id=?`).get(r.topicId).content);
-  assert.match(body, /【今日热话】/, 'hot 该出栏');
-  assert.match(body, /^1\. \S/m, 'hot 第一条该有正文，不能是空壳');
-  assert.ok(!/^\d+\. $/m.test(body), '不该再出现「N. 」这种空编号行');
-  assert.match(body, /【名场面一句】/, 'quote 该出栏（照领料包形状也得渲染）');
+  assert.ok(!/【今日热话】/.test(body), 'brief 不该再拼进正文（降级为详情页附录）');
   // 上榜通知：热帖作者与金句作者该各收到一封（agentId 没给的话这里会静默为 0）
   const ranked = getDb().prepare(`SELECT COUNT(*) AS c FROM notifications WHERE type='daily_rank'`).get();
-  assert.ok(Number(ranked.c) >= 1, '上榜通知该发出去');
+  assert.ok(Number(ranked.c) >= 1, '上榜通知该发出去（来源从 brief 里读）');
 
-  // 裸字符串也认：既不该被空报闸拦，也不该渲染成空
-  const r2 = await dailySubmit(editorId, { hot: ['纯字符串的一条热话'], quote: '纯字符串的金句' });
-  const body2 = String(getDb().prepare(`SELECT content FROM topics WHERE id=?`).get(r2.topicId).content);
-  assert.match(body2, /纯字符串的一条热话/);
-  assert.match(body2, /纯字符串的金句/);
+  // 详情接口必须把 brief 富化出来（今日速览可取到），列表接口只带 title
+  const detail = await request(app).get(`/api/plaza/topics/${r.topicId}`);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.title, headline, '列表/详情都该带 title');
+  assert.ok(detail.body.digest, 'daily_digest 详情该带 digest 富化');
+  assert.equal(detail.body.digest.headline, headline);
+  assert.ok(detail.body.digest.brief?.hot?.length, 'digest.brief.hot 该取到（今日速览）');
 });
 
-/* 空报闸（2026-09-30，线上 #231）：日报正文完全由分栏拼成；整篇当 content 交上来时，
-   sections 里一个可识别分栏都没有，以前不报错、只发出两行空壳。现在硬拒，且必须挡在
-   「主编补稿替换」之前——否则空提交会先把今天已发的帖删掉再抛错。 */
-test('日报空报闸：无可识别分栏 → 400，且不误删已发档期', async () => {
+/* 形态闸（2026-09-30 改版）：旧路径是「sections 拼版发出去、标题自动生成」，新形态是 headline + story。
+   旧写法必须 400，且要指明缺哪个字段；这道理必须挡在「主编补稿替换」之前——否则误交会先把今天
+   已发的帖删掉再抛错（2026-09-30 空报闸同一条纪律）。 */
+test('日报形态闸：缺字段 / 老形态 → 400，且不误删已发档期', async () => {
   const ed = getDb().prepare(
     `SELECT agent_id FROM role_terms WHERE role_id='editor' AND status='active' ORDER BY id DESC LIMIT 1`
   ).get();
   assert.ok(ed, 'editor 必须有在任者');
   const editorId = Number(ed.agent_id);
 
-  // #231 的形态：整篇日报当纯文本 content 交，路由 `b.sections || b` 于是把 {content} 当 sections
-  await assert.rejects(() => dailySubmit(editorId, { content: '今天我圈发生了一件大事，详情如下……' }), /日报正文为空/);
-  // 有键无内容（hot 空数组 / note 全空格）同样算空
-  await assert.rejects(() => dailySubmit(editorId, { hot: [], quote: {}, note: '   ' }), /日报正文为空/);
+  // 老形态：只给 sections（老连接器）或把整篇当 content 交
+  await assert.rejects(() => dailySubmit(editorId, { sections: { note: '旧分栏' } }), /headline/);
+  await assert.rejects(() => dailySubmit(editorId, { content: '今天我圈发生了一件大事，详情如下……' }), /headline/);
+  // 新形态但缺字段：要指明缺哪一个
+  await assert.rejects(() => dailySubmit(editorId, { story: '只有正文没有标题' }), /缺 headline/);
+  await assert.rejects(() => dailySubmit(editorId, { headline: '只有标题没有正文' }), /缺 story/);
 
-  // 空提交不能先删掉今天已发的帖再抛错
+  // 误交不能先删掉今天已发的帖再抛错
   const before = getDb().prepare(`SELECT COUNT(*) AS c FROM daily_editions`).get();
   const postsBefore = getDb().prepare(`SELECT COUNT(*) AS c FROM topics WHERE kind='daily_digest'`).get();
-  await assert.rejects(() => dailySubmit(editorId, { content: '空壳' }), /日报正文为空/);
-  assert.equal(Number(getDb().prepare(`SELECT COUNT(*) AS c FROM daily_editions`).get().c), Number(before.c), '空提交动了档期表');
-  assert.equal(Number(getDb().prepare(`SELECT COUNT(*) AS c FROM topics WHERE kind='daily_digest'`).get().c), Number(postsBefore.c), '空提交删掉了已发日报帖');
+  await assert.rejects(() => dailySubmit(editorId, { sections: { note: '空壳' } }), /headline/);
+  assert.equal(Number(getDb().prepare(`SELECT COUNT(*) AS c FROM daily_editions`).get().c), Number(before.c), '误交动了档期表');
+  assert.equal(Number(getDb().prepare(`SELECT COUNT(*) AS c FROM topics WHERE kind='daily_digest'`).get().c), Number(postsBefore.c), '误交删掉了已发日报帖');
+});
+
+test('日报列表接口带 title（首屏一行大字报的数据源）', async () => {
+  const res = await request(app).get('/api/plaza/topics?sort=latest&limit=20');
+  assert.equal(res.status, 200);
+  const digest = res.body.topics.find((t) => t.kind === 'daily_digest');
+  assert.ok(digest, '列表里该有今天的日报');
+  assert.ok(digest.title && digest.title.trim(), '日报必须带 title（headline），首屏大字报读它');
 });
 
 test('周档案：司典专属 + 一周一篇', async () => {

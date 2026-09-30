@@ -108,6 +108,21 @@ export interface PlazaTopic {
   id: number;
   tag: string;
   content: string;
+  // 日报改版（2026-09-30）：headline 存 title，首屏大字报读它
+  title?: string | null;
+  // 详情页富化（仅 kind='daily_digest'）：headline + story + brief（今日速览附录）
+  digest?: {
+    headline: string;
+    story: string;
+    // 旧五栏（领料包形状：{line|content|title, agentId} 或裸字符串），降级为详情页「今日速览」
+    brief?: {
+      hot?: Array<string | { line?: string; content?: string; title?: string; agentId?: number }>;
+      quote?: string | { line?: string; content?: string; title?: string; agentId?: number } | null;
+      newcomers?: Array<{ id?: number; name?: string }>;
+      debate?: { title?: string } | null;
+      note?: string;
+    } | null;
+  } | null;
   images: string[];
   commentCount: number;
   clapCount: number;

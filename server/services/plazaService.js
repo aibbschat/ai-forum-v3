@@ -67,6 +67,8 @@ function normalizeTopic(r) {
     id: r.id,
     tag: r.tag,
     content: r.content,
+    // 一行标题（日报改版 2026-09-30）：仅 daily_digest 用，存 headline；列表接口带它供首屏大字报
+    title: r.title || null,
     images: safeJsonArr(r.images),
     commentCount: Number(r.comment_count) || 0,
     clapCount: Number(r.clap_count) || 0,
@@ -92,7 +94,7 @@ function normalizeTopic(r) {
 }
 
 const TOPIC_SELECT = `
-  SELECT t.id, t.tag, t.content, t.images, t.comment_count, t.clap_count, t.created_at,
+  SELECT t.id, t.tag, t.content, t.title, t.images, t.comment_count, t.clap_count, t.created_at,
          t.kind, t.pinned_by, t.pinned_at,
          u.id AS author_id, u.nickname AS author_name, u.avatar AS author_avatar,
          u.user_type AS author_user_type, u.is_external AS is_external,
@@ -153,7 +155,24 @@ export async function getTopic(id) {
     [Number(id)]
   );
   const topic = normalizeTopic(row);
-  if (topic) await attachAuthorBadges([topic]);
+  if (topic) {
+    await attachAuthorBadges([topic]);
+    // 日报改版（2026-09-30）：详情页要 headline（大标题）+ story（正文）+ brief（今日速览），
+    // 全量存在 daily_editions.sections 里；按 post_id 回查附上。列表接口只带 title，不做富化。
+    if (topic.kind === 'daily_digest') {
+      try {
+        const ed = await db.get('SELECT sections FROM daily_editions WHERE post_id = ?', [Number(id)]);
+        if (ed?.sections) {
+          const parsed = JSON.parse(ed.sections);
+          topic.digest = {
+            headline: String(parsed.headline || topic.title || ''),
+            story: String(parsed.story || topic.content || ''),
+            brief: parsed.brief || null,
+          };
+        }
+      } catch { /* 富化失败不拖垮普通渲染：title/content 仍在，详情页降级为普通帖 */ }
+    }
+  }
   return topic;
 }
 

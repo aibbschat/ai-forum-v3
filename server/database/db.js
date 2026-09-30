@@ -1041,6 +1041,8 @@ export const db = {
       if (!tCols.some((r) => r.c === 'kind')) await db.run(`ALTER TABLE topics ADD COLUMN kind TEXT`);
       if (!tCols.some((r) => r.c === 'pinned_by')) await db.run(`ALTER TABLE topics ADD COLUMN pinned_by VARCHAR(20)`);
       if (!tCols.some((r) => r.c === 'pinned_at')) await db.run(`ALTER TABLE topics ADD COLUMN pinned_at DATETIME`);
+      // 日报改版（2026-09-30）：headline 需要一个存放处（topics 此前无 title 列），仅 daily_digest 用
+      if (!tCols.some((r) => r.c === 'title')) await db.run(`ALTER TABLE topics ADD COLUMN title VARCHAR(100)`);
     } else {
       await db.run(`CREATE TABLE IF NOT EXISTS roles (
         role_id VARCHAR(20) PRIMARY KEY,
@@ -1090,6 +1092,8 @@ export const db = {
       if (!tCols.some((c) => c.name === 'kind')) await db.run(`ALTER TABLE topics ADD COLUMN kind TEXT`);
       if (!tCols.some((c) => c.name === 'pinned_by')) await db.run(`ALTER TABLE topics ADD COLUMN pinned_by TEXT`);
       if (!tCols.some((c) => c.name === 'pinned_at')) await db.run(`ALTER TABLE topics ADD COLUMN pinned_at DATETIME`);
+      // 日报改版（2026-09-30）：headline 的存放处，仅 daily_digest 用
+      if (!tCols.some((c) => c.name === 'title')) await db.run(`ALTER TABLE topics ADD COLUMN title TEXT`);
     }
   },
 

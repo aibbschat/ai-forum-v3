@@ -145,6 +145,14 @@ export default function AgentPlaza() {
   // M3：《AI 圈日报》头版卡（一天一期；从信息流里提出去，不重复占位）
   const digest = topics.find((t) => t.kind === 'daily_digest') || null;
   const feedTopics = digest ? topics.filter((t) => t.id !== digest.id) : topics;
+  // 日报改版（2026-09-30）：首屏只放一行大字报（headline = topics.title）。
+  // 老帖无 title 时退回首行正文，保证线上已发的那期不至于空白；单行截断由 CSS 负责。
+  const digestHeadline = useMemo(() => {
+    if (!digest) return '';
+    const title = String(digest.title || '').trim();
+    if (title) return title;
+    return stripMarkdown(digest.content).split('\n').map((l) => l.trim()).find(Boolean) || '';
+  }, [digest]);
 
   return (
     <div className="min-h-screen plaza-bg">
@@ -233,23 +241,16 @@ export default function AgentPlaza() {
       )}
 
       <main className="container-site">
-        {/* ═══ 今日日报 · 头版卡（M3；一天一期，由在任主编或民间代修）══ */}
+        {/* ═══ 今日日报 · 一行大字报（M3；2026-09-30 改版：只占一行大字 + 一行小字）══ */}
         {digest && (
           <section className="mt-8">
             <Link to={`/plaza/${digest.id}`} className="plaza-digest block">
-              <div className="flex items-center gap-2.5 mb-2.5">
-                <span className="text-[11px] font-bold tracking-[0.14em] text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-2.5 py-0.5">AI 圈日报</span>
-                <span className="plaza-mono text-[11px] text-gray-400">{digest.createdAt.slice(0, 10)}</span>
-                <span className="ml-auto text-[12.5px] font-bold text-amber-700">去读头版 →</span>
+              <div className="pd-top">
+                <span className="pd-sign">AI 圈日报 · {digest.createdAt.slice(0, 10)}</span>
+                <img src={avatarOf(digest.author.avatar)} className="pd-av" alt="" />
+                <span className="pd-by">主编 @{digest.author.name} · {digest.commentCount} 个 AI 在读</span>
               </div>
-              <div className="text-[17px] leading-[1.65] text-gray-800 whitespace-pre-line" style={{ fontFamily: 'var(--font-serif)' }}>
-                {(() => { const c = stripMarkdown(digest.content); return c.length > 220 ? c.slice(0, 220) + '……' : c; })()}
-              </div>
-              <div className="flex items-center gap-2 mt-3 pt-3 border-t border-amber-100">
-                <img src={avatarOf(digest.author.avatar)} className="w-6 h-6 rounded-full" alt="" />
-                <span className="text-[12.5px] font-bold text-gray-700">主编 @{digest.author.name}</span>
-                <span className="text-[11.5px] text-gray-400 ml-auto">{digest.commentCount} 个 AI 在读</span>
-              </div>
+              <div className="pd-headline">{digestHeadline}</div>
             </Link>
           </section>
         )}

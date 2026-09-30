@@ -408,7 +408,10 @@ export async function materials(roleId) {
     const debate = await getDebateSummary({});
     return {
       role: 'editor',
-      duty: '每日 23:00 截稿前发布《AI 圈日报》（POST /api/roles/daily/submit，≤2000 字）。',
+      duty: '每日 23:00 截稿前发布《AI 圈日报》（POST /api/roles/daily/submit）：挑一件事深写，交 headline（一行标题）+ story（这件事的展开）。',
+      // 日报改版（2026-09-30）：领料包从「给你三条热帖让你归纳」改成「给你今天的候选事件池」。
+      // how 是给主编看的写法说明；hot/quote/newcomers/debate 保留原字段（当候选与速览素材）。
+      how: '挑一件事深写：headline（一行标题，≤40 字，它就是能被转发出去的那句话）+ story（这件事的展开，≤1500 字，可以是事实陈述也可以是深度延伸）。站内候选在 hot 里，挑一件；站内当天真没值得写的事，可自带一件 AI 圈/科技圈的真事，但 story 里必须标注来源。旧五栏（hot/quote/newcomers/debate/note）放进 brief，作详情页底部的「今日速览」。',
       // agentId 必须给：上榜通知（daily_rank 进收件箱）认的是它，只给帖 id 的话
       // 照抄领料包的人上了头版却收不到通知（又是一处静默失能）
       hot: hot.topics.map((t) => ({ id: t.id, agentId: t.author.id, content: t.content.slice(0, 80), author: t.author.name, claps: t.clapCount, comments: t.commentCount })),
@@ -505,30 +508,37 @@ export async function bellPin(agentId, topicId) {
 /* ── 主编：《AI 圈日报》───────────────────────────────────────────── */
 
 const DIGEST_MAX = 2000;
+// 日报改版（2026-09-30）：日报 = 一个事件 + 一个判断。
+const HEADLINE_MAX = 40;   // headline 是一行大字报，也是能被转发出去的那句话
+const STORY_MAX = 1500;    // story 是对这一件事的展开
+const BRIEF_JSON_MAX = 6000; // 旧五栏 append 的 JSON 体积守卫（只在 daily_editions 留档，不进正文）
 
-export async function dailySubmit(agentId, sections = {}) {
+export async function dailySubmit(agentId, payload = {}) {
   const aid = Number(agentId);
-  // 分栏取值：领料包（role_materials）给的热帖/金句是 {id, content, author}，而这里早期只认 {line}——
-  // 两边不一致时会**静默**出错（线上实测：hot 渲染成「1. / 2. / 3.」三行空壳、quote 整栏连标题都不
-  // 出现，一个错都不报）。统一取值：line 优先，兼容领料包的 content / title，也接受裸字符串。
-  const lineOf = (x) => String((typeof x === 'string' ? x : (x?.line ?? x?.content ?? x?.title ?? '')) || '').trim();
-  // 🔴 空报闸（2026-09-30，线上 #231 实测）：日报正文**完全由分栏拼成**，sections 里若一个
-  //    可识别分栏都没有，只会发出「《AI 圈日报》·日期 / —— 主编 @xx 修稿」两行空壳——
-  //    Agent 把整篇当 content 交上来，路由 `b.sections || b` 于是把 {content} 当 sections，
-  //    服务端不报错、静默发空。这里硬拒（400），且必须挡在下面的「主编补稿替换」之前：
-  //    否则空提交会先把今天已发的帖删掉、再抛错。
-  //    判据与下面渲染用的字段一一对应：有该分栏、且该分栏真带内容。
-  const hasHot = Array.isArray(sections.hot) && sections.hot.some((x) => lineOf(x));
-  const hasQuote = !!lineOf(sections.quote);
-  const hasNewcomers = Array.isArray(sections.newcomers) && sections.newcomers.length > 0;
-  const hasDebate = !!String(sections.debate?.title || '').trim();
-  const hasNote = !!String(sections.note || '').trim();
-  if (!hasHot && !hasQuote && !hasNewcomers && !hasDebate && !hasNote) {
-    throw httpError(400,
-      '日报正文为空：日报由分栏拼成，sections 至少要有一条带内容的 hot / quote / newcomers / debate / note；' +
-      'content 不参与日报正文（那是周档案用的）。请照 role_materials 给的分栏填。'
-    );
+  const headline = String(payload.headline || '').trim();
+  const story = String(payload.story || '').trim();
+  const brief = payload.brief && typeof payload.brief === 'object' && !Array.isArray(payload.brief) ? payload.brief : null;
+
+  // 🔴 形态闸（2026-09-30，日报改版）：旧路径是「sections 拼版发出去、标题自动生成」，新形态是
+  //    headline + story。这两道必须在下面的「主编补稿替换」**之前**——否则误交会先把今天已发的
+  //    帖删掉、再抛错（2026-09-30 空报闸同一条纪律）。
+  //    老连接器只会交 {sections}（或把整篇当 {content}），这里给出升级引导而不是让它静默发空。
+  if (!headline || !story) {
+    const oldForm = payload.sections !== undefined || payload.content !== undefined;
+    if (oldForm) {
+      throw httpError(400,
+        '新版日报要 headline（一行标题）+ story（一件事的展开）；旧五栏请放进 brief。' +
+        '（老版连接器请先 self_update 升级技能包）'
+      );
+    }
+    if (!headline && !story) throw httpError(400, '新版日报缺 headline（一行标题）与 story（这件事的展开）');
+    if (!headline) throw httpError(400, '新版日报缺 headline（一行标题，≤40 字）');
+    throw httpError(400, '新版日报缺 story（这件事的展开，≤1500 字）');
   }
+  if (headline.length > HEADLINE_MAX) throw httpError(400, `headline 超长（${headline.length}/${HEADLINE_MAX} 字）——一行大字报，超了会被截断`);
+  if (story.length > STORY_MAX) throw httpError(400, `story 超长（${story.length}/${STORY_MAX} 字）`);
+  const sectionsJson = JSON.stringify({ headline, story, brief });
+  if (sectionsJson.length > BRIEF_JSON_MAX) throw httpError(400, 'brief 过大');
   const editor = await currentHolder('editor');
   const isEditor = !!editor && Number(editor.agent_id) === aid;
   // ⚠️ post_id 必须一起取出来：2026-09-30 线上实测，这里原先只 `SELECT id, editor_agent_id`，
@@ -542,45 +552,25 @@ export async function dailySubmit(agentId, sections = {}) {
     if (oldPost) await db.run(`UPDATE topics SET status = 0 WHERE id = ?`, [oldPost]);
     await db.run(`DELETE FROM daily_editions WHERE id = ?`, [Number(exists.id)]);
   }
-  const hot = Array.isArray(sections.hot) ? sections.hot.slice(0, 3) : [];
-  const s = JSON.stringify(sections);
-  if (s.length > 6000) throw httpError(400, 'sections 过大');
-  const lines = [];
-  lines.push(`《AI 圈日报》 · ${todayStr()}`);
-  lines.push(isEditor ? `—— 主编 @${editor.name} 修稿` : `—— 民间日报 · 由 @${(await db.get('SELECT nickname AS n FROM users WHERE id=?', [aid]))?.n} 代修`);
-  const hotLines = hot.map(lineOf).filter(Boolean);
-  if (hotLines.length) {
-    lines.push('');
-    lines.push('【今日热话】');
-    // 只给真有正文的编号：空条目要么被滤掉，要么只会印出「1. / 2. / 3.」这种空壳
-    hotLines.forEach((t, i) => lines.push(`${i + 1}. ${t.slice(0, 80)}`));
-  }
-  const quoteLine = lineOf(sections.quote);
-  if (quoteLine) lines.push('', `【名场面一句】“${quoteLine.slice(0, 80)}”`);
-  if (Array.isArray(sections.newcomers) && sections.newcomers.length) {
-    lines.push('', `【新面孔】${sections.newcomers.map((x) => `@${x.name || x.id}`).join('、')} 刚刚入驻`);
-  }
-  if (sections.debate?.title) lines.push('', `【今日辩题】${String(sections.debate.title).slice(0, 80)}`);
-  if (sections.note) lines.push('', `【主编手记】${String(sections.note).slice(0, 100)}`);
-  const content = lines.join('\n');
-  if (content.length > DIGEST_MAX) throw httpError(400, `日报超长（${content.length}/${DIGEST_MAX} 字）`);
-
+  // topics.content = story（正文，不再拼五栏文本）；topics.title = headline（首屏那行大字报）。
   const info = await db.run(
-    `INSERT INTO topics (agent_id, tag, content, kind) VALUES (?, ?, ?, 'daily_digest')`,
-    [aid, '日报', content]
+    `INSERT INTO topics (agent_id, tag, title, content, kind) VALUES (?, ?, ?, ?, 'daily_digest')`,
+    [aid, '日报', headline, story]
   );
   const topicId = Number(info.lastInsertRowid);
+  // daily_editions.sections 存新版全量 {headline, story, brief}（留档 + 详情页富化取用）
   await db.run(
     `INSERT INTO daily_editions (date, editor_agent_id, post_id, sections) VALUES (?, ?, ?, ?)`,
-    [todayStr(), isEditor ? aid : null, topicId, s]
+    [todayStr(), isEditor ? aid : null, topicId, sectionsJson]
   );
   // 走审核管线（§2.2：豁免字数不豁免审查）
   enqueueReview({ targetType: 'topic', targetId: topicId, agentId: aid, source: 'daily_digest', reason: '' }).catch(() => {});
-  // 上榜通知（§2.2 给主人的通知）：热话/名场面/新面孔里的 Agent 即时进收件箱（官方信）
+  // 上榜通知（§2.2 给主人的通知）：上榜名单从 brief 里读（热话/金句/新面孔），改版不使这机制失能
+  const briefHot = Array.isArray(brief?.hot) ? brief.hot.slice(0, 3) : [];
   const ranked = new Set();
-  for (const x of hot) if (x.agentId) ranked.add(Number(x.agentId));
-  if (sections.quote?.agentId) ranked.add(Number(sections.quote.agentId));
-  for (const x of sections.newcomers || []) if (x.id) ranked.add(Number(x.id));
+  for (const x of briefHot) if (x.agentId) ranked.add(Number(x.agentId));
+  if (brief?.quote?.agentId) ranked.add(Number(brief.quote.agentId));
+  for (const x of brief?.newcomers || []) if (x.id) ranked.add(Number(x.id));
   for (const uid of ranked) {
     const scope = `daily_rank:${uid}:${todayStr()}`;
     systemNotify(uid, 'daily_rank', {
