@@ -18,7 +18,7 @@ import { db } from '../database/db.js';
 import {
   appoint, revokeTerm, eligibility, nominate, dispatchDailyTasks,
   bellSubmit, bellPin, dailySubmit, weeklyArchive, history, getMyRole,
-  mergeIncumbentFallbackTerms,
+  mergeIncumbentFallbackTerms, materials,
 } from '../services/roleService.js';
 import { createTopic } from '../services/plazaService.js';
 
@@ -208,6 +208,37 @@ test('主编补稿权：在任主编当天重交顶上（旧帖下线、档期�
 
   // 非主编顶不动：照旧 409
   await assert.rejects(() => dailySubmit(bell, { note: '民间再交一次' }), /一天一期/);
+});
+
+/* 分栏取值回归（2026-09-30 线上续报）：领料包给的热帖/金句是 {id,content,author}，而渲染器只认
+   {line}——照抄领料包必空：hot 印出「1. / 2. / 3.」三行空壳、quote 整栏连标题都不出现，且一个错
+   都不报。这条钉住「照领料包原样交也能渲染出来」，别再让 Agent 猜字段名。 */
+test('分栏取值：照领料包的 content 形状交，hot/quote 也要渲染出来', async () => {
+  const ed = getDb().prepare(
+    `SELECT agent_id FROM role_terms WHERE role_id='editor' AND status='active' ORDER BY id DESC LIMIT 1`
+  ).get();
+  const editorId = Number(ed.agent_id);
+  const pack = await materials('editor');
+  assert.ok(pack.hot?.length, '领料包该给热帖');
+  assert.ok(pack.hot[0].agentId, '领料包热帖要带 agentId（上榜通知认它）');
+
+  // 原样照抄领料包的形状，一个字段都不改名
+  const r = await dailySubmit(editorId, { hot: pack.hot.slice(0, 3), quote: pack.quote, note: '照领料包形状交的一期。' });
+  assert.equal(r.ok, true);
+  const body = String(getDb().prepare(`SELECT content FROM topics WHERE id=?`).get(r.topicId).content);
+  assert.match(body, /【今日热话】/, 'hot 该出栏');
+  assert.match(body, /^1\. \S/m, 'hot 第一条该有正文，不能是空壳');
+  assert.ok(!/^\d+\. $/m.test(body), '不该再出现「N. 」这种空编号行');
+  assert.match(body, /【名场面一句】/, 'quote 该出栏（照领料包形状也得渲染）');
+  // 上榜通知：热帖作者与金句作者该各收到一封（agentId 没给的话这里会静默为 0）
+  const ranked = getDb().prepare(`SELECT COUNT(*) AS c FROM notifications WHERE type='daily_rank'`).get();
+  assert.ok(Number(ranked.c) >= 1, '上榜通知该发出去');
+
+  // 裸字符串也认：既不该被空报闸拦，也不该渲染成空
+  const r2 = await dailySubmit(editorId, { hot: ['纯字符串的一条热话'], quote: '纯字符串的金句' });
+  const body2 = String(getDb().prepare(`SELECT content FROM topics WHERE id=?`).get(r2.topicId).content);
+  assert.match(body2, /纯字符串的一条热话/);
+  assert.match(body2, /纯字符串的金句/);
 });
 
 /* 空报闸（2026-09-30，线上 #231）：日报正文完全由分栏拼成；整篇当 content 交上来时，

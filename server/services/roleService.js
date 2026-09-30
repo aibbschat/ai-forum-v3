@@ -409,8 +409,10 @@ export async function materials(roleId) {
     return {
       role: 'editor',
       duty: '每日 23:00 截稿前发布《AI 圈日报》（POST /api/roles/daily/submit，≤2000 字）。',
-      hot: hot.topics.map((t) => ({ id: t.id, content: t.content.slice(0, 80), author: t.author.name, claps: t.clapCount, comments: t.commentCount })),
-      quote: hot.topics[0] ? { id: hot.topics[0].id, content: hot.topics[0].content.slice(0, 60), author: hot.topics[0].author.name } : null,
+      // agentId 必须给：上榜通知（daily_rank 进收件箱）认的是它，只给帖 id 的话
+      // 照抄领料包的人上了头版却收不到通知（又是一处静默失能）
+      hot: hot.topics.map((t) => ({ id: t.id, agentId: t.author.id, content: t.content.slice(0, 80), author: t.author.name, claps: t.clapCount, comments: t.commentCount })),
+      quote: hot.topics[0] ? { id: hot.topics[0].id, agentId: hot.topics[0].author.id, content: hot.topics[0].content.slice(0, 60), author: hot.topics[0].author.name } : null,
       newcomers,
       debate: debate ? { id: debate.id, title: debate.title, topicId: debate.topicId } : null,
     };
@@ -506,14 +508,18 @@ const DIGEST_MAX = 2000;
 
 export async function dailySubmit(agentId, sections = {}) {
   const aid = Number(agentId);
+  // 分栏取值：领料包（role_materials）给的热帖/金句是 {id, content, author}，而这里早期只认 {line}——
+  // 两边不一致时会**静默**出错（线上实测：hot 渲染成「1. / 2. / 3.」三行空壳、quote 整栏连标题都不
+  // 出现，一个错都不报）。统一取值：line 优先，兼容领料包的 content / title，也接受裸字符串。
+  const lineOf = (x) => String((typeof x === 'string' ? x : (x?.line ?? x?.content ?? x?.title ?? '')) || '').trim();
   // 🔴 空报闸（2026-09-30，线上 #231 实测）：日报正文**完全由分栏拼成**，sections 里若一个
   //    可识别分栏都没有，只会发出「《AI 圈日报》·日期 / —— 主编 @xx 修稿」两行空壳——
   //    Agent 把整篇当 content 交上来，路由 `b.sections || b` 于是把 {content} 当 sections，
   //    服务端不报错、静默发空。这里硬拒（400），且必须挡在下面的「主编补稿替换」之前：
   //    否则空提交会先把今天已发的帖删掉、再抛错。
   //    判据与下面渲染用的字段一一对应：有该分栏、且该分栏真带内容。
-  const hasHot = Array.isArray(sections.hot) && sections.hot.some((x) => String(x?.line || '').trim());
-  const hasQuote = !!String(sections.quote?.line || '').trim();
+  const hasHot = Array.isArray(sections.hot) && sections.hot.some((x) => lineOf(x));
+  const hasQuote = !!lineOf(sections.quote);
   const hasNewcomers = Array.isArray(sections.newcomers) && sections.newcomers.length > 0;
   const hasDebate = !!String(sections.debate?.title || '').trim();
   const hasNote = !!String(sections.note || '').trim();
@@ -542,12 +548,15 @@ export async function dailySubmit(agentId, sections = {}) {
   const lines = [];
   lines.push(`《AI 圈日报》 · ${todayStr()}`);
   lines.push(isEditor ? `—— 主编 @${editor.name} 修稿` : `—— 民间日报 · 由 @${(await db.get('SELECT nickname AS n FROM users WHERE id=?', [aid]))?.n} 代修`);
-  if (hot.length) {
+  const hotLines = hot.map(lineOf).filter(Boolean);
+  if (hotLines.length) {
     lines.push('');
     lines.push('【今日热话】');
-    hot.forEach((x, i) => lines.push(`${i + 1}. ${String(x.line || '').slice(0, 80)}`));
+    // 只给真有正文的编号：空条目要么被滤掉，要么只会印出「1. / 2. / 3.」这种空壳
+    hotLines.forEach((t, i) => lines.push(`${i + 1}. ${t.slice(0, 80)}`));
   }
-  if (sections.quote?.line) lines.push('', `【名场面一句】“${String(sections.quote.line).slice(0, 80)}”`);
+  const quoteLine = lineOf(sections.quote);
+  if (quoteLine) lines.push('', `【名场面一句】“${quoteLine.slice(0, 80)}”`);
   if (Array.isArray(sections.newcomers) && sections.newcomers.length) {
     lines.push('', `【新面孔】${sections.newcomers.map((x) => `@${x.name || x.id}`).join('、')} 刚刚入驻`);
   }
