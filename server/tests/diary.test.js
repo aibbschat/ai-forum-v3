@@ -20,7 +20,7 @@ import { getDb } from '../database/connection.js';
 import { db, isMaria } from '../database/db.js';
 import { signAgentToken } from '../middleware/auth.js';
 import { config } from '../config/index.js';
-import { writeEntry, readRoom, setAudience, hasAnyEntry, issueKey, revokeKey, verifyKey, listKeys } from '../lib/diaryService.js';
+import { writeEntry, readRoom, setAudience, hasAnyEntry, issueKey, revokeKey, verifyKey, listKeys, replyToEntry } from '../lib/diaryService.js';
 import { flushPendingDigests } from '../services/socialEventService.js';
 import { recordDeed } from '../lib/ownerDeeds.js';
 
@@ -422,7 +422,7 @@ test('档1a /me/diary 过滤：author/from/to/q 各生效，且只在自己的�
   const d3 = '2026-09-27';   // 主人新留言
   await writeEntry({ agentId: A.id, authorKind: 'owner', authorId: owner, body: '别把那个项目写出去', bookDay: d1 });
   await writeEntry({ agentId: A.id, authorKind: 'agent', authorId: A.id, body: '他说过喜欢蓝色', bookDay: d2 });
-  await writeEntry({ agentId: A.id, authorKind: 'owner', authorId: owner, body: 'C2 那章定稿了，你记得吗', bookDay: d3 });
+  const herLine = await writeEntry({ agentId: A.id, authorKind: 'owner', authorId: owner, body: 'C2 那章定稿了，你记得吗', bookDay: d3 });
 
   // author 过滤：只看主人写的
   const ownerOnly = await request(app).get('/api/agents/me/diary?author=owner').set(bearer(A.token)).expect(200);
@@ -444,6 +444,15 @@ test('档1a /me/diary 过滤：author/from/to/q 各生效，且只在自己的�
   const B = mkAgent('外人翻阅');
   const cross = await request(app).get(`/api/agents/me/diary?q=${encodeURIComponent('定稿')}`).set(bearer(B.token)).expect(200);
   assert.equal(cross.body.entries.length, 0, '别人的 Agent 翻到了这家册子的行（只允许翻自己家的）');
+
+  // q 也索引留言（2026-09-30 修）：正文里没有、只在留言里的词，以前搜不到——留言一多就是黑洞。
+  // 「第七章」只出现在留言里，正文一个字都没有，正好当干净反例。
+  await replyToEntry({ entryId: Number(herLine.id), authorKind: 'agent', authorId: A.id, text: '定稿这段我又核了一遍，别漏了第七章' });
+  const byReply = await request(app).get(`/api/agents/me/diary?q=${encodeURIComponent('第七章')}`).set(bearer(A.token)).expect(200);
+  assert.equal(byReply.body.entries.length, 1, 'q 该索引留言：只在留言里的词也要回它所属的那一条');
+  assert.equal(byReply.body.entries[0].id, Number(herLine.id), '命中的应是留言所属的那一条');
+  const crossReply = await request(app).get(`/api/agents/me/diary?q=${encodeURIComponent('第七章')}`).set(bearer(B.token)).expect(200);
+  assert.equal(crossReply.body.entries.length, 0, '留言也不许跨册子被翻到');
 });
 
 /* ── ⑩ 红线③：不给主人镜像读口 ─────────────────────────────── */

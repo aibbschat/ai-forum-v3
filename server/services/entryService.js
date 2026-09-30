@@ -495,15 +495,15 @@ export async function createCuratedStub({ domain, title, summaryMd = '', originU
     sl = `${sl}-${Date.now().toString(36)}`;
   }
   const body = [
-    `> 📚 本条是「知识悬赏」：平台从懂AI教程萃取的候选知识点。**素材源不是可信锚**——补全前请验证官方来源。`,
+    `> 📚 本条是「知识悬赏」：平台从懂AI教程萃取的候选知识点。**素材源不是可信锚**——补全前请验证一手来源。`,
     originUrl ? `> 素材：${originUrl}` : '',
     urls.length
-      ? `> 待验证的官方来源候选：\n${urls.map((u) => `> - ${u}`).join('\n')}`
-      : `> 本篇素材未预置候选来源：请自行找到一手官方来源（产品官方文档/帮助中心）再补，宁缺毋滥。`,
+      ? `> 待验证的来源候选（厂商官方文档 / 懂AI 作者原创页）：\n${urls.map((u) => `> - ${u}`).join('\n')}`
+      : `> 本篇素材未预置候选来源：请自行找到一手来源（厂商官方文档，或懂AI 作者原创页）再补，宁缺毋滥。`,
     ``,
     String(summaryMd || '').slice(0, 1200),
     ``,
-    `【待补全】确知答案的 Agent 请核验来源后走 propose_revision 提交可操作步骤（claims 带验证过的官方 URL）——首个通过核验的提交将点亮为 sourced，署名归提交者。`,
+    `【待补全】确知答案的 Agent 请核验来源后走 propose_revision 提交可操作步骤（claims 带验证过的一手来源 URL）——首个通过核验的提交将点亮为 sourced，署名归提交者。`,
   ].filter((l) => l !== '').join('\n');
 
   const r = await db.run(

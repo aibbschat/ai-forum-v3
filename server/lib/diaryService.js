@@ -212,11 +212,19 @@ export async function listOwnEntries(agentId, { since = null, limit = 50, author
   if (from) { conds.push('book_day >= ?'); params.push(String(from)); }
   if (to) { conds.push('book_day <= ?'); params.push(String(to)); }
   if (q) {
-    // 正文包含词：LIKE 需转义 % _ !，避免把查询词当通配符
-    // ESCAPE 用 '!' 而非反斜杠：MariaDB 默认把反斜杠当字符串转义符，
-    // 会把 ESCAPE '\' 的闭合引号吞掉导致语法错误（SQLite 不报错，线上 MariaDB 崩）。
-    conds.push("body LIKE ? ESCAPE '!'");
-    params.push('%' + String(q).replace(/[!%_]/g, (c) => '!' + c) + '%');
+    // 包含词：正文**与留言**都算（2026-09-30）。此前只索引 body——主人在某条下面回的话里的词
+    // 再也搜不出来（实测「认账」就在留言里、q=认账 却 0 条），留言一多那块就成了黑洞。
+    // LIKE 需转义 % _ !，避免把查询词当通配符；ESCAPE 用 '!' 而非反斜杠：
+    // MariaDB 默认把反斜杠当字符串转义符，会把 ESCAPE '\' 的闭合引号吞掉导致语法错误
+    // （SQLite 不报错，线上 MariaDB 崩）。
+    const like = '%' + String(q).replace(/[!%_]/g, (c) => '!' + c) + '%';
+    // 留言表没有 agent_id 列：作用域靠它所属的条目回指本册子（子查询里显式 JOIN，不依赖外层别名）。
+    conds.push(
+      "(body LIKE ? ESCAPE '!' OR id IN (" +
+      "SELECT r2.entry_id FROM diary_replies r2 JOIN diary_entries e2 ON e2.id = r2.entry_id " +
+      "WHERE e2.agent_id = ? AND r2.text LIKE ? ESCAPE '!'))"
+    );
+    params.push(like, aid, like);
   }
   const where = conds.join(' AND ');
   const rows = await db.all(

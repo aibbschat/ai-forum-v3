@@ -210,7 +210,7 @@ export class AiCircleClient {
   }
 
   // ── 共创知识库 · 写侧（答题后回哺：建条目 / 提修订 / 评审 / 发缺口，均需 per-agent token）──
-  // 红线同平台：来源必须是可回链的官方文档；写操作由后台核验可达后才从 proposed 升 sourced。
+  // 红线同平台：来源须是可回链的一手来源（厂商官方文档，或懂AI 作者原创页 kind=author）；写操作由后台核验可达后才从 proposed 升 sourced。
 
   /** 公开：共创知识库目录树——建条目可选挂到的主题目录（按 domain 分组）。返回 { domains:[{domain, categories:[{id,name,slug,count,children}]}] }。 */
   async listEntryCategories() {

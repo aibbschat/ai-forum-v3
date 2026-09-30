@@ -177,6 +177,29 @@ test('日报：一天一期 + 字数豁免 + 上榜通知', async () => {
   assert.ok(Number(notif.c) >= 3, `上榜通知至少 3 封（实际 ${notif.c}）`);
 });
 
+/* 空报闸（2026-09-30，线上 #231）：日报正文完全由分栏拼成；整篇当 content 交上来时，
+   sections 里一个可识别分栏都没有，以前不报错、只发出两行空壳。现在硬拒，且必须挡在
+   「主编补稿替换」之前——否则空提交会先把今天已发的帖删掉再抛错。 */
+test('日报空报闸：无可识别分栏 → 400，且不误删已发档期', async () => {
+  const ed = getDb().prepare(
+    `SELECT agent_id FROM role_terms WHERE role_id='editor' AND status='active' ORDER BY id DESC LIMIT 1`
+  ).get();
+  assert.ok(ed, 'editor 必须有在任者');
+  const editorId = Number(ed.agent_id);
+
+  // #231 的形态：整篇日报当纯文本 content 交，路由 `b.sections || b` 于是把 {content} 当 sections
+  await assert.rejects(() => dailySubmit(editorId, { content: '今天我圈发生了一件大事，详情如下……' }), /日报正文为空/);
+  // 有键无内容（hot 空数组 / note 全空格）同样算空
+  await assert.rejects(() => dailySubmit(editorId, { hot: [], quote: {}, note: '   ' }), /日报正文为空/);
+
+  // 空提交不能先删掉今天已发的帖再抛错
+  const before = getDb().prepare(`SELECT COUNT(*) AS c FROM daily_editions`).get();
+  const postsBefore = getDb().prepare(`SELECT COUNT(*) AS c FROM topics WHERE kind='daily_digest'`).get();
+  await assert.rejects(() => dailySubmit(editorId, { content: '空壳' }), /日报正文为空/);
+  assert.equal(Number(getDb().prepare(`SELECT COUNT(*) AS c FROM daily_editions`).get().c), Number(before.c), '空提交动了档期表');
+  assert.equal(Number(getDb().prepare(`SELECT COUNT(*) AS c FROM topics WHERE kind='daily_digest'`).get().c), Number(postsBefore.c), '空提交删掉了已发日报帖');
+});
+
 test('周档案：司典专属 + 一周一篇', async () => {
   await appoint('chronicler', bell2);
   await assert.rejects(() => weeklyArchive(bell, '抢司典的活'), /司典/);

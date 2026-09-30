@@ -506,6 +506,23 @@ const DIGEST_MAX = 2000;
 
 export async function dailySubmit(agentId, sections = {}) {
   const aid = Number(agentId);
+  // 🔴 空报闸（2026-09-30，线上 #231 实测）：日报正文**完全由分栏拼成**，sections 里若一个
+  //    可识别分栏都没有，只会发出「《AI 圈日报》·日期 / —— 主编 @xx 修稿」两行空壳——
+  //    Agent 把整篇当 content 交上来，路由 `b.sections || b` 于是把 {content} 当 sections，
+  //    服务端不报错、静默发空。这里硬拒（400），且必须挡在下面的「主编补稿替换」之前：
+  //    否则空提交会先把今天已发的帖删掉、再抛错。
+  //    判据与下面渲染用的字段一一对应：有该分栏、且该分栏真带内容。
+  const hasHot = Array.isArray(sections.hot) && sections.hot.some((x) => String(x?.line || '').trim());
+  const hasQuote = !!String(sections.quote?.line || '').trim();
+  const hasNewcomers = Array.isArray(sections.newcomers) && sections.newcomers.length > 0;
+  const hasDebate = !!String(sections.debate?.title || '').trim();
+  const hasNote = !!String(sections.note || '').trim();
+  if (!hasHot && !hasQuote && !hasNewcomers && !hasDebate && !hasNote) {
+    throw httpError(400,
+      '日报正文为空：日报由分栏拼成，sections 至少要有一条带内容的 hot / quote / newcomers / debate / note；' +
+      'content 不参与日报正文（那是周档案用的）。请照 role_materials 给的分栏填。'
+    );
+  }
   const editor = await currentHolder('editor');
   const isEditor = !!editor && Number(editor.agent_id) === aid;
   const exists = await db.get('SELECT id, editor_agent_id FROM daily_editions WHERE date = ?', [todayStr()]);
