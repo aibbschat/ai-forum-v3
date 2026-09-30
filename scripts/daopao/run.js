@@ -38,8 +38,8 @@ const ORPHAN_H = Math.max(0, Number(process.env.DAOPAO_ORPHAN_HOURS ?? 24));
 const DRY = process.env.DAOPAO_DRY === '1';
 const MAX_ITEMS = Math.max(1, Number(process.env.DAOPAO_MAX_ITEMS || ATTEMPT_CAP));
 const UA = 'Mozilla/5.0 (compatible; AiCircleDaopao/2.0; +https://aibbs.chat)';
-const RETRY_SKIP_D = 3;   // skip-no-fit 回炉天数
-const RETRY_NOCAND_D = 14; // no-candidates 回炉天数
+const RETRY_SKIP_D = Math.max(0, Number(process.env.DAOPAO_RETRY_SKIP_DAYS ?? 3));   // skip-no-fit 回炉天数
+const RETRY_NOCAND_D = Math.max(0, Number(process.env.DAOPAO_RETRY_NOCAND_DAYS ?? 14)); // no-candidates 回炉天数
 
 const TOKEN = fs.readFileSync(path.join(ROOT, 'dsh/daopao-token'), 'utf8').trim();
 const CURATED = (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'official-sources.json'), 'utf8')).sources || []; } catch { return []; } })();
@@ -49,8 +49,8 @@ const LEDGER_PATH = path.join(ROOT, 'dsh/logs/daopao-claims.json');
 const readJson = (p, fb) => { try { const d = JSON.parse(fs.readFileSync(p, 'utf8')); return d ?? fb; } catch { return fb; } };
 let DISCOVERED = readJson(DISC_PATH, { items: [] }).items || [];
 const ledger = readJson(LEDGER_PATH, {}) || {};
-const saveLedger = () => { fs.mkdirSync(path.dirname(LEDGER_PATH), { recursive: true }); fs.writeFileSync(LEDGER_PATH, JSON.stringify(ledger, null, 2)); };
-const saveDiscovered = () => { fs.mkdirSync(path.dirname(DISC_PATH), { recursive: true }); fs.writeFileSync(DISC_PATH, JSON.stringify({ items: DISCOVERED, updated_at: new Date().toISOString() }, null, 2)); };
+const saveLedger = () => { if (DRY) return; fs.mkdirSync(path.dirname(LEDGER_PATH), { recursive: true }); fs.writeFileSync(LEDGER_PATH, JSON.stringify(ledger, null, 2)); };
+const saveDiscovered = () => { if (DRY) return; fs.mkdirSync(path.dirname(DISC_PATH), { recursive: true }); fs.writeFileSync(DISC_PATH, JSON.stringify({ items: DISCOVERED, updated_at: new Date().toISOString() }, null, 2)); };
 
 const today = () => new Date().toISOString().slice(0, 10);
 const isToday = (at) => String(at || '').startsWith(today());
@@ -136,11 +136,12 @@ async function collectCandidates(entry, hints, onSearch) {
       map.set(s.url, { url: s.url, host: h, title: (s.title || '').trim(), snippet: (s.snippet || '').slice(0, 200), score: (cur?.score || 0) + boost });
     }
   }
-  // 加速器：人审目录 + 历史发现里同域/同厂商的 URL，置顶直接命中（不耗搜索也能过）
-  const accel = [...CURATED, ...DISCOVERED]
-    .filter((s) => (s.domains || []).includes(entry.domain) || (hints.brand && String(s.product || s.host || '').toLowerCase().includes(hints.brand.toLowerCase().replace(/\s+/g, ''))))
+  // 加速器：只按**品牌命中**注入人审目录/历史发现的官方域（不按 domain 粗匹配，否则 python 之类同桶来源会淹掉真厂商）
+  const brandKey = hints.brand ? hints.brand.toLowerCase().replace(/\s+/g, '') : '';
+  const accel = brandKey ? [...CURATED, ...DISCOVERED]
+    .filter((s) => `${s.product || ''} ${s.host || ''} ${s.url || ''}`.toLowerCase().replace(/\s+/g, '').includes(brandKey))
     .map((s) => ({ url: s.url, host: hostOf(s.url), title: s.product || '', snippet: '', score: 99 }))
-    .filter((c) => c.url && !isAgg(c.host));
+    .filter((c) => c.url && !isAgg(c.host)) : [];
   for (const a of accel) if (!map.has(a.url)) map.set(a.url, a); else map.get(a.url).score += 50;
   return [...map.values()].sort((x, y) => y.score - x.score).slice(0, 3);
 }
