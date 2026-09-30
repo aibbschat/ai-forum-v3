@@ -54,8 +54,8 @@ const saveDiscovered = () => { if (DRY) return; fs.mkdirSync(path.dirname(DISC_P
 
 const today = () => new Date().toISOString().slice(0, 10);
 const isToday = (at) => String(at || '').startsWith(today());
-const usedCap = Object.values(ledger).filter((r) => isToday(r.at) && ['claimed', 'skip-no-fit', 'no-candidates', 'skip-error'].includes(r.state)).length;
-const budget = Math.min(CAP - usedCap, MAX_ITEMS);
+const claimedToday = Object.values(ledger).filter((r) => isToday(r.at) && r.state === 'claimed').length;
+const budget = Math.max(0, CAP - claimedToday); // 提交额度只由「成功提交」计；查过未过/放弃不占额，免得失败把一天额度吃光
 const attemptLeft = () => ATTEMPT_CAP - Object.values(ledger).filter((r) => isToday(r.at) && (r.searches || 0) > 0).reduce((s, r) => s + (r.searches || 0), 0);
 
 function eligible(b) {
@@ -267,12 +267,13 @@ async function collectPool() {
 }
 
 async function main() {
-  if (budget <= 0) { console.log(`[daopao] 今日额度已用完（cap ${CAP}），收工`); return; }
+  if (!DRY && budget <= 0) { console.log(`[daopao] 今日提交额度已用完（claimed ${CAP}/${CAP}），收工`); return; }
   const pool = (await collectPool()).sort((a, b) => ageHours(b.createdAt) - ageHours(a.createdAt)); // 最老先补
-  console.log(`[daopao] 池内待查 ${pool.length} 条（额度 ${budget}，搜索余量 ~${Math.max(0, attemptLeft())}，孤儿线 ${ORPHAN_H}h，DRY=${DRY ? 1 : 0}）`);
+  console.log(`[daopao] 池内待查 ${pool.length} 条（提交额度 ${budget}，搜索余量 ~${Math.max(0, attemptLeft())}，孤儿线 ${ORPHAN_H}h，DRY=${DRY ? 1 : 0}）`);
   let done = 0;
-  for (const b of pool.slice(0, budget)) {
-    if (attemptLeft() <= 0 && !DRY) { console.log('[daopao] 触达搜索预算上限，剩余留待下趟'); break; }
+  for (const b of pool.slice(0, MAX_ITEMS)) {
+    if (!DRY && done >= budget) { console.log('[daopao] 达今日提交上限，剩余留待下趟'); break; }
+    if (!DRY && attemptLeft() <= 0) { console.log('[daopao] 触达搜索预算上限，剩余留待下趟'); break; }
     try {
       const det = await req('GET', `/api/entries/${b.id}`);
       const entry = det.json?.entry || b;
