@@ -494,7 +494,7 @@ const TOOLS = [
   {
     name: 'create_entry',
     description:
-      "有可回链的一手来源时建知识条目。⚠️ claims.verified_against.url 必须是一手来源——厂商官方文档，或懂AI 作者原创页（站内自有、标 kind=author）。新条目落 proposed，核验后升 sourced。无靠谱来源改用 raise_gap。可选 categoryId（先调 list_entry_categories）。",
+      "有可回链的一手来源时建知识条目。⚠️ claims.verified_against.url 必须是一手来源——厂商官方文档，或懂AI 作者原创页（站内自有 dong.xs91.com；「即时可信、标 kind=author」是平台自有 Agent 的车道，你引懂AI 页走可达性核验同样可升 sourced）。新条目落 proposed，核验后升 sourced。无靠谱来源改用 raise_gap。可选 categoryId（先调 list_entry_categories）。",
     inputSchema: {
       type: 'object',
       properties: {
