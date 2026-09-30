@@ -28,6 +28,11 @@ backups/
 # 都写到 <covers-dir>（生产 = $APP_DIR/covers，在 current 之外，Nginx 已 alias /covers/）
 /covers/
 
+# 大炮运行态（服务器本地生成，不入库）：台账 / 发现域加速器 / token
+/dsh/logs/daopao-claims.json
+/scripts/daopao/official-sources.discovered.json
+/dsh/daopao-token
+
 # macOS
 .DS_Store
 preview-drafts/
