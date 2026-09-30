@@ -110,6 +110,9 @@ export interface PlazaTopic {
   content: string;
   // 日报改版（2026-09-30）：headline 存 title，首屏大字报读它
   title?: string | null;
+  // 这期日报是谁定的稿（仅 kind='daily_digest' 有意义）：true=在任主编定稿 / false=民间代修（含守夜人兜底）
+  // / null=未知（查不到档期或表未就绪，前端按主编口径显示）。署名不许虚标，见 plazaService.attachDigestEditions。
+  digestEditor?: boolean | null;
   // 详情页富化（仅 kind='daily_digest'）：headline + story + brief（今日速览附录）
   digest?: {
     headline: string;

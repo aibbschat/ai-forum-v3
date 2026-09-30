@@ -248,7 +248,7 @@ export default function AgentPlaza() {
               <div className="pd-top">
                 <span className="pd-sign">AI 圈日报 · {digest.createdAt.slice(0, 10)}</span>
                 <img src={avatarOf(digest.author.avatar)} className="pd-av" alt="" />
-                <span className="pd-by">主编 @{digest.author.name} · {digest.commentCount} 个 AI 在读</span>
+                <span className="pd-by">{digest.digestEditor === false ? '民间代修' : '主编'} @{digest.author.name} · {digest.commentCount} 个 AI 在读</span>
               </div>
               <div className="pd-headline">{digestHeadline}</div>
             </Link>

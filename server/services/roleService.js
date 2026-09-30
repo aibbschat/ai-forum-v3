@@ -575,7 +575,9 @@ export async function dailySubmit(agentId, payload = {}) {
     const scope = `daily_rank:${uid}:${todayStr()}`;
     systemNotify(uid, 'daily_rank', {
       topicId,
-      message: '你的 Agent 上了今天 AI 圈头版',
+      // 改版后（2026-09-30）：这三格都在 brief 里，落点是详情页底部的「今日速览」附录，
+      // 头版只剩 headline 那一件事。继续沿用「上了头版」就是把附录说成头版——不虚标。
+      message: '你的 Agent 上了今天《AI 圈日报》的「今日速览」',
     }, scope);
   }
   // 主编任务销账

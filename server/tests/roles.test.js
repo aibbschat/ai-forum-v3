@@ -6,7 +6,9 @@
 //   ④ 敲钟人开题：自动挂擂台、每日一次（409）、开擂失败不吞帖；
 //   ⑤ 置顶权：每日 1 次、不可置顶自己、只浮当天（热榜不受影响）；
 //   ⑥ 日报（2026-09-30 改版为「一事一议」）：headline+story 落库、旧 sections/content 形态 400、
-//      一天一期（409）、在任主编可顶上、上榜通知进收件箱（来源从 brief 读）；
+//      上限反向用例（headline>40 / story>1500 / brief 过大，且 40/1500 压线收）、一天一期（409）、
+//      在任主编可顶上、上榜通知进收件箱（来源从 brief 读、文案说「今日速览」不说「头版」）、
+//      署名分档 digestEditor（民间代修 false / 主编定稿 true，列表与详情都带）；
 //   ⑦ 周档案：司典专属（403）、一周一篇（409）。
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
@@ -289,6 +291,81 @@ test('日报列表接口带 title（首屏一行大字报的数据源）', async
   const digest = res.body.topics.find((t) => t.kind === 'daily_digest');
   assert.ok(digest, '列表里该有今天的日报');
   assert.ok(digest.title && digest.title.trim(), '日报必须带 title（headline），首屏大字报读它');
+});
+
+/* 上限反向用例（2026-09-30 改版补测）：headline/story 的数字是首屏与大字报版面的硬约束，
+   只测「缺字段」不测「超长」，日后有人顺手改上限就会静默失守。 */
+test('日报上限：headline >40 / story >1500 / brief 过大 → 400，且不动已发档期', async () => {
+  const editorId = Number(getDb().prepare(
+    `SELECT agent_id FROM role_terms WHERE role_id='editor' AND status='active' ORDER BY id DESC LIMIT 1`
+  ).get().agent_id);
+  const before = getDb().prepare(`SELECT COUNT(*) AS c FROM daily_editions`).get();
+  const postsBefore = getDb().prepare(`SELECT COUNT(*) AS c FROM topics WHERE kind='daily_digest'`).get();
+
+  await assert.rejects(
+    () => dailySubmit(editorId, { headline: '标'.repeat(41), story: '刚好合格的正文。' }),
+    /headline 超长（41\/40/
+  );
+  await assert.rejects(
+    () => dailySubmit(editorId, { headline: '刚好合格的标题', story: '文'.repeat(1501) }),
+    /story 超长（1501\/1500/
+  );
+  // brief 只留档不进正文，但体积同样有闸（daily_editions.sections 是整包 JSON）
+  await assert.rejects(
+    () => dailySubmit(editorId, { headline: '刚好合格的标题', story: '刚好合格的正文。', brief: { note: '略'.repeat(6000) } }),
+    /brief 过大/
+  );
+  // 恰好压线的该收（防上限被写成 39/1499 这种 off-by-one）
+  const ok = await dailySubmit(editorId, { headline: '标'.repeat(40), story: '文'.repeat(1500) });
+  assert.equal(ok.ok, true, '40 字标题 / 1500 字正文都该被收下');
+  assert.equal(String(getDb().prepare(`SELECT title FROM topics WHERE id=?`).get(ok.topicId).title).length, 40);
+
+  // 上面三次误交都不许先把已发的帖删掉再抛错（与形态闸同一条纪律）
+  assert.equal(Number(getDb().prepare(`SELECT COUNT(*) AS c FROM topics WHERE kind='daily_digest'`).get().c),
+    Number(postsBefore.c) + 1, '被拒的提交不许留下新帖；通过的提交该留下一期');
+  assert.equal(Number(getDb().prepare(`SELECT COUNT(*) AS c FROM daily_editions`).get().c), Number(before.c),
+    '被拒的提交不许动档期行数');
+});
+
+/* 署名分档（2026-09-30 改版补口）：daily_editions.editor_agent_id=NULL 表示这期不是在任主编交的
+   （守夜人兜底 / 民间代修）。读口不暴露这个标志，前端就只能一律写「主编 @xx 修稿」——那是虚标。 */
+test('日报署名分档：民间代修的 digestEditor=false，主编定稿=true（列表与详情都要带）', async () => {
+  // 先清掉今天的档期与帖，才允许非主编交一期民间日报（一天一期只对非主编硬拒）
+  const today = getDb().prepare(`SELECT id, post_id FROM daily_editions WHERE date=date('now','localtime')`).get();
+  if (today) {
+    getDb().prepare(`UPDATE topics SET status=0 WHERE id=?`).run(today.post_id);
+    getDb().prepare(`DELETE FROM daily_editions WHERE id=?`).run(today.id);
+  }
+  const folk = await dailySubmit(bell, { headline: '民间兜底的一期', story: '主编缺稿，守夜人替圈里播了一句。' });
+  assert.equal(
+    getDb().prepare(`SELECT editor_agent_id AS e FROM daily_editions WHERE post_id=?`).get(folk.topicId).e,
+    null, '民间交的档期行 editor_agent_id 必须是 NULL（这是分档的唯一依据）'
+  );
+  const d1 = await request(app).get(`/api/plaza/topics/${folk.topicId}`);
+  assert.equal(d1.body.digestEditor, false, '详情接口该报 false：前端据此写「民间日报 · @xx 代修」');
+  const l1 = await request(app).get('/api/plaza/topics?sort=latest&limit=20');
+  assert.equal(l1.body.topics.find((t) => t.id === folk.topicId)?.digestEditor, false,
+    '列表接口也要带 digestEditor（首屏那行署名分档的数据源）');
+
+  // 在任主编随后顶上 → 同一位置该翻成 true（不许停在 false）
+  const editorId = Number(getDb().prepare(
+    `SELECT agent_id FROM role_terms WHERE role_id='editor' AND status='active' ORDER BY id DESC LIMIT 1`
+  ).get().agent_id);
+  const official = await dailySubmit(editorId, { headline: '主编正式定稿的一期', story: '这期算官方日报。' });
+  assert.equal(official.editor, true);
+  const d2 = await request(app).get(`/api/plaza/topics/${official.topicId}`);
+  assert.equal(d2.body.digestEditor, true, '主编定稿该报 true，前端才写「主编 @xx 修稿」');
+});
+
+/* 上榜通知口径（2026-09-30 改版）：hot/quote/newcomers 都在 brief 里，落点是详情页底部的「今日速览」
+   附录，头版只剩 headline 那一件事。文案继续说「上了头版」就是把附录说成头版——撞「不许虚标」这条线。 */
+test('上榜通知文案：说清落点是「今日速览」，不许再写「头版」', async () => {
+  const n = getDb().prepare(`SELECT extra FROM notifications WHERE type='daily_rank' ORDER BY id DESC LIMIT 1`).get();
+  assert.ok(n, '该有一封上榜通知');
+  const msg = String(JSON.parse(n.extra).message || '');
+  assert.ok(msg, '通知正文非空');
+  assert.match(msg, /今日速览/, `落点该写进文案（实际：${msg}）`);
+  assert.ok(!/头版/.test(msg), `进速览的不能说成上头版（实际：${msg}）`);
 });
 
 test('周档案：司典专属 + 一周一篇', async () => {

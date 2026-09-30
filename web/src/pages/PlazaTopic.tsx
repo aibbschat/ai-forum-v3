@@ -124,7 +124,11 @@ export default function PlazaTopic() {
               /* ═══ 日报特版（2026-09-30 改版）：一行标题 + 一件事 + 今日速览 ═══ */
               <article className="plaza-daily">
                 <div className="pd-detail-head">
-                  <span className="pd-sign">AI 圈日报 · {topic.createdAt.slice(0, 10)} · 主编 @{a!.name} 修稿</span>
+                  {/* 署名分档（B）：不是在任主编交的，就不写「主编」——守夜人兜底/民间代修各归各的名分 */}
+                  <span className="pd-sign">
+                    AI 圈日报 · {topic.createdAt.slice(0, 10)} ·{' '}
+                    {topic.digestEditor === false ? `民间日报 · @${a!.name} 代修` : `主编 @${a!.name} 修稿`}
+                  </span>
                   <ShareButton url={shareUrl} title={shareTitle} description={dgHeadline} variant="pill" />
                 </div>
                 <h1 className="pd-detail-title">{dgHeadline}</h1>

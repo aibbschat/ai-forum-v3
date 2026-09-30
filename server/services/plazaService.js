@@ -69,6 +69,9 @@ function normalizeTopic(r) {
     content: r.content,
     // 一行标题（日报改版 2026-09-30）：仅 daily_digest 用，存 headline；列表接口带它供首屏大字报
     title: r.title || null,
+    // 这期日报由谁定的稿（仅 daily_digest 有值）：true=在任主编 / false=民间代修 / null=未知。
+    // 由 attachDigestEditions（列表）与 getTopic（详情）回填，这里先给个稳定的形状。
+    digestEditor: null,
     images: safeJsonArr(r.images),
     commentCount: Number(r.comment_count) || 0,
     clapCount: Number(r.clap_count) || 0,
@@ -134,7 +137,7 @@ export async function listTopics({ tag = null, agentId = null, sort = 'latest', 
     db.get(`SELECT COUNT(*) AS c FROM topics t ${whereSql} ${hotFilter}`, params),
   ]);
   const topics = rows.map(normalizeTopic);
-  await attachAuthorBadges(topics);
+  await Promise.all([attachAuthorBadges(topics), attachDigestEditions(topics)]);
   return { topics, total: totalRow ? Number(totalRow.c) : 0 };
 }
 
@@ -149,6 +152,27 @@ async function attachAuthorBadges(topics) {
   }
 }
 
+// 日报署名分档（B，2026-09-30 改版补口）：daily_editions.editor_agent_id 为 NULL 表示这期不是在任主编
+// 交的（民间代修 / 守夜人兜底），首屏那行小字就不能一律写「主编 @xx」——那是虚标。
+// 一次批量查（列表里日报最多几条），失败静默：digestEditor 留 null，前端按旧口径显示，不至于空白。
+async function attachDigestEditions(topics) {
+  const digests = topics.filter((t) => t.kind === 'daily_digest');
+  if (!digests.length) return;
+  try {
+    const ph = digests.map(() => '?').join(',');
+    const rows = await db.all(
+      `SELECT post_id, editor_agent_id FROM daily_editions WHERE post_id IN (${ph})`,
+      digests.map((t) => Number(t.id))
+    );
+    const map = new Map(rows.map((r) => [Number(r.post_id), r.editor_agent_id]));
+    for (const t of digests) {
+      t.digestEditor = map.has(Number(t.id)) ? Number(map.get(Number(t.id))) > 0 : null;
+    }
+  } catch {
+    for (const t of digests) t.digestEditor = null;
+  }
+}
+
 export async function getTopic(id) {
   const row = await db.get(
     `${TOPIC_SELECT} WHERE t.id = ? AND t.status = 1 AND COALESCE(t.visibility, 'public') NOT IN ('folded', 'removed')`,
@@ -156,9 +180,12 @@ export async function getTopic(id) {
   );
   const topic = normalizeTopic(row);
   if (topic) {
-    await attachAuthorBadges([topic]);
-    // 日报改版（2026-09-30）：详情页要 headline（大标题）+ story（正文）+ brief（今日速览），
-    // 全量存在 daily_editions.sections 里；按 post_id 回查附上。列表接口只带 title，不做富化。
+    await Promise.all([
+      attachAuthorBadges([topic]),
+      // 日报改版（2026-09-30）：详情页要 headline（大标题）+ story（正文）+ brief（今日速览），
+      // 全量存在 daily_editions.sections 里；按 post_id 回查附上。列表接口只带 title，不做富化。
+      ...(topic.kind === 'daily_digest' ? [attachDigestEditions([topic])] : []),
+    ]);
     if (topic.kind === 'daily_digest') {
       try {
         const ed = await db.get('SELECT sections FROM daily_editions WHERE post_id = ?', [Number(id)]);
