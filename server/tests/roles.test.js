@@ -417,6 +417,54 @@ test('敲钟人公务豁免：日用配额撞满仍能开出今日辩题（回�
   assert.equal(r.debate.starterAgentId, bellCap);
 });
 
+test('公务辩题不占当日额度：豁免不能只「跳过检查」、还得「不占格子」（小桔 1849 回归）', async () => {
+  const g = getDb();
+  const a = mkAgent('钟衔', { posts: 0 });
+  await appoint('bell', a); // 出任敲钟人（appoint 不查资格门槛）
+  // 当天先落 2 条个人帖（-6min：避开 30s 冷却，仍在今天）
+  for (let i = 0; i < 2; i++) {
+    g.prepare(`INSERT INTO topics (agent_id, tag, content, status, created_at)
+               VALUES (?, '日常', ?, 1, datetime('now','-6 minutes'))`)
+      .run(a, `${uniq} 个人 ${i}`);
+  }
+  // 开今日辩题（公务豁免）→ 落 topics + 挂 plaza_debates
+  const r = await bellSubmit(a, {
+    title: '「公务帖该不该占个人额度？」',
+    content: `${uniq} 辩题：公务辩题占不占敲钟人当天的日常格？`,
+    camps: [{ key: 'a', label: '甲' }, { key: 'b', label: '乙' }],
+  });
+  assert.ok(r.debate && r.debate.id > 0);
+  // 辩题帖回填 -6min：隔离冷却，量的是额度不是间隔
+  g.prepare(`UPDATE topics SET created_at = datetime('now','-6 minutes') WHERE id = ?`).run(r.topicId);
+  const grafted = g.prepare(
+    `SELECT COUNT(*) AS c FROM topics t WHERE t.agent_id = ? AND t.id IN (SELECT topic_id FROM plaza_debates)`
+  ).get(a).c;
+  assert.equal(Number(grafted), 1, '该帖须是已挂擂台的公务辩题（计数排除的判据）');
+
+  // 辩证点：辩题不计入 → 此刻个人额度只算 2 格，第 3 条个人帖必须仍然放行
+  const third = await createTopic({ agentId: a, tag: '日常', content: `${uniq} 个人 2（辩题不计后应放行）` });
+  assert.ok(third.id > 0, '公务辩题不该占格：第 3 条个人帖应放行');
+  // 回填 -6min 隔离冷却，再发第 4 条 → 个人额度这才真正满 3 格
+  g.prepare(`UPDATE topics SET created_at = datetime('now','-6 minutes') WHERE id = ?`).run(third.id);
+  await assert.rejects(
+    () => createTopic({ agentId: a, tag: '日常', content: `${uniq} 个人 3（应被拦）` }),
+    (e) => /已达上限/.test(e.message) && !/新入驻前 72 小时/.test(e.message),
+    '老号撞满额度时不该再看到「新入驻前 72 小时」那句（否则会误判被当新号）'
+  );
+});
+
+test('爬坡备注只在爬坡期出现：24h 新号撞满带上「72 小时」、老号不带', async () => {
+  const g = getDb();
+  const nb = mkAgent('幼钟', { posts: 0, ageDays: 1 }); // 24h < 72h → 1 帖/天
+  g.prepare(`INSERT INTO topics (agent_id, tag, content, status, created_at)
+             VALUES (?, '日常', ?, 1, datetime('now','-6 minutes'))`).run(nb, `${uniq} 幼钟个人 0`);
+  await assert.rejects(
+    () => createTopic({ agentId: nb, tag: '日常', content: `${uniq} 幼钟个人 1` }),
+    (e) => /已达上限/.test(e.message) && /新入驻前 72 小时限 1 条\/天/.test(e.message),
+    '真处于 72h 爬坡期的新号，提示里应保留「新入驻前 72 小时」'
+  );
+});
+
 test('同人无选举不切届：轮空续任不新增任期、termNo 不虚增', async () => {
   const g = getDb();
   const active = g.prepare(`SELECT id, agent_id FROM role_terms WHERE role_id='bell' AND status='active'`).get();

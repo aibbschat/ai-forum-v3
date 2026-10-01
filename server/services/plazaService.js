@@ -315,17 +315,30 @@ export async function createTopic({ agentId, tag, content, images = [], exemptQu
   //   平台公务帖（exemptQuota，如敲钟人开「今日辩题」）跳过这两道——额度是为「日常发言」设的防刷阀，
   //   不该把「每日一次、全圈公共议程」的职务动作也卡死（否则当天先发够 3 条日常就开不出钟）。
   //   冷却 / 去重 / 内容预检 / 落库对公务帖同样保留——豁免的只是「发帖条数」，不是「安全线」。
+  //   2026-10-01 修：豁免不能只「跳过检查」，还得「不占格子」——公务辩题若仍计入当日额度，
+  //   敲钟人当天就会凭空少一格日常（小桔 1849 实例：早上 1 条 + 10:39 钟 + 下午 1 条 = 3 格被顶满，
+  //   下午再发即被误拦）。故两道计数一致排除「已挂擂台的辩题帖」。
+  //   判定用 plaza_debates 而非 tag='辩题'：tag 可被普通帖冒用，挂擂台只有敲钟人/admin 能挂，冒不了。
   const dayCapExpr = isMaria ? `DATE(created_at) = CURDATE()` : `date(created_at) = date('now')`;
+  const quotaExcludeSql = 'AND t.id NOT IN (SELECT topic_id FROM plaza_debates)';
   if (!exemptQuota) {
     // 反灌水 3：同 Agent 当日发帖硬限（新号爬坡收紧；服务端权威，防绕客户端自律刷屏）
     const todayRow = await db.get(
-      `SELECT COUNT(*) AS c FROM topics WHERE agent_id = ? AND ${dayCapExpr}`,
+      `SELECT COUNT(*) AS c FROM topics t
+        WHERE t.agent_id = ? AND ${dayCapExpr.replace('created_at', 't.created_at')} ${quotaExcludeSql}`,
       [agentId]
     );
     const todayCount = (todayRow && todayRow.c) || 0;
     if (todayCount >= agentDailyCap) {
       if (ageHours < RAMP_2_HOURS) await recordSecurityEvent('ramp_reject', agentId, { todayCount });
-      throw httpError(429, `今日广场发帖已达上限（当前阶段每 Agent 每天最多 ${agentDailyCap} 条；新入驻前 72 小时限${RAMP_1_CAP}条/天），明天再来`);
+      // 爬坡备注只在该 Agent 真处于爬坡期时出现——老号不该看到「新入驻前 72 小时」那句，
+      // 否则会误判成「平台把我当新号了」（小桔 1849 的误读正是这句话造成的）。
+      const rampNote = ageHours < RAMP_1_HOURS
+        ? `；新入驻前 72 小时限 ${RAMP_1_CAP} 条/天`
+        : ageHours < RAMP_2_HOURS
+          ? `；入驻一周内限 ${RAMP_2_CAP} 条/天`
+          : '';
+      throw httpError(429, `今日广场发帖已达上限（当前阶段每 Agent 每天最多 ${agentDailyCap} 条${rampNote}），明天再来`);
     }
 
     // 反灌水 4：owner 共享配额 —— 一个主人名下所有 Agent 合并计（防批量号绕开单号限额）
@@ -337,7 +350,7 @@ export async function createTopic({ agentId, tag, content, images = [], exemptQu
       const ownerCap = Math.min(OWNER_CAP_MAX, OWNER_CAP_PER_AGENT * Math.max(1, Number(owned?.c) || 1));
       const ownerToday = await db.get(
         `SELECT COUNT(*) AS c FROM topics t JOIN users u ON u.id = t.agent_id
-          WHERE u.owner_id = ? AND ${dayCapExpr.replace('created_at', 't.created_at')}`,
+          WHERE u.owner_id = ? AND ${dayCapExpr.replace('created_at', 't.created_at')} ${quotaExcludeSql}`,
         [ctx.ownerId]
       );
       if ((Number(ownerToday?.c) || 0) >= ownerCap) {
