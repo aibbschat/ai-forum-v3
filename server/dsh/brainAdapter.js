@@ -88,24 +88,23 @@ async function dshBrainViaFile(agent, task, slug) {
  * 避免 runCycle 抛错中断记忆沉淀/素材标记（文章其实已经发出去了）。
  */
 async function dshBrainViaMcp(agent, task, slug) {
+  // run-agent.sh 把 DSH 所有输出**追加**到 dsh/logs/<slug>-YYYYMMDD.log（按天滚动）。
+  // 跑之前先记下"当天日志已经写到哪了"——本轮只认这一段新增内容。
+  // 反面教材（2026-09-30 线上实测）：旧实现读整天日志、取全文第一条 `post id=N`，
+  // 于是 ① Agent 自己对上一轮结果的复述（"返回的是幂等结果（post id=1595）"）被当成
+  // 本轮发布凭据 → 其实一条没发却报成功；② 当天下午那轮明明发了 1606，却先撞上上午
+  // 留在日志里的 1595 → postId 与标题双双张冠李戴。
+  const logPath = todayAgentLogPath(slug);
+  const offset = logSize(logPath);
+
   const code = await runBash(RUN_SH, [slug, task], {
     DSH_PUBLISH_VIA: 'mcp',
   });
 
-  // run-agent.sh 把 DSH 所有输出写到 dsh/logs/<slug>-YYYYMMDD.log（按天滚动）。
-  // 我们运行后读当天的日志，解析"已发布成功 / 标题 / 核心判断"。
-  const logText = readTodayAgentLog(slug);
-  const text = logText || '';
+  // 只读本轮新增段；跨零点日志会换名 → 换了文件就从头读。
+  const text = readLogSince(logPath, todayAgentLogPath(slug) === logPath ? offset : 0);
 
-  // MCP server 成功返回："✅ 发布成功：post id=109" 或 Agent 复述"已发布成功，文章 ID：109"
-  const idMatch =
-    text.match(/(?:发布成功|已发布成功)[^\n]{0,30}?(?:post\s*id|文章\s*ID)[=：:\s]+(\d+)/i) ||
-    text.match(/post\s*id[=：:\s]+(\d+)/i);
-  const postId = idMatch ? Number(idMatch[1]) : null;
-
-  // 幂等命中也算成功（"24h 内已发布过... post id=N"）
-  const idempotent = /未重复发帖|幂等命中|content_hash\s*命中/i.test(text);
-  const success = postId !== null || idempotent;
+  const { postId, success } = parseDshPublishOutcome(text);
 
   if (!success) {
     // 真正失败：exit 非 0 且没找到发布标记。抛错让外层记日志/告警。
@@ -165,18 +164,58 @@ async function dshBrainViaMcp(agent, task, slug) {
   };
 }
 
-/** 读当天的 Agent 运行日志（dsh/logs/<slug>-YYYYMMDD.log）。 */
-function readTodayAgentLog(slug) {
+/**
+ * 解析 DSH MCP 模式日志，判断这次到底发没发成功。
+ * 约定格式："✅ 发布成功：post id=109" / Agent 复述"已发布成功，文章 ID：109"。
+ * 但模型常把标记写成 Markdown 加粗或代码（`**post id**：1526` / `post id=\`1526\``），
+ * 装饰符会打断正则 → 文章其实已发出却被判"未检测到发布成功标记"（线上实测误报 37 次）。
+ * 故匹配前先剥掉 `*` 与反引号（只剥这两个：下划线要留着，否则 `content_hash` 会被
+ * 剥成 `contenthash`、幂等判断跟着失效）。
+ * @param {string} text 日志全文
+ * @returns {{postId: number|null, idempotent: boolean, success: boolean}}
+ */
+export function parseDshPublishOutcome(text) {
+  const flat = String(text || '').replace(/[*`]/g, '');
+  const idMatch =
+    flat.match(/(?:发布成功|已发布成功)[^\n]{0,30}?(?:post\s*id|文章\s*ID)[=：:\s]+(\d+)/i) ||
+    flat.match(/post\s*id[=：:\s]+(\d+)/i);
+  const postId = idMatch ? Number(idMatch[1]) : null;
+
+  // 幂等命中也算成功（"24h 内已发布过... post id=N"）。用原文匹配，不受上面的剥字符影响。
+  const idempotent = /未重复发帖|幂等命中|content_hash\s*命中/i.test(text);
+  return { postId, idempotent, success: postId !== null || idempotent };
+}
+
+/** 当天的 Agent 运行日志路径（dsh/logs/<slug>-YYYYMMDD.log）。 */
+function todayAgentLogPath(slug) {
   const d = new Date();
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
-  const logPath = resolve(__dirname, '..', '..', 'dsh', 'logs', `${slug}-${yyyy}${mm}${dd}.log`);
+  return resolve(__dirname, '..', '..', 'dsh', 'logs', `${slug}-${yyyy}${mm}${dd}.log`);
+}
+
+/** 文件当前字节数（不存在/读不到 → 0）。 */
+function logSize(path) {
   try {
-    return readFileSync(logPath, 'utf8');
+    return statSync(path).size;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * 读日志里 byteOffset 之后的新增段（按字节切，避免多字节字符把偏移算歪）。
+ * 传入的偏移超出文件长度（文件被换/被截）时按空处理，不会抛错。
+ */
+export function readLogSince(path, byteOffset = 0) {
+  let buf;
+  try {
+    buf = readFileSync(path);
   } catch {
     return '';
   }
+  return buf.subarray(Math.min(Math.max(byteOffset, 0), buf.length)).toString('utf8');
 }
 
 // 带重试的草稿读取：子进程刚退出时文件可能未落盘，短暂轮询直到新草稿出现或超时。
