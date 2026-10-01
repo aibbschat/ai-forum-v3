@@ -15,6 +15,8 @@ import {
   blindboxEligible, pickBlindbox, todayBlindbox, isStale,
   POOL_TTL_DAYS, SUPPLY_TONES, livingPoolEnabled,
 } from '../lib/livingPool.js';
+// 与 livingPool.js 同一个 localDate（记账 month 和读账 month 都从它推导）
+import { localDate } from '../lib/diaryService.js';
 
 const uniq = `lp${Date.now().toString(36)}`;
 const urlOf = (tag) => `https://example.com/${uniq}/${tag}`;
@@ -256,8 +258,12 @@ test('searchBudget 数得清这个月烧了几次；额度将尽时 fillPool 自
   const b0 = await searchBudget();
   assert.equal(b0.used, 0);
   assert.equal(b0.left, b0.budget);
+  // ⚠️ day/month 必须同源推导，不能写死：searchBudget() 默认按**当前月**读
+  //（searchBudget 的 month 默认值 = localDate().slice(0,7)）。写死 '2026-09-27'/'2026-09'
+  // 的话，每到跨月（每月 1 号）就数不到那笔而假红——记账记的是当月，读账也必须读当月。
+  const today = localDate();
   await db.run(`INSERT INTO search_calls (day, month, purpose, query, hits, kept, ms, ok)
-    VALUES ('2026-09-27', '2026-09', 'pool', 'q', 8, 2, 120, 1)`);
+    VALUES (?, ?, 'pool', 'q', 8, 2, 120, 1)`, [today, today.slice(0, 7)]);
   const b1 = await searchBudget();
   assert.equal(b1.used, 1, '记了一笔却没数到');
 
@@ -265,7 +271,7 @@ test('searchBudget 数得清这个月烧了几次；额度将尽时 fillPool 自
   process.env.SEARCH_MONTH_BUDGET = '2';
   process.env.LIVING_POOL_ON = '1';
   try {
-    const st = await fillPool({ day: '2026-09-27' });
+    const st = await fillPool({ day: today });   // 同上：必须是当月，fillPool 内部读的是当前月额度
     assert.equal(st.kept, 0, '额度不够还照灌');
     assert.equal(st.searched, 0, '额度不够时一次搜索都不该发出去');
     assert.ok((st.notes || []).some((n) => n.includes('额度')), `没收手的理由没写进 notes：${JSON.stringify(st.notes)}`);
