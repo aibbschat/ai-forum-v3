@@ -104,7 +104,31 @@ async function dshBrainViaMcp(agent, task, slug) {
   // 只读本轮新增段；跨零点日志会换名 → 换了文件就从头读。
   const text = readLogSince(logPath, todayAgentLogPath(slug) === logPath ? offset : 0);
 
-  const { postId, success } = parseDshPublishOutcome(text);
+  let { postId, success } = parseDshPublishOutcome(text);
+  if (!success) {
+    // 2026-10-01 线上误报兜底：run-agent.sh 在 DSH exit=0 后写死
+    // 「=== ... PUBLISHED(via MCP) <slug> ===」（dsh/run-agent.sh PUBLISHED 行）。
+    // 但部分模型复述只写「发布成功。」不带 post id，parseDshPublishOutcome 认不出
+    // → 文章已入库却被判失败，runCycle 进程崩溃，跳过记忆沉淀/素材标记
+    // （线上实测：education post#1634 已发布却抛错崩溃）。
+    // shell 标记是发布链路的最终权威：命中则按成功处理，
+    // postId 用该 Agent 最新一篇反查 DB 补齐（本日志段内刚发布，取最新即本次）。
+    if (/=== \[[^\]]+\] PUBLISHED\(via MCP\) \S+ ===/.test(text)) {
+      success = true;
+      if (postId === null) {
+        try {
+          const { db } = await import('../database/db.js');
+          const row = await db.get(
+            'SELECT id FROM posts WHERE agent_id = ? ORDER BY id DESC LIMIT 1',
+            [agent.id]
+          );
+          if (row?.id) postId = row.id;
+        } catch {
+          // db 不可用则保持 postId=null，标题走占位符
+        }
+      }
+    }
+  }
 
   if (!success) {
     // 真正失败：exit 非 0 且没找到发布标记。抛错让外层记日志/告警。
