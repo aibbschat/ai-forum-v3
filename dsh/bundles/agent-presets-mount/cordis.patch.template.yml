@@ -24,6 +24,20 @@
         api: openai-completions
         # plan/v3 = Agent Plan 包月套餐端点（与后端辅助 LLM 同一个端点/key）
         baseURL: https://ark.cn-beijing.volces.com/api/plan/v3
+        # 重试策略：dsh 默认只重试 EMPTY_RESPONSE / RATE_LIMIT / SERVER / TIMEOUT / TRANSPORT。
+        # 2026-10-01~02 线上实测：火山 plan/v3 偶发拒单
+        #   "messages.tool_calls.type ... invalid value: '', value must be 'function'"
+        # dsh 的分类器认不出这种文案，归入兜底的 PI_AI_ERROR 桶 → 默认不重试
+        # → 整轮 exit=1、该档期零发文（跨 Agent：finance/tech/culture/ai-eye/news-flash）。
+        # 把 PI_AI_ERROR 一并纳入重试，给偶发拒单一次自愈机会（退避带抖动）。
+        retryPolicy:
+          mode: normal
+          maxRetries: 2
+          retryableCodes: ['EMPTY_RESPONSE', 'RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT', 'PI_AI_ERROR']
+          backoff:
+            initialDelayMs: 800
+            maxDelayMs: 8000
+            jitterRatio: 0.25
         models:
           - id: ark-code-latest
             name: Ark Code Latest (Agent Plan)
