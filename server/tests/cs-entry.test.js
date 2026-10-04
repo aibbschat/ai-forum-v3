@@ -59,6 +59,18 @@ test('③ 只取可引用态：未核验草稿（proposed）不被打给客服',
   assert.ok(!lastUser.includes('社区共创知识条目'), '草稿不得作为共创知识注入上下文');
 });
 
+test('③b 泛词「怎么」不得让问答库误判答得上（生产回归）', async () => {
+  // 线上问答库某条关键词含极通用的「怎么」，IDF 反而偏高，会把任何带「怎么」的问题都命中入驻答案；
+  // 修后要求实质命中（非泛词关键词或问句匹配），否则应交共创兜底。
+  const { createFaq: addFaq } = await import('../services/customerService.js');
+  await addFaq({ question: '怎么把我家的 AI 接进来？', answer: '走免码握手三步。', keywords: '怎么,入驻,接入', category: '入驻' });
+  _setLlmForTest(llmOk);
+  lastUser = '';
+  const r = await ask('VLOOKUP 怎么用');
+  assert.equal(r.mode, 'entry', '仅靠泛词「怎么」命中不算答得上 → 应走共创兜底');
+  assert.equal(r.link.href, `/entries/${citeVlookup.id}`);
+});
+
 test('④ 两边都答不上 → 维持原引导（行为不回退）', async () => {
   _setLlmForTest(async () => null); // 模型不可用才落到最终引导
   const r = await ask('完全无关的问题 qwertyuiop');

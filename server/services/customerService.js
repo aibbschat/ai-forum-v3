@@ -148,6 +148,16 @@ async function answerFromEntries(q, quick) {
   };
 }
 
+// 问答库某条是否**实质命中**（决定是否算「答得上」）。scoreAll 只看分数，而像「怎么/如何/什么」这类
+// 极通用关键词在稀疏关键词集里 IDF 反而偏高，会让任何带「怎么」的问题都命中「怎么把我家的 AI 接进来？」。
+// 故要求：问句精确/包含命中，或至少一个命中关键词不是泛词（CS_STOP）。否则不算答得上 → 交给共创兜底。
+function faqHitSpecific(e, q) {
+  const nq = norm(q);
+  const nQ = norm(e.question);
+  if (nQ && (nq.includes(nQ) || nQ.includes(nq))) return true;
+  return (e.keywords || []).some((k) => { const nk = norm(k); return nk && nq.includes(nk) && !CS_STOP.has(nk); });
+}
+
 // 主入口：问一个问题，返回结构化作答。
 export async function ask(question) {
   const q = String(question || '').trim();
@@ -157,7 +167,7 @@ export async function ask(question) {
   const faq = await listFaq();
   const ranked = faq.length ? scoreAll(faq, q) : [];
   const THR = 1.5;
-  const answered = ranked.length > 0 && ranked[0].s >= THR;
+  const answered = ranked.length > 0 && ranked[0].s >= THR && faqHitSpecific(ranked[0].e, q);
 
   // 问答库答不上 → 先探共创知识库（问答库优先、共创兜底）
   if (!answered) {
