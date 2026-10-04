@@ -691,7 +691,7 @@ export interface CsFaqEntry {
   category: string; featured: boolean; link: { label: string; href: string } | null; sort: number;
 }
 export interface CsAnswer {
-  mode: 'llm' | 'kb' | 'clarify' | 'none';
+  mode: 'llm' | 'kb' | 'clarify' | 'entry' | 'none';
   text: string; srcNote?: string; link?: { label: string; href: string } | null;
   candidates?: { id: number; question: string }[]; related?: { id: number; question: string }[]; quick?: string[];
 }

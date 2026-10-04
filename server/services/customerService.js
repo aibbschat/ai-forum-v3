@@ -1,5 +1,10 @@
 import { db } from '../database/db.js';
 import { chat } from '../llm/client.js';
+import { lookupEntries } from './entryService.js';
+
+// 测试接缝：允许注入 mock LLM（与 companionChatService 同款；生产勿用）。
+let llmChatImpl = chat;
+export function _setLlmForTest(fn) { llmChatImpl = fn || chat; }
 
 // 新手问答「小圈圈」服务。单一事实源 = cs_faq 表（全站新手问题唯一库，admin 可增删改）。
 // 作答：先按 IDF 从库里检索 topK，交给统一模型路由 chat({purpose:'cs'}) 理解并作答（只依据知识库、不背书第三方）；
@@ -72,6 +77,77 @@ function scoreAll(faq, q) {
   }).filter((x) => x.s > 0).sort((a, b) => b.s - a.s);
 }
 
+// 调模型作答（统一 400 token / 0.3 温度；不可用返回 null，交调用方降级）。
+async function callCsLlm(sys, user) {
+  try {
+    const r = await llmChatImpl({
+      purpose: 'cs',
+      messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
+      temperature: 0.3, maxTokens: 400,
+    });
+    const t = r && r.content ? String(r.content).trim() : '';
+    return t || null;
+  } catch { return null; }
+}
+
+// 从自然语言问题里抽检索词：英文/数字按词（≥2 位）、中文按 2 字滑窗，滤掉常见虚词。
+const CS_STOP = new Set([
+  '怎么', '如何', '什么', '为何', '可以', '不能', '能否', '是否', '我要', '我想', '帮我', '一下', '请问',
+  '介绍', '使用', '这个', '那个', '哪些', '哪个', '多少', '时候', '需要', '应该', '一个', '我的', '你的',
+]);
+function keywordsOf(q) {
+  const s = String(q || '').toLowerCase();
+  const out = new Set();
+  for (const m of s.matchAll(/[a-z0-9]{2,}/g)) out.add(m[0]);
+  for (const seg of s.match(/[\u4e00-\u9fa5]+/g) || []) {
+    for (let i = 0; i + 2 <= seg.length; i++) out.add(seg.slice(i, i + 2));
+  }
+  return [...out].filter((k) => !CS_STOP.has(k));
+}
+
+// 兜底：问答库答不上时，去共创知识库找**已核验可引用**条目（scope=answer 只放行 sourced/corroborated）。
+// lookupEntries 的 q 是整串 LIKE（不对自然语言分词），故这里一次取回可引用条目、在内存里按关键词命中数打分。
+// 命中则用「简短要点 + 原文链接」作答，并注明来源是社区共创（平台不为他人内容背书）；无命中返回 null。
+// ⚠️ 上限 50 条（lookupEntries 硬上限）：可引用条目增长超过 50 后需另开专用检索接口。
+async function answerFromEntries(q, quick) {
+  const kws = keywordsOf(q);
+  if (!kws.length) return null;
+  let res;
+  try { res = await lookupEntries({ scope: 'answer', limit: 50 }); }
+  catch (e) { console.warn('[cs] lookupEntries 失败（忽略）:', e?.message || e); return null; }
+  const all = (res && res.entries) || [];
+  if (!all.length) return null;
+
+  const scored = all
+    .map((e) => {
+      const hay = (String(e.title || '') + ' ' + String(e.excerpt || '')).toLowerCase();
+      return { e, s: kws.reduce((n, k) => n + (hay.includes(k) ? 1 : 0), 0) };
+    })
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s);
+  if (!scored.length) return null;
+
+  const entries = scored.slice(0, 3).map((x) => x.e);
+  const best = entries[0];
+  const link = { label: '看这条共创知识', href: `/entries/${best.id}` };
+  const srcNote = '来自社区共创知识 · 《' + best.title + '》';
+
+  const sys =
+    '你是 AI 圈官方客服「小圈圈」，服务第一次来的新手主人。下面提供的是 AI 圈**社区共创知识**（由社区 Agent 共建、已核验的实操条目）。' +
+    '只依据这些条目回答：用简体中文，口语、简短（≤120字），给 2-3 句可操作要点。' +
+    '必须说明这些内容来自「社区共创」，不要当成平台官方结论，也不为任何第三方厂商背书；条目里没有的绝不编造。';
+  const user = '社区共创知识条目(JSON)：\n'
+    + JSON.stringify(entries.map((x) => ({ title: x.title, excerpt: x.excerpt, state: x.state, curator: x.curatorName || null })))
+    + '\n\n用户问题：' + q;
+  const llmText = await callCsLlm(sys, user);
+
+  return {
+    mode: 'entry',
+    text: llmText || (best.excerpt || best.title), // LLM 不可用：直接给摘要/标题，不空手
+    srcNote, link, candidates: [], related: [], quick,
+  };
+}
+
 // 主入口：问一个问题，返回结构化作答。
 export async function ask(question) {
   const q = String(question || '').trim();
@@ -79,26 +155,32 @@ export async function ask(question) {
   if (!q || q.length > 300) return { mode: 'none', text: '问题有点长或空了，换个说法问我～', candidates: [], related: [], quick };
 
   const faq = await listFaq();
+  const ranked = faq.length ? scoreAll(faq, q) : [];
+  const THR = 1.5;
+  const answered = ranked.length > 0 && ranked[0].s >= THR;
+
+  // 问答库答不上 → 先探共创知识库（问答库优先、共创兜底）
+  if (!answered) {
+    const hit = await answerFromEntries(q, quick);
+    if (hit) return hit;
+  }
+
   if (!faq.length) return { mode: 'none', text: '知识库还空着，先去「新手上手」看看～', candidates: [], related: [], quick };
 
-  const ranked = scoreAll(faq, q);
   const ctx = (ranked.slice(0, 5).map((x) => x.e)).length ? ranked.slice(0, 5).map((x) => x.e) : faq.slice(0, 8);
 
-  // 交给我们自己的模型理解作答（chat 返回 null 表示全供应商不可用 → 下面降级）
+  // 交给我们自己的模型理解作答（callCsLlm 返回 null 表示全供应商不可用 → 下面降级）
   const sys =
     '你是 AI 圈官方客服「小圈圈」，服务第一次来的新手主人。只依据下面提供的知识库条目回答；库里没有的就友好说明没有、并引导去看「新手上手」(https://aibbs.chat/start) 或站内反馈，绝不编造。' +
     '涉及“该用哪家 AI”（Workbody/腾讯/字节/智谱/Kimi 等）只给判断标准（能否跑命令、要不要装连接器），不推荐也不背书任何第三方厂商。用简体中文，口语、简短（≤120字）。';
   const user = '知识库条目(JSON)：\n' + JSON.stringify(ctx.map((x) => ({ question: x.question, answer: x.answer, category: x.category, link: x.link && x.link.href }))) + '\n\n用户问题：' + q;
-  let llm = null;
-  try { llm = await chat({ purpose: 'cs', messages: [{ role: 'system', content: sys }, { role: 'user', content: user }], temperature: 0.3, maxTokens: 400 }); }
-  catch { llm = null; }
-  if (llm && llm.content && llm.content.trim()) {
+  const llmText = await callCsLlm(sys, user);
+  if (llmText) {
     const best = ranked[0] && ranked[0].e;
-    return { mode: 'llm', text: llm.content.trim(), srcNote: '由模型理解你的问题后 · 基于 ' + ctx.length + ' 条知识库作答', link: best && best.link, candidates: [], related: [], quick };
+    return { mode: 'llm', text: llmText, srcNote: '由模型理解你的问题后 · 基于 ' + ctx.length + ' 条知识库作答', link: best && best.link, candidates: [], related: [], quick };
   }
 
   // 降级：纯检索（IDF）。命中且唯一 → 回库里既有答案；两条咬太近 → 澄清；否则引导。
-  const THR = 1.5;
   const top = ranked[0], second = ranked[1];
   const ambiguous = second && second.s >= THR && second.s >= top.s * 0.8 && second.e.id !== top.e.id;
   if (top && top.s >= THR && !ambiguous) {

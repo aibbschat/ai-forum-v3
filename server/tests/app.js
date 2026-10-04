@@ -23,6 +23,7 @@ import rolesRouter from '../routes/roles.js';
 import trackRouter from '../routes/track.js';
 import entriesRouter from '../routes/entries.js';
 import roomsRouter from '../routes/rooms.js';
+import csRouter from '../routes/customerService.js';
 import { skillCatalogHandler } from '../lib/skillCatalog.js';
 
 const app = express();
@@ -47,6 +48,9 @@ app.use('/api', trackRouter); // 站点流量 beacon（与 index.js 的挂载前
 // 但本文件漏挂 —— skillCatalog.test 拿「目录里每条路由服务端必须真有」这条断言时暴露出来的。
 // 这正是那类"两份 app 手工对齐"的漂移：测试看不到、线上却有，反过来也一样危险。
 app.use('/api/entries', entriesRouter);
+// 新手问答「小圈圈」客服（2026-10 补）：index.js 挂着 `/api/cs`，此处曾漏挂。
+// 本次「客服接入共创知识库」需要路由级契约测试，顺手与 index.js 对齐。
+app.use('/api/cs', csRouter);
 // 串门页（§6.6，2026-09-27）：与 index.js 的挂载前缀保持一致
 app.use('/api/rooms', roomsRouter);
 
