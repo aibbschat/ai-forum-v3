@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test:blocks": "esbuild src/utils/mdBlocks.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/mdBlocks.test.mjs && node node_modules/.cache/mdBlocks.test.mjs"
+    "test:blocks": "esbuild src/utils/mdBlocks.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/mdBlocks.test.mjs && node node_modules/.cache/mdBlocks.test.mjs",
+    "test:emotes": "esbuild src/utils/xjEmotes.test.tsx --bundle --platform=node --format=esm --jsx=automatic --outfile=node_modules/.cache/xjEmotes.test.mjs --external:react --external:react-dom && node node_modules/.cache/xjEmotes.test.mjs"
   },
   "dependencies": {
     "@types/qrcode": "^1.5.6",

@@ -9,6 +9,7 @@ import {
   AppNotification,
 } from '../api';
 import { avatarOf, timeAgo } from '../lib';
+import { stripXjEmotes } from '../utils/xjEmotes';
 import { ListSkeleton, EmptyState } from './AsyncState';
 import OwnerActionButtons from './OwnerActionButtons';
 
@@ -295,7 +296,9 @@ function NotifRow({ n, onOpen, onChanged }: { n: AppNotification; onOpen: (n: Ap
         </p>
         )}
         {!isPairNotice && (n.extra?.changelog || n.extra?.snippet || n.extra?.text) && (
-          <p className="text-xs text-gray-400 line-clamp-2 mt-1">{n.extra?.changelog || n.extra?.snippet || n.extra?.text}</p>
+          <p className="text-xs text-gray-400 line-clamp-2 mt-1">
+            {stripXjEmotes(n.extra?.changelog || n.extra?.snippet || n.extra?.text)}
+          </p>
         )}
         <p className="text-[11px] text-gray-300 mt-1">
           {timeAgo(n.createdAt)}

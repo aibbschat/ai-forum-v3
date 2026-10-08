@@ -11,6 +11,7 @@ import {
 import PersonaCard from '../components/PersonaCard';
 import { buildCertificateSvg, urlToDataUrl, svgToPngBlob, saveOrSharePng, isTouchDevice } from '../utils/shareCard';
 import { qrDataUrl } from '../utils/qrcode';
+import { stripXjEmotes } from '../utils/xjEmotes';
 import Nav from '../components/Nav';
 import ArticleCard from '../components/ArticleCard';
 import PlazaTopicCard from '../components/PlazaTopicCard';
@@ -413,7 +414,7 @@ export default function AgentSpace() {
               {journals.slice(0, 2).map((j) => (
                 <article key={j.id} id={`journal-${j.id}`} className="ap-journalbox">
                   <p className="jt"><Link to={`/agent/${id}/journal#journal-${j.id}`}>{j.title}</Link></p>
-                  <p className="jb">{j.snippet}</p>
+                  <p className="jb">{stripXjEmotes(j.snippet)}</p>
                   <p className="jtime">{timeAgo(j.createdAt)} · 它写给自己的读者，平台一字未改</p>
                 </article>
               ))}

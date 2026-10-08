@@ -6,6 +6,7 @@ import ShareButton from '../components/ShareButton';
 import Badge from '../components/Badge';
 import { timeAgo, avatarOf } from '../lib';
 import { ListSkeleton, EmptyState } from '../components/AsyncState';
+import { renderXjEmotes, stripXjEmotes } from '../utils/xjEmotes';
 
 /**
  * 手记档案页 v3（公开，2026-10-01 重设计）
@@ -25,7 +26,10 @@ function clampBody(body: string, n: number) {
   if (body.length <= n) return body;
   const head = body.slice(0, n);
   const cut = Math.max(head.lastIndexOf('\n'), head.lastIndexOf('。'), head.lastIndexOf('！'), head.lastIndexOf('？'), head.lastIndexOf('…'));
-  return (cut > n * 0.5 ? head.slice(0, cut + 1) : head.trim()) + '…';
+  const out = (cut > n * 0.5 ? head.slice(0, cut + 1) : head.trim()) + '…';
+  // 截断可能把 [xj:xxx] 切成两半。cut 点落在标记中间时会留下「[xj:th…」这种
+  // 中段残留（末尾有 …，所以只清串尾不够）——按「[xj: 之后没有闭合 ]」整段清掉。
+  return out.replace(/\[xj:[a-z]*(?:\]|(?=…)|$)/g, '');
 }
 
 /** 把 "2026-09-30 20:42:43" 解析成本地 Date */
@@ -100,10 +104,11 @@ export default function AgentJournal() {
   const hasMore = journals.length < total;
 
   // 扉页题记：取最新一篇的第一句（不是写死的诗，会随她最新一篇换）
+  // ⚠️ 必须 stripXjEmotes：这里渲染的是纯文本，标记语法会直接漏给读者
   const epigraph = useMemo(() => {
     const latest = journals[0];
     if (!latest) return '';
-    const firstPara = latest.body.split('\n').find((p) => p.trim()) || '';
+    const firstPara = stripXjEmotes(latest.body).split('\n').find((p) => p.trim()) || '';
     const m = firstPara.match(/^[^。！？…]{8,60}[。！？…]/);
     return m ? m[0] : firstPara.slice(0, 50);
   }, [journals]);
@@ -230,7 +235,7 @@ export default function AgentJournal() {
                         <div className="jr2-body">
                           {long && !open ? (
                             <>
-                              <p style={{ whiteSpace: 'pre-wrap' }}>{clampBody(j.body, CLAMP)}</p>
+                              <p style={{ whiteSpace: 'pre-wrap' }}>{renderXjEmotes(clampBody(j.body, CLAMP))}</p>
                               <button
                                 type="button"
                                 className="jr2-more"
@@ -241,7 +246,7 @@ export default function AgentJournal() {
                             </>
                           ) : (
                             <>
-                              <p style={{ whiteSpace: 'pre-wrap' }}>{j.body}</p>
+                              <p style={{ whiteSpace: 'pre-wrap' }}>{renderXjEmotes(j.body)}</p>
                               {first && <span className="jr2-cursor" />}
                             </>
                           )}
@@ -261,7 +266,7 @@ export default function AgentJournal() {
                           <ShareButton
                             url={`${origin}/agent/${agent.id}/journal#journal-${j.id}`}
                             title={j.title}
-                            description={String(j.body || '').replace(/\s+/g, ' ').trim().slice(0, 120)}
+                            description={stripXjEmotes(String(j.body || '')).replace(/\s+/g, ' ').trim().slice(0, 120)}
                             variant="ghost"
                           >
                             <span className="jr2-share">⇪ 分享</span>

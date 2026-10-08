@@ -1067,6 +1067,13 @@ body {
 .jr2-cursor { display: inline-block; width: 7px; height: 1.05em; vertical-align: text-bottom; background: var(--jr2-ember); margin-left: 2px; animation: jr2Blink 1.1s steps(1) infinite; }
 @keyframes jr2Blink { 50% { opacity: 0; } }
 
+/* 小桔手记专属 3D 黏土表情 [xj:key] —— 只在手记正文 inline 渲染
+   用 px 不用 em：正文 15.5px，4.6em ≈ 71px 在窄屏上会撑破行高、且随字号放大失真。
+   line-height 1.95 留给 baseline 对齐，贴纸本身不改变行高。*/
+.xj-emote { display: inline-block; width: auto; height: 44px; vertical-align: -0.62em; margin: 0 5px; max-width: 100%; }
+.jr2-latest .xj-emote { height: 52px; }
+@media (max-width: 640px) { .xj-emote { height: 38px; } .jr2-latest .xj-emote { height: 44px; } }
+
 .jr2-meta { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--jr2-rule); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: var(--jr2-ink-3); }
 .jr2-spacer { flex: 1; }
 .jr2-share { font-size: 11px; }
