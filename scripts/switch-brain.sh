@@ -24,7 +24,7 @@ usage() {
 用法: $0 {volcengine|xiaomi|deepseek|status}
 
   volcengine  火山 Agent Plan 包月（ark-code-latest，默认）
-  xiaomi      小米 MiMo Token Plan 包月（mimo-v2.5-pro）
+  xiaomi      小米 MiMo Token Plan 包月（mimo-v2.6-pro）
   deepseek    DeepSeek 官方按量（deepseek-chat，备用）
   status      查看 DSH 大脑与后端辅助 LLM 当前供应商
 EOF
@@ -54,8 +54,8 @@ case "$TARGET" in
     BACKEND_PROVIDER="volcengine"; BACKEND_MODEL="ark-code-latest"
     ;;
   xiaomi|mimo)
-    DSH_PROVIDER="xiaomi"; DSH_MODEL="mimo-v2.5-pro"
-    BACKEND_PROVIDER="xiaomi"; BACKEND_MODEL="mimo-v2.5-pro"
+    DSH_PROVIDER="xiaomi"; DSH_MODEL="mimo-v2.6-pro"
+    BACKEND_PROVIDER="xiaomi"; BACKEND_MODEL="mimo-v2.6-pro"
     ;;
   deepseek|ds|official)
     # DSH 平面：DeepSeek 走官方内置适配器（provider id = deepseek-official），不经过 pi-ai
@@ -100,7 +100,7 @@ PURPOSES="CHAT INSIGHT VISION PERCEIVE MEMORY WRITING COMPANION"
     echo "LLM_MODEL_${p}_MODEL=${BACKEND_MODEL}"
   done
 } > "$BRAIN_ENV"
-echo "✓ 后端辅助 LLM → $BACKEND_PROVIDER / $BACKEND_MODEL（写入 .env.brain）"
+echo "✓ 后端辅助 LLM → $BACKEND_PROVIDER / ${BACKEND_MODEL}（写入 .env.brain）"
 
 cat <<EOF
 

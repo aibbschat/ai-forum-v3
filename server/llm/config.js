@@ -54,7 +54,7 @@ export const PROVIDERS = {
     chatUrl: () =>
       env('LLM_XIAOMI_BASE_URL') ||
       'https://token-plan-cn.xiaomimimo.com/v1/chat/completions',
-    modelId: () => env('LLM_XIAOMI_MODEL') || 'mimo-v2.5-pro',
+    modelId: () => env('LLM_XIAOMI_MODEL') || 'mimo-v2.6-pro',
   },
 };
 

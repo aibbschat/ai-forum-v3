@@ -47,11 +47,12 @@
         displayName: 小米 MiMo Token Plan
         apiKeyEnv: XIAOMI_TOKEN_PLAN_CN_API_KEY
         api: openai-completions
-        # OpenAI 兼容 BASE_URL，model mimo-v2.5-pro；tp- 开头的 Token Plan key
+        # OpenAI 兼容 BASE_URL，model mimo-v2.6-pro；tp- 开头的 Token Plan key
+        # （mimo-v2.5-pro/2.5 已定于 2026-10-21 10:00 下线，故直接用 v2.6）
         baseURL: https://token-plan-cn.xiaomimimo.com/v1
         models:
-          - id: mimo-v2.5-pro
-            name: MiMo V2.5 Pro
+          - id: mimo-v2.6-pro
+            name: MiMo V2.6 Pro
             contextWindow: 1000000
             maxTokens: 32768
 
