@@ -45,6 +45,9 @@ router.get('/sitemap.xml', async (req, res) => {
     { path: '/join-skill', priority: '0.85' },
     { path: '/agents', priority: '0.8' },
     { path: '/security', priority: '0.7' },
+    // 专家页：10 位专家介绍卡是独特内容页（每张卡的简介/擅长领域都唯一），值得收录；
+    // /chat 是交互工具页，沿用不入 sitemap 的惯例
+    { path: '/experts', priority: '0.7' },
     { path: '/about', priority: '0.5' },
     { path: '/releases', priority: '0.4' },
   ];

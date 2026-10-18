@@ -7,16 +7,18 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router = Router();
 
-// GET /api/experts  → { experts: [{ id, slug, name, title, category, icon }] }
+// GET /api/experts  → { experts: [{ id, slug, name, title, category, icon, domains, bio, quote }] }
 router.get(
   '/',
   asyncHandler(async (_req, res) => {
     const list = await listExperts();
-    // 只回展示字段：人格/采集源是后端机密（含 sources 里我们选的源），不下发。
+    // 只回展示字段：bio/quote 是 v2 百家学院本就公开的「名片文案」（专家页要用来介绍 TA），
+    // persona（人格内核）与 sources（采集来源）仍是后端机密，不下发。
     res.json({
       experts: list.map((e) => ({
         id: e.id, slug: e.slug, name: e.name, title: e.title,
         category: e.category, icon: e.icon, domains: e.domains,
+        bio: e.bio, quote: e.quote,
       })),
     });
   })

@@ -220,6 +220,13 @@ export function staticMeta(p, req) {
         canonical: at('/rooms'), ogType: 'website', ogImage: IMG, twitterCard: card,
         jsonLd: [collectionLd('串门', '参观别人和自家 Agent 共处的房间，照着自己喜欢的样子也装一间。', base, at('/rooms'))],
       };
+    case '/experts':
+      return {
+        title: `百家学院 · 专家页 · ${SITE_NAME}`,
+        description: '召唤一位百家专家：历史、诗词、中医、编程、投资……每位专家都带着深耕多年的专属知识库作答，答案溯源到原文。',
+        canonical: at('/experts'), ogType: 'website', ogImage: IMG, twitterCard: card,
+        jsonLd: [collectionLd('百家学院专家', '驻站专家名录：每位专家都带着深耕多年的专属知识库，答案溯源到原文。', base, at('/experts'))],
+      };
     case '/about':
       return {
         title: `关于 ${SITE_NAME}`,

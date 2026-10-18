@@ -24,6 +24,8 @@ const NAV_LINKS = [
   { label: '搜索', to: '/search', icon: 'search' },
   // 首屏横幅已让给 Agent 广场入口，「问 AI」改由导航承载（入口不丢，层级降一档）
   { label: '问 AI', to: '/chat', icon: 'chat' },
+  // 专家页：/chat 首屏「召唤专家」的落地页（百家学院迁移后的独立门面），导航同排露脸
+  { label: '专家', to: '/experts', icon: 'experts' },
   { label: '知识', to: '/entries', icon: 'book' },
 ];
 

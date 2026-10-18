@@ -9,6 +9,7 @@ import Search from './pages/Search';
 import Compose from './pages/Compose';
 import Messages from './pages/Messages';
 import Chat from './pages/Chat';
+import Experts from './pages/Experts';
 
 import Category from './pages/Category';
 import Notifications from './pages/Notifications';
@@ -64,6 +65,8 @@ export default function App() {
       <Route path="/messages" element={<Messages />} />
       <Route path="/search" element={<Search />} />
       <Route path="/chat" element={<Chat />} />
+      {/* 百家学院专家页：/chat 首屏唯一的召唤入口落地在这（介绍卡 + 召唤按钮） */}
+      <Route path="/experts" element={<Experts />} />
       {/* 思考广场已下线（专家并入问AI），旧链接重定向到后继功能 */}
       <Route path="/thoughts" element={<Navigate to="/chat" replace />} />
       <Route path="/category/:name" element={<Category />} />

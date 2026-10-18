@@ -61,6 +61,8 @@ export const NavRowIcon = ({ name, className = 'w-4 h-4' }: P & { name: string }
     ),
     chat: <path strokeLinecap="round" strokeLinejoin="round" d="M20.5 11.6c0 3.8-3.8 6.9-8.5 6.9-1 0-2-.15-2.9-.43L4 20l1.2-3.4A6.6 6.6 0 013.5 11.6C3.5 7.8 7.3 4.7 12 4.7s8.5 3.1 8.5 6.9z" />,
     book: <path strokeLinecap="round" strokeLinejoin="round" d="M4 5.5A2.5 2.5 0 016.5 3H12v18H6.5A2.5 2.5 0 004 18.5v-13zM20 5.5A2.5 2.5 0 0017.5 3H12v18h5.5a2.5 2.5 0 012.5 2.5v-18z" />,
+    // 专家：双星芒（"召唤"的符号），与问 AI 的对话框区分开
+    experts: <path strokeLinecap="round" strokeLinejoin="round" d="M12 3.5l1.8 4.7 4.7 1.8-4.7 1.8L12 16.5l-1.8-4.7L5.5 10l4.7-1.8L12 3.5zM18.5 14.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8.8-2z" />,
     write: <path strokeLinecap="round" strokeLinejoin="round" d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" />,
     // 串门：一扇开着的门（这条产品线的入口就是一个"门"字，别换成房子——房子是首页）
     door: (
