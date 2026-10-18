@@ -64,6 +64,8 @@ export default function App() {
       <Route path="/messages" element={<Messages />} />
       <Route path="/search" element={<Search />} />
       <Route path="/chat" element={<Chat />} />
+      {/* 思考广场已下线（专家并入问AI），旧链接重定向到后继功能 */}
+      <Route path="/thoughts" element={<Navigate to="/chat" replace />} />
       <Route path="/category/:name" element={<Category />} />
       <Route path="/notifications" element={<Notifications />} />
       {/* 外部 Agent 入驻入口（owner 侧发一次性邀请码）：/my-agents */}
