@@ -1,14 +1,22 @@
 // 发布标记解析测试（MCP 直连模式）：
 // 钉住"模型用 Markdown 装饰包住标记时不能误判失败"——线上实测误报 37 次，文章其实已发出。
 // 依据：DSH 线上大脑硬规则 + 2026-09-30 线上只读勘察记录。
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, appendFileSync, statSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import './env.js';
-import { parseDshPublishOutcome, readLogSince } from '../dsh/brainAdapter.js';
+import { parseDshPublishOutcome, readLogSince, newestAgentPost } from '../dsh/brainAdapter.js';
+import { closePool } from '../database/mariadb.js';
+
+// newestAgentPost 会真的连库查（生产 DB_DRIVER=mariadb）→ 池里的连接会一直挂着，
+// node --test 跑完不会自动退出，测试进程会卡到超时。
+// 故显式收尾：把池关掉，让事件循环能干净退出。
+after(async () => {
+  await closePool();
+});
 
 test('标准格式：MCP server 返回的 "发布成功：post id=109"', () => {
   const r = parseDshPublishOutcome('✅ 发布成功：post id=109');
@@ -96,4 +104,31 @@ test('readLogSince 容错：文件不存在、偏移越界都不抛错', () => {
   writeFileSync(p, 'abc');
   assert.equal(readLogSince(p, 999), ''); // 偏移超出长度 → 空，不是乱码
   rmSync(dir, { recursive: true, force: true });
+});
+
+// ─────────────────────────────────────────────────────────────
+// 2026-10-05 线上回归：假成功骗过巡检（education 停更 2 天的真凶）
+// 现象：本轮一条没发，模型却复述「文章已由 MCP 直接发布（postId=387）」，
+// 而 387 在 posts 表里不存在（教育真实最新是 10-03 的 #1694）。
+// 旧实现只 grep 日志 → 判成功 → runCycle 跳过素材标记与记忆沉淀，巡检连续显示 ✅。
+// 新铁律：DB 是唯一权威 —— 必须存在「比跑之前基线更新的、属本 Agent 的文章」。
+// ─────────────────────────────────────────────────────────────
+
+test('日志声称的 post id 仍能被解析（向后兼容），但权威性已移交 DB', () => {
+  const r = parseDshPublishOutcome('✅ 文章已由 MCP 直接发布（postId=387）');
+  assert.equal(r.postId, 387);
+});
+
+test('newestAgentPost：缺 agent.id / DB 不可用时安全返回 null，不抛错', async () => {
+  assert.equal(await newestAgentPost(null), null);
+  assert.equal(await newestAgentPost({}), null);
+  assert.equal(await newestAgentPost({ id: undefined }), null);
+});
+
+test('newestAgentPost：newerThan 只认比基线更新的行，不把旧文当本轮产出', async () => {
+  const r = await newestAgentPost({ id: 83 }, { newerThan: 1694 });
+  assert.ok(
+    r === null || (typeof r.id === 'number' && r.id > 1694),
+    '有返回时 id 必须大于基线，绝不能是更旧的行'
+  );
 });

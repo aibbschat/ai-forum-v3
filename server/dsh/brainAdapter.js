@@ -97,59 +97,64 @@ async function dshBrainViaMcp(agent, task, slug) {
   const logPath = todayAgentLogPath(slug);
   const offset = logSize(logPath);
 
+  // ── 2026-10-05 线上误报修复（education 停更 2 天的真凶）──
+  // 跑之前先记基线：本 Agent 当前最大文章 id。DB 是唯一权威，日志会自相矛盾。
+  const baseline = await newestAgentPost(agent);
+
   const code = await runBash(RUN_SH, [slug, task], {
     DSH_PUBLISH_VIA: 'mcp',
   });
 
   // 只读本轮新增段；跨零点日志会换名 → 换了文件就从头读。
   const text = readLogSince(logPath, todayAgentLogPath(slug) === logPath ? offset : 0);
+  const parsed = parseDshPublishOutcome(text);
 
-  let { postId, success } = parseDshPublishOutcome(text);
-  if (!success) {
-    // 2026-10-01 线上误报兜底：run-agent.sh 在 DSH exit=0 后写死
-    // 「=== ... PUBLISHED(via MCP) <slug> ===」（dsh/run-agent.sh PUBLISHED 行）。
-    // 但部分模型复述只写「发布成功。」不带 post id，parseDshPublishOutcome 认不出
-    // → 文章已入库却被判失败，runCycle 进程崩溃，跳过记忆沉淀/素材标记
-    // （线上实测：education post#1634 已发布却抛错崩溃）。
-    // shell 标记是发布链路的最终权威：命中则按成功处理，
-    // postId 用该 Agent 最新一篇反查 DB 补齐（本日志段内刚发布，取最新即本次）。
-    if (/=== \[[^\]]+\] PUBLISHED\(via MCP\) \S+ ===/.test(text)) {
-      success = true;
-      if (postId === null) {
-        try {
-          const { db } = await import('../database/db.js');
-          const row = await db.get(
-            'SELECT id FROM posts WHERE agent_id = ? ORDER BY id DESC LIMIT 1',
-            [agent.id]
-          );
-          if (row?.id) postId = row.id;
-        } catch {
-          // db 不可用则保持 postId=null，标题走占位符
-        }
-      }
-    }
-  }
+  // 权威判据：DB 里有没有比基线更新的、属于本 Agent 的文章。有就是真发布了，
+  // id 与标题直接取 DB，日志怎么复述都不影响结论。
+  //
+  // 反面教材（2026-10-05 education 实录）：本轮一条没发，模型却复述
+  // 「文章已由 MCP 直接发布（postId=387）」，而 387 号在 posts 表里根本不存在
+  // （教育真实最新是 10-03 的 #1694）。旧实现只做日志正则 → 判成功 →
+  // runCycle 跳过素材标记/记忆沉淀，巡检看到 ✅ 其实早停更 2 天。
+  // 同理，run-agent.sh 的 PUBLISHED 标记只在 DSH exit=0 时写死输出，
+  // 「进程正常退出」≠「文章入库」，故它也不再能单独作为成功凭据
+  // （旧兜底取"该 Agent 最新一篇"，会把几天前的旧文当成本轮产出报上去）。
+  const baselineId = baseline?.id ?? null;
+  const fresh = await waitForFreshPost(agent, baselineId);
 
-  if (!success) {
-    // 真正失败：exit 非 0 且没找到发布标记。抛错让外层记日志/告警。
+  let postId = null;
+  let title = '';
+
+  if (fresh?.id) {
+    // 本轮真入库：id 与标题一律取 DB，日志复述一律不作数。
+    postId = fresh.id;
+    title = String(fresh.title || '').trim();
+  } else if (parsed.idempotent) {
+    // 幂等命中：内容 24h 内已发过、服务端去重，预期本轮不新增行 → 算成功（沿用原语义）。
+    // id 只在它确实是本 Agent 的文章时才采信，否则退回基线。
+    const claimedKind = await classifyClaimedPost(agent, parsed.postId);
+    postId = claimedKind === 'exists' || claimedKind === 'foreign' ? parsed.postId : baselineId;
+    if (postId !== null) title = await fetchPostTitle(postId);
+  } else {
+    // 铁律：宁可显式抛错（进日志与告警），不可假成功（静默丢稿还骗过巡检）。
+    const kind = await classifyClaimedPost(agent, parsed.postId);
+    const claimed =
+      parsed.postId === null
+        ? '日志未给出 post id'
+        : `日志声称 post id=${parsed.postId}` +
+          ({
+            exists: '（该 id 存在且属本 Agent，但不是本轮新增）',
+            foreign: '（该 id 存在，却属于别的 Agent）',
+            missing: '（该 id 在 posts 表里根本不存在）',
+            unknown: '（DB 查询失败，无法核实）',
+          })[kind];
     const tail = text.slice(-500);
     throw new Error(
-      `dshBrain(MCP): ${slug} 未检测到发布成功标记（exit=${code}）。tail: ${tail}`
+      `dshBrain(MCP): ${slug} 本轮未真正入库（exit=${code}）—— ${claimed}，` +
+        `且 DB 中无比基线(#${baselineId ?? '无'})更新的文章。tail: ${tail}`
     );
   }
 
-  // 标题：优先从数据库按 postId 查（最可靠，不同 Agent 复述格式不一致）；
-  // 查不到再退回日志正则；都没有给占位符。
-  let title = '';
-  if (postId !== null) {
-    try {
-      const { db } = await import('../database/db.js');
-      const row = await db.get('SELECT title FROM posts WHERE id = ?', [postId]);
-      if (row?.title) title = String(row.title).trim();
-    } catch {
-      // db 不可用时退回日志解析
-    }
-  }
   if (!title) {
     const titleMatch = text.match(/标题[：:]\s*\*{0,2}\s*([^\n*]+?)\s*\*{0,2}\s*(?:\r?\n|$)/);
     title = titleMatch ? titleMatch[1].trim() : `(${slug} 已发布文章#${postId ?? '?'})`;
@@ -208,6 +213,84 @@ export function parseDshPublishOutcome(text) {
   // 幂等命中也算成功（"24h 内已发布过... post id=N"）。用原文匹配，不受上面的剥字符影响。
   const idempotent = /未重复发帖|幂等命中|content_hash\s*命中/i.test(text);
   return { postId, idempotent, success: postId !== null || idempotent };
+}
+
+/**
+ * 取该 Agent 当前最新一篇文章（id + 标题）。
+ * 新增 optional newerThan：只认 id 更大的行 → 用来判断"本轮是否真的新增了文章"。
+ * @param {object} agent  含 id/username 的 Agent 定义
+ * @param {{newerThan?: number|null}} [opts]
+ * @returns {Promise<{id: number, title: string}|null>}
+ */
+export async function newestAgentPost(agent, { newerThan = null } = {}) {
+  const aid = agent?.id;
+  if (aid === undefined || aid === null) return null;
+  try {
+    const { db } = await import('../database/db.js');
+    // author_id 是权威归属列；agent_id 线上有 6 行历史 NULL，不适合当过滤条件。
+    // 两列都匹配，兼容早期只填了其中一列的数据。
+    const row = newerThan
+      ? await db.get(
+          'SELECT id, title FROM posts WHERE (author_id = ? OR agent_id = ?) AND id > ? ORDER BY id DESC LIMIT 1',
+          [aid, aid, newerThan]
+        )
+      : await db.get(
+          'SELECT id, title FROM posts WHERE author_id = ? OR agent_id = ? ORDER BY id DESC LIMIT 1',
+          [aid, aid]
+        );
+    if (!row?.id) return null;
+    return { id: Number(row.id), title: String(row.title || '').trim() };
+  } catch {
+    return null; // DB 不可用 → 返回 null，由调用方按"无新文章"处理
+  }
+}
+
+/**
+ * 该 id 的文章是否存在且确属本 Agent（用于诊断"日志声称的 id 到底是什么"）。
+ * 返回 'exists' | 'missing' | 'foreign' | 'unknown'。
+ */
+async function classifyClaimedPost(agent, postId) {
+  if (postId === null || postId === undefined) return 'missing';
+  try {
+    const { db } = await import('../database/db.js');
+    const row = await db.get('SELECT id, author_id, agent_id FROM posts WHERE id = ?', [postId]);
+    if (!row?.id) return 'missing';
+    const aid = agent?.id;
+    return Number(row.author_id) === Number(aid) || Number(row.agent_id) === Number(aid)
+      ? 'exists'
+      : 'foreign';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * 等 DB 里出现"比基线更新的本 Agent 文章"再放弃。
+ * 发布是 DSH 进程内经 MCP 落库的，理论上子进程退出时事务已提交；
+ * 但 MariaDB 主从/连接池可见性有毫秒级延迟，直接查可能抢跑 → 误判失败。
+ * 轮询一小段再下结论，宁可多等也不要把真成功判成失败。
+ */
+async function waitForFreshPost(agent, baselineId, { attempts = 6, delayMs = 500 } = {}) {
+  for (let i = 0; i < attempts; i++) {
+    const fresh =
+      baselineId === null
+        ? await newestAgentPost(agent)
+        : await newestAgentPost(agent, { newerThan: baselineId });
+    if (fresh?.id) return fresh;
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return null;
+}
+
+/** 按 id 取文章标题（查不到返回空串）。 */
+async function fetchPostTitle(postId) {
+  try {
+    const { db } = await import('../database/db.js');
+    const row = await db.get('SELECT title FROM posts WHERE id = ?', [postId]);
+    return row?.title ? String(row.title).trim() : '';
+  } catch {
+    return '';
+  }
 }
 
 /** 当天的 Agent 运行日志路径（dsh/logs/<slug>-YYYYMMDD.log）。 */
