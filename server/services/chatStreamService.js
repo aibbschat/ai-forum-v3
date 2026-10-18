@@ -6,9 +6,8 @@
 import { chatStream as llmChatStream } from '../llm/client.js';
 import { searchWeb, formatWebContext } from './webSearchService.js';
 
-/** 复用 chatService 的检索逻辑：提取检索词、站内 OR 检索、拼上下文。 */
-async function retrieveInSite(question) {
-  const { searchArticlesByTerms } = await import('./searchService.js');
+/** 从问句里抽检索词（去标点 + 空格词 + 中文二元组），站内/专家库/兜底共用一套口径。 */
+function extractTerms(question) {
   const cleaned = (question || '').replace(/[？?！!，,。.、：:；;""''（）()【】\[\]《》<>/\\|+\-_*=~`@#$%^&]/g, ' ').trim();
   const terms = new Set();
   cleaned.split(/\s+/).forEach((t) => { if (t.length >= 2) terms.add(t); });
@@ -17,11 +16,16 @@ async function retrieveInSite(question) {
     const bg = cjk.slice(i, i + 2);
     if (/[一-龥]{2}/.test(bg)) terms.add(bg);
   }
-  const arr = Array.from(terms).slice(0, 6);
-  if (!arr.length) return { contexts: [], sources: [] };
+  return Array.from(terms).slice(0, 6);
+}
+
+/** 通用「问 AI 圈」的站内检索：全站在标题/正文 OR 命中，拼上下文 + 来源。 */
+async function retrieveInSite(question, terms) {
+  const { searchArticlesByTerms } = await import('./searchService.js');
+  if (!terms.length) return { contexts: [], sources: [] };
   const conds = [];
   const params = [];
-  for (const t of arr) {
+  for (const t of terms) {
     conds.push('(p.title LIKE ? OR p.content LIKE ?)');
     params.push(`%${t}%`, `%${t}%`);
   }
@@ -38,21 +42,69 @@ async function retrieveInSite(question) {
 }
 
 /**
+ * 专家模式检索：直连 TA 在百家学院的既有知识库（`<BAIJIA_DATA_DIR>/<slug>.db` 的 FTS5 全文检索），
+ * 取原文片段做上下文。库缺失 / 未命中 → 返回空，上层自动走「联网兜底」，但仍带 TA 的人格，不会空手。
+ */
+async function retrieveExpert(question, expert) {
+  const { searchExpertCorpus } = await import('./expertService.js');
+  const rows = searchExpertCorpus(expert.slug, question, { limit: 6 });
+  const contexts = [];
+  const sources = [];
+  for (const r of rows.slice(0, 6)) {
+    const text = String(r.snippet || '').replace(/\s+/g, ' ').trim();
+    if (text.length < 20) continue;
+    const meta = [r.dynasty, r.author].filter(Boolean).join(' · ');
+    contexts.push(`【${expert.name}的知识库】《${r.title}${r.heading ? ' · ' + r.heading : ''}${meta ? '（' + meta + '）' : ''}》\n${text.slice(0, 600)}`);
+    sources.push({ title: r.title, author: r.author || expert.name });
+  }
+  return { contexts, sources };
+}
+
+/** 把专家人格拼成 system 片段。persona 为结构化对象；缺失则退化为「姓名 + 简介 + 领域」轻人设。 */
+function personaBlock(expert) {
+  if (!expert) return '';
+  const p = expert.persona;
+  const lines = [];
+  lines.push(`你现在以「${expert.name}」的身份回答——AI 圈「百家」驻站专家。`);
+  if (expert.domains?.length) lines.push(`你的专业领域：${expert.domains.join('、')}。`);
+  if (p && typeof p === 'object') {
+    if (p.worldview) lines.push(`你的世界观：${p.worldview}`);
+    if (p.stance) lines.push(`你的立场：${p.stance}`);
+    if (p.cares?.length) lines.push(`你最关注：${p.cares.join('；')}。`);
+    if (p.dislikes?.length) lines.push(`你反感：${p.dislikes.join('；')}。`);
+  } else if (typeof p === 'string' && p) {
+    lines.push(`你的人格：${p}`);
+  } else if (expert.bio) {
+    lines.push(`你的自我定位：${expert.bio}`);
+  }
+  lines.push('请始终保持这一身份与语气，用第一人称，像 TA 本人在回答，不要自称"AI 助手"或"语言模型"。');
+  return lines.join('\n');
+}
+
+
+/**
  * 流式回答一个问题。
  * @param {string} question
  * @param {(event:string, data:object)=>void} send  SSE 推送回调
  * @param {()=>boolean} isAborted  检测客户端是否断开
+ * @param {{userId:number,name:string,domains?:string[],persona?:object}|null} [expert]
+ *        选中专家时传入：从 TA 自己的知识库检索 + 叠加人格 prompt；不传 = 通用三层 RAG。
  */
-export async function answerQuestionStream(question, send, isAborted) {
+export async function answerQuestionStream(question, send, isAborted, expert = null) {
   const q = (question || '').trim();
   if (!q) {
     send('content', { text: '请输入你的问题。' });
     return;
   }
+  const persona = personaBlock(expert);
+  const terms = extractTerms(q);
 
-  // ─── Stage 1: 站内检索 ───
-  send('stage', { text: '正在检索站内资料…' });
-  const { contexts, sources } = await retrieveInSite(q);
+  // ─── Stage 1: 检索（专家 → TA 在百家学院的既有知识库；通用 → 全站文章）───
+  send('stage', { text: expert ? `正在检索 ${expert.name} 的知识库…` : '正在检索站内资料…' });
+  const { contexts, sources } = expert
+    ? await retrieveExpert(q, expert)
+    : await retrieveInSite(q, terms);
+
 
   // ─── Stage 2: 豆包联网搜索（与站内并行触发，省一轮往返） ───
   // 旧逻辑：先让 LLM 判【无资料】再联网，常被代码模型跳过；
@@ -68,8 +120,9 @@ export async function answerQuestionStream(question, send, isAborted) {
     send('stage', { text: `找到 ${sources.length} 篇相关文章，正在分析…` });
     const contextText = contexts.join('\n\n---\n\n');
     const sys = [
-      '你是 AI 圈的专家问答助手，由多位领域专家 Agent 共同支撑。',
-      '请严格基于下方「站内资料」回答用户问题，做到专业、客观、去 AI 味。',
+      persona || '你是 AI 圈的专家问答助手，由多位领域专家 Agent 共同支撑。',
+      expert ? '请严格基于下方「站内资料」（均为该专家本人过往文章）回答，做到专业、客观、去 AI 味。'
+             : '请严格基于下方「站内资料」回答用户问题，做到专业、客观、去 AI 味。',
       '要求：',
       '1. 不编造资料之外的具体事实；资料不足时，明确指出「站内资料有限」。',
       '2. 在回答末尾另起一行，用「来源：《标题》· 作者」列出你参考的文章（可多条）。',
@@ -129,7 +182,7 @@ export async function answerQuestionStream(question, send, isAborted) {
     const webContextText = formatWebContext(webSourcesRaw);
     const hasInSite = contexts.length > 0;
     const sys = [
-      '你是 AI 圈的问答助手，由驻站专家 Agent 与联网检索共同支撑。',
+      persona || '你是 AI 圈的问答助手，由驻站专家 Agent 与联网检索共同支撑。',
       '请基于下方「参考资料」用中文专业、客观地回答用户问题，去 AI 味、不标题党、不编造。',
       '要求：',
       '1. 引用网页时，请使用 Markdown 链接 [标题](URL) 在行文中自然标注来源。',
@@ -137,7 +190,8 @@ export async function answerQuestionStream(question, send, isAborted) {
       hasInSite
         ? '3. 站内资料优先；若站内与网页信息互补，请融合表述，不要简单拼接。'
         : '3. 不要在开头说"根据搜索结果"这类废话，直接作答。',
-    ].join('\n');
+      expert ? '4. 始终保持在指定专家身份与领域视角内作答。' : '',
+    ].filter(Boolean).join('\n');
 
     const userParts = [];
     if (hasInSite) {
@@ -213,7 +267,8 @@ export async function answerQuestionStream(question, send, isAborted) {
       {
         role: 'system',
         content:
-          '你是 AI 圈问答助手。站内暂无相关资料、联网检索也暂时不可用。' +
+          (persona ? persona + '\n' : '你是 AI 圈问答助手。') +
+          '站内暂无相关资料、联网检索也暂时不可用。' +
           '请基于你的通识，用中文专业、客观地给用户一个方向性回答，并在开头简要说明' +
           '"以下回答未结合站内最新资料，仅供参考"。去 AI 味，不要编造具体数字。',
       },

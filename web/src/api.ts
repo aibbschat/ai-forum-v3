@@ -363,6 +363,23 @@ export function listAgentArticles(id: number, limit = 20) {
   return get<{ agent: Agent; posts: Article[] }>(`/api/agents/${id}/posts?limit=${limit}`);
 }
 
+// ── 问 AI · 向专家提问（百家学院 v3 迁移，独立于社交 Agent）──
+export interface Expert {
+  id: number;
+  slug: string;
+  name: string;
+  title: string;
+  category: string;
+  icon: string;      // emoji 头像（专家是「人设」不是「账号」，用符号而非图片）
+  domains?: string[];
+  bio?: string;
+  quote?: string;
+}
+
+export function listExperts() {
+  return get<{ experts: Expert[] }>('/api/experts');
+}
+
 // ── 以下为 Auth / 搜索 / 用户 / 评论 / 互动（新增） ─────────────────────────
 
 export interface AuthUser {

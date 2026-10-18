@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import Nav from '../components/Nav';
+import { listExperts, type Expert } from '../api';
 
 /* ── 类型 ── */
 interface ChatSource {
@@ -25,6 +26,8 @@ interface Msg {
   pending?: boolean;
   isReasoning?: boolean;       // 是否还在推理中
   isContent?: boolean;         // 是否在流式输出答案中
+  expertName?: string;         // 回答者：选中专家时为其名，否则「AI 圈」
+  expertIcon?: string;         // 回答者头像（专家的 emoji）
 }
 
 /* ── 渲染简易 Markdown（加粗/链接/换行） ── */
@@ -90,9 +93,23 @@ export default function Chat() {
   const [input, setInput] = useState(initialQ);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [loading, setLoading] = useState(false);
+  const [experts, setExperts] = useState<Expert[]>([]);
+  const [expertId, setExpertId] = useState<number | null>(null); // null = 通用「问 AI 圈」
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // 百家学院专家池（点头像即与之对话）；拉取失败静默——退化为纯通用问答，不影响主流程。
+  useEffect(() => {
+    listExperts().then((r) => setExperts(r.experts || [])).catch(() => {});
+  }, []);
+
+  const expert = expertId ? experts.find((e) => e.id === expertId) || null : null;
+  const targetLabel = expert ? expert.name : 'AI 圈';
+  // handleAsk 需要读到「当前最新」选中的专家，但不希望因专家切换而重建回调
+  // （它会作为自动提问 effect 的依赖），用 ref 承载最新值。
+  const expertRef = useRef<{ id: number; name: string; icon: string } | null>(null);
+  expertRef.current = expert ? { id: expert.id, name: expert.name, icon: expert.icon } : null;
 
   // 滚动到底
   useEffect(() => {
@@ -102,7 +119,7 @@ export default function Chat() {
   // 自动调节输入框高度
   const autoResize = useCallback(() => {
     const el = inputRef.current;
-    if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; }
+    if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px'; }
   }, []);
 
   const handleAsk = useCallback(
@@ -110,8 +127,13 @@ export default function Chat() {
       const text = raw.trim();
       if (!text || loading) return;
 
+      const curExpert = expertRef.current;
       const userMsg: Msg = { role: 'user', content: text };
-      const pending: Msg = { role: 'assistant', content: '', reasoning: '', stage: '准备中…', pending: true, isReasoning: true };
+      const pending: Msg = {
+        role: 'assistant', content: '', reasoning: '', stage: '准备中…', pending: true, isReasoning: true,
+        expertName: curExpert?.name || 'AI 圈',
+        expertIcon: curExpert?.icon || '',
+      };
       setMessages((m) => [...m, userMsg, pending]);
       setLoading(true);
       setInput('');
@@ -124,7 +146,7 @@ export default function Chat() {
         const res = await fetch(`/api/chat/stream`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question: text }),
+          body: JSON.stringify({ question: text, expertId: curExpert?.id ?? null }),
           signal: ctrl.signal,
         });
 
@@ -134,7 +156,12 @@ export default function Chat() {
 
         const reader = res.body.getReader();
         const dec = new TextDecoder();
+        // eventType 必须在读循环外持久化：服务端零缓冲写 socket，单个 SSE 事件
+        // （event:…\ndata:…\n\n）可能被 TCP 拆进两个 chunk。若把 eventType 放在
+        // for(;;) 内部每轮重置，data: 落在后一个 chunk 时类型已被清空 → 答案片段/
+        // 来源/阶段事件被静默丢弃（就是"有时出错"的主因）。
         let buf = '';
+        let eventType = '';
 
         for (;;) {
           const { done, value } = await reader.read();
@@ -144,7 +171,6 @@ export default function Chat() {
           const lines = buf.split('\n');
           buf = lines.pop() || '';
 
-          let eventType = '';
           for (const line of lines) {
             const trimmed = line.trim();
             if (trimmed.startsWith('event:')) {
@@ -248,7 +274,9 @@ export default function Chat() {
       {/* 顶部工具条：思考广场入口 */}
       <div className="border-b border-gray-100 bg-white/80 backdrop-blur">
         <div className="container-site flex items-center justify-between h-10">
-          <h1 className="text-sm font-bold text-gray-700">AI 圈 · 智能问答</h1>
+          <h1 className="text-sm font-bold text-gray-700">
+            问 AI <span className="font-normal text-gray-400">· 向专家提问</span>
+          </h1>
           <Link
             to="/thoughts"
             className="text-xs text-gray-400 hover:text-indigo-600 transition"
@@ -262,13 +290,28 @@ export default function Chat() {
       <div className="flex-1 overflow-y-auto">
         <div className="container-site max-w-[800px] mx-auto px-4 py-6">
           {isEmpty ? (
-            /* ── 空态：欢迎 + 推荐问题 ── */
-            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
+            /* ── 空态：欢迎 + 专家 + 推荐问题 ── */
+            <div className="flex flex-col items-center justify-center min-h-[55vh] text-center">
               <div className="mb-4">
                 <img src="/logo.svg" alt="AI 圈" className="w-16 h-16 mx-auto animate-logo-breathe" />
               </div>
-              <h2 className="text-xl font-extrabold text-gray-900 mb-2">向 AI 圈的 Agent 提问</h2>
-              <p className="text-sm text-gray-400 mb-6">有问必答，实时展开思考过程。</p>
+              <h2 className="text-2xl font-extrabold text-gray-900 mb-2">问 AI · 向专家提问</h2>
+              <p className="text-sm text-gray-400 mb-6">选一位百家专家深聊，或直接问 AI 圈——答案溯源到 TA 的知识库与站内文章。</p>
+              {experts.length > 0 && (
+                <div className="flex items-center justify-center gap-3 mb-7 flex-wrap max-w-[560px]">
+                  {experts.map((e) => (
+                    <button
+                      key={e.id}
+                      onClick={() => { setExpertId(e.id); inputRef.current?.focus(); }}
+                      className="group flex flex-col items-center gap-1.5 w-16"
+                      title={e.title || e.name}
+                    >
+                      <span className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center text-xl ring-2 ring-transparent group-hover:ring-indigo-300 transition">{e.icon || '💬'}</span>
+                      <span className="text-[11px] text-gray-500 leading-tight line-clamp-1 group-hover:text-indigo-600 transition">{e.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="flex flex-wrap gap-2 justify-center">
                 {[
                   '大模型推理成本为什么在快速下降？',
@@ -299,10 +342,18 @@ export default function Chat() {
                     </div>
                   ) : (
                     <div className="flex gap-3">
-                      <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 mt-0.5">
-                        <img src="/logo.svg" alt="AI" className="w-full h-full animate-logo-pulse" />
+                      <div className={`w-8 h-8 rounded-full shrink-0 mt-0.5 flex items-center justify-center text-lg ${m.expertIcon ? 'bg-gray-100' : 'overflow-hidden'}`}>
+                        {m.expertIcon
+                          ? m.expertIcon
+                          : <img src="/logo.svg" alt="AI" className="w-full h-full animate-logo-pulse" />}
                       </div>
                       <div className="flex-1 min-w-0">
+                        {/* 回答者身份：选中专家时显示其名，否则「AI 圈」 */}
+                        {m.expertName && (
+                          <div className="text-[11px] text-gray-400 mb-1 font-medium">
+                            {m.expertName === 'AI 圈' ? 'AI 圈' : `${m.expertName} · 百家专家`}
+                          </div>
+                        )}
                         {/* 阶段提示 */}
                         {m.stage && m.pending && (
                           <div className="text-xs text-gray-400 mb-2 flex items-center gap-1.5">
@@ -384,30 +435,72 @@ export default function Chat() {
         </div>
       </div>
 
-      {/* 底部输入区（吸底） */}
-      <div className="border-t border-gray-100 bg-white/90 backdrop-blur">
-        <form onSubmit={submit} className="container-site max-w-[800px] mx-auto px-4 py-3">
-          <div className="flex items-end gap-2">
+      {/* 底部输入区（吸底）：专家选择条 + 大号对话输入卡 */}
+      <div className="border-t border-gray-100 bg-white/95 backdrop-blur">
+        <form onSubmit={submit} className="container-site max-w-[820px] mx-auto px-4 pt-3 pb-4">
+          <div className="rounded-2xl border-2 border-gray-200 bg-white focus-within:border-indigo-300 transition-colors">
+            {/* 专家头像条：点谁就跟谁聊，「问 AI 圈」为通用（不选专家） */}
+            <div className="flex items-center gap-2 overflow-x-auto px-3 pt-3 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <button
+                type="button"
+                onClick={() => setExpertId(null)}
+                className={`shrink-0 inline-flex items-center gap-1.5 h-8 pl-1.5 pr-3 rounded-full text-[13px] font-medium border transition ${
+                  expertId === null
+                    ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                    : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                }`}
+              >
+                <img src="/logo.svg" alt="" className="w-6 h-6 rounded-full" />
+                问 AI 圈
+              </button>
+              {experts.map((e) => (
+                <button
+                  key={e.id}
+                  type="button"
+                  onClick={() => setExpertId(e.id)}
+                  title={e.title || e.name}
+                  className={`shrink-0 inline-flex items-center gap-1.5 h-8 pl-1 pr-3 rounded-full text-[13px] font-medium border transition ${
+                    expertId === e.id
+                      ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                      : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                  }`}
+                >
+                  <span className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-[15px] leading-none">{e.icon || '💬'}</span>
+                  {e.name}
+                </button>
+              ))}
+            </div>
+
+            {/* 大号输入框 */}
             <textarea
               ref={inputRef}
               value={input}
               onChange={(e) => { setInput(e.target.value); autoResize(); }}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(e); } }}
-              placeholder="问 AI 圈：想了解什么？（Shift+Enter 换行）"
-              rows={1}
-              className="flex-1 resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 max-h-[120px]"
+              placeholder={expert ? `向 ${expert.name} 提问…（Shift+Enter 换行）` : '想问点什么？（Shift+Enter 换行）'}
+              rows={2}
+              className="w-full resize-none px-5 py-3 text-[15px] leading-relaxed text-gray-800 placeholder:text-gray-400 focus:outline-none bg-transparent max-h-[200px]"
             />
-            <button
-              type="submit"
-              disabled={loading || !input.trim()}
-              className="shrink-0 w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center hover:bg-indigo-700 disabled:opacity-40 transition"
-              title="发送"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="22" y1="2" x2="11" y2="13" />
-                <polygon points="22 2 15 22 11 13 2 9 22 2" />
-              </svg>
-            </button>
+
+            {/* 工具行：左当前对象，右发送 */}
+            <div className="flex items-center justify-between px-4 pb-3">
+              <div className="text-xs text-gray-400 select-none">
+                当前：<span className={expert ? 'text-indigo-600 font-medium' : ''}>{targetLabel}</span>
+                <span className="text-gray-300 mx-1.5">·</span>
+                回答可溯源到站内文章
+              </div>
+              <button
+                type="submit"
+                disabled={loading || !input.trim()}
+                className="shrink-0 inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="22" y1="2" x2="11" y2="13" />
+                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                </svg>
+                发送
+              </button>
+            </div>
           </div>
         </form>
       </div>

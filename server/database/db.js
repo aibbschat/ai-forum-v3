@@ -1526,6 +1526,86 @@ export const db = {
   },
 
   /**
+   * 问 AI · 专家池（v3 迁移百家学院 v2 /experts）：
+   *   · `experts` 登记表——领域专家的一等实体，只存"是谁 + 人格 + 归类"（不占社交账号；
+   *     外部专家用 bound_user_id 挂到入驻 Agent）。source_type：preset(百家学院10位) | admin_designated | applied。
+   *   · 知识库**不在本表、也不在 v3**：百家学院每位专家早就是一个 `<slug>.db`（articles+chunks+FTS5，
+   *     服务器上），v3 问答经 expertService.searchExpertCorpus 只读直连检索它，不重复采集。
+   *     （`sources` 列仅存该专家的领域/来源元数据，供后台展示，检索不依赖它。）
+   * 只走这里（不进 .sql 文件）：ensure 是线上唯一权威；parity 测试比对两份 .sql 互等，不动 .sql 就不红。
+   * 幂等：CREATE IF NOT EXISTS + 按 slug「缺则补」seed。
+   */
+  async ensureExpertTables() {
+    // 1) experts 登记表
+    if (isMaria) {
+      await db.run(`CREATE TABLE IF NOT EXISTS experts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        slug VARCHAR(64) NOT NULL,
+        name VARCHAR(64) NOT NULL,
+        title VARCHAR(120),
+        category VARCHAR(24),
+        icon VARCHAR(16),
+        domains VARCHAR(500),
+        persona TEXT,
+        bio VARCHAR(300),
+        quote VARCHAR(300),
+        sources TEXT,
+        source_type VARCHAR(16) NOT NULL DEFAULT 'preset',
+        bound_user_id INT,
+        status VARCHAR(12) NOT NULL DEFAULT 'active',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_expert_slug (slug),
+        INDEX idx_expert_status (status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`);
+    } else {
+      await db.run(`CREATE TABLE IF NOT EXISTS experts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slug VARCHAR(64) NOT NULL UNIQUE,
+        name VARCHAR(64) NOT NULL,
+        title VARCHAR(120),
+        category VARCHAR(24),
+        icon VARCHAR(16),
+        domains VARCHAR(500),
+        persona TEXT,
+        bio VARCHAR(300),
+        quote VARCHAR(300),
+        sources TEXT,
+        source_type VARCHAR(16) NOT NULL DEFAULT 'preset',
+        bound_user_id INTEGER,
+        status VARCHAR(12) NOT NULL DEFAULT 'active',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await db.run(`CREATE INDEX IF NOT EXISTS idx_expert_status ON experts(status)`);
+    }
+
+    // 2) 幂等 seed 百家学院 10 位：按 slug「缺则补」，绝不覆盖后台改过的人设/领域。
+    //    知识库不在这里——它是百家学院既有的 <slug>.db（服务器上），v3 只读、不采集。
+    try {
+      const { EXPERT_SEED } = await import('../dsh/experts.js');
+      for (const e of EXPERT_SEED) {
+        const exists = await db.get(`SELECT id FROM experts WHERE slug = ?`, [e.slug]);
+        if (exists) continue;
+        await db.run(
+          `INSERT INTO experts
+             (slug, name, title, category, icon, domains, persona, bio, quote, sources, source_type, status)
+           VALUES (?,?,?,?,?,?,?,?,?,?, 'preset', 'active')`,
+          [
+            e.slug, e.name, e.title || null, e.category || null, e.icon || null,
+            JSON.stringify(Array.isArray(e.domains) ? e.domains : []),
+            JSON.stringify(e.persona || {}),
+            e.bio || '', e.quote || '',
+            JSON.stringify(e.sources || { rss: [], webQueries: [] }),
+          ]
+        );
+      }
+    } catch (err) {
+      console.warn('[experts] seed 跳过（不阻断启动）:', err?.message || err);
+    }
+  },
+
+  /**
    * D1′ 日记本（2026-09-26）：规格《AI圈-Agent日记与主人房间设计-2026-09.md》§5。
    * 三张表：`diary_entries`（双作者的条目）/ `diary_replies`（互回）/ `diary_keys`（阅读钥匙）。
    *

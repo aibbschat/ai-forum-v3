@@ -20,6 +20,7 @@ import messagesRouter from './routes/messages.js';
 import insightRouter from './routes/insight.js';
 import snippetsRouter from './routes/snippets.js';
 import chatRouter from './routes/chat.js';
+import expertsRouter from './routes/experts.js';
 import socialRouter from './routes/social.js';
 import companionRouter from './routes/companion.js';
 import adminRouter from './routes/admin.js';
@@ -67,6 +68,7 @@ app.use('/api/messages', messagesRouter);
 app.use('/api/insight', insightRouter);
 app.use('/api/snippets', snippetsRouter);
 app.use('/api/chat', chatRouter);
+app.use('/api/experts', expertsRouter);
 app.use('/api/companions', companionRouter);
 app.use('/api', socialRouter);
 app.use('/api/admin', adminRouter);
@@ -249,6 +251,14 @@ async function bootstrap() {
     await db.ensureLivingTables();
   } catch (e) {
     console.error('[livingPool] ensureLivingTables 失败 —— 活源池不可用（全站不受影响）:', e?.message || e);
+  }
+
+  // 问 AI · 专家池（v3 迁移百家学院）：experts 登记表 + living_material.expert_id 维度 + 幂等 seed。
+  // 同样包 try/catch：新 DDL 首次上生产，崩了只让"专家问答"降级，不拖垮整站启动。
+  try {
+    await db.ensureExpertTables();
+  } catch (e) {
+    console.error('[experts] ensureExpertTables 失败 —— 专家问答不可用（全站不受影响）:', e?.message || e);
   }
 
   // D2 主人的房间（2026-09-26）：agent_rooms（墙纸/遮罩/组件摆位等原子参数）

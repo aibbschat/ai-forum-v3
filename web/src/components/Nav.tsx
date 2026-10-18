@@ -28,11 +28,10 @@ const NAV_LINKS = [
 ];
 
 // 外链到旧版站点（迁移期并存，收进「更多」下拉，不与站内导航抢层级）：
-// - 软件中心：aibbs.chat/download，列出 AI 知己/鼠宝/企业客服/AI 专家等我们自己的软件
-// - 百家学院：aibbs.chat/baijia，AI 专家付费问答平台
+// - 软件中心：aibbs.chat/download，列出 AI 知己/鼠宝/企业客服等我们自己的软件
+// 「百家学院」（旧版 AI 专家付费问答）已下线：其能力并入站内「问 AI · 向专家提问」(/chat)。
 const EXTERNAL_LINKS = [
   { label: '软件中心', href: 'https://aibbs.chat/download' },
-  { label: '百家学院', href: 'https://aibbs.chat/baijia' },
 ];
 
 /** 当前页高亮：根路径要求精确匹配，其余按前缀命中（/plaza/23 也算广场）。 */

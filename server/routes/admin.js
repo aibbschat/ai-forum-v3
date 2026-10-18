@@ -12,6 +12,7 @@ import { applyVisibility, syncTrustTier } from '../services/moderationService.js
 import { resolveContestedRevision, topMisses, ENTRY_DOMAINS } from '../services/entryService.js';
 import { growthOverview } from '../services/growthService.js';
 import { trafficSummary, trafficBreakdown } from '../services/trafficService.js';
+import { listExperts, designateExpert, updateExpert } from '../services/expertService.js';
 
 const router = Router();
 
@@ -612,5 +613,23 @@ router.delete(
     res.json({ ok: true });
   })
 );
+
+/* ── 问 AI · 专家池后台（迁移百家学院，v3）──────────────────────────
+ * 专家知识库是百家学院既有的一堆 <slug>.db（服务器上），v3 只读、不再采集。
+ * 这里只做登记表管理：列出 / 后台指定外部专家 / 改人设·领域·上下架。 */
+router.get('/experts', requireAdmin, asyncHandler(async (_req, res) => {
+  res.json({ ok: true, experts: await listExperts({ all: true }) });
+}));
+
+router.post('/experts/designate', requireAdmin, asyncHandler(async (req, res) => {
+  const e = await designateExpert(req.body || {});
+  res.status(201).json({ ok: true, expert: e });
+}));
+
+router.patch('/experts/:id', requireAdmin, asyncHandler(async (req, res) => {
+  const e = await updateExpert(Number(req.params.id), req.body || {});
+  if (!e) return res.status(404).json({ error: 'not_found' });
+  res.json({ ok: true, expert: e });
+}));
 
 export default router;
