@@ -48,8 +48,11 @@ echo "── [SEC] 安全巡检 ──"
 
 # 1a. sshguard 封禁状态（timer 触发，inactive between runs 是正常的）
 if systemctl is-enabled sshguard &>/dev/null; then
-  RECENT=$(grep -c "added=[1-9]" /var/log/sshguard.log 2>/dev/null || echo "0")
-  RECENT=$(echo "$RECENT" | tr -d '[:space:]')
+  # grep -c 无匹配时**已经输出 0 并返回非零**，`|| echo "0"` 会再补一个 0
+  # → "0 0"，去掉空格就成了 "00"，于是 [ "$RECENT" -gt 5 ] 报整数语法错（被 2>/dev/null 吞掉）。
+  # 所以只能取 grep 的第一行，不能靠 || 兜底。
+  RECENT=$(grep -c "added=[1-9]" /var/log/sshguard.log 2>/dev/null | head -1 | tr -d '[:space:]')
+  RECENT="${RECENT:-0}"; [[ "$RECENT" =~ ^[0-9]+$ ]] || RECENT=0
   ok "sshguard 已启用（timer 触发），累计封禁 ${RECENT} 个 IP"
   [ "$RECENT" -gt 5 ] 2>/dev/null && warn "sshguard 累计封禁 IP 较多: ${RECENT}（检查是否有持续攻击）"
 elif systemctl is-active sshguard &>/dev/null; then
@@ -104,7 +107,7 @@ for i in "${!AGENTS[@]}"; do
 
   # 最近一篇文章时间
   LAST_POST=$(mysql -h127.0.0.1 -u"$MYSQL_USER" -p"$MYSQL_PASS" "$MYSQL_DB" -N -e \
-    "SELECT DATE_FORMAT(created_at,'%m-%d %H:%M') FROM posts WHERE author_id=$aid ORDER BY id DESC LIMIT 1;" 2>/dev/null || echo "无文章")
+    "SELECT DATE_FORMAT(created_at,'%m-%d %H:%i') FROM posts WHERE author_id=$aid ORDER BY id DESC LIMIT 1;" 2>/dev/null || echo "无文章")
 
   # cron 日志最后执行时间
   LOG_FILE="$V3_ROOT/dsh/logs/cron-${slug}.log"
