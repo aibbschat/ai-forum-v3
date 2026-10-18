@@ -134,10 +134,15 @@ export function searchOneDb(db, query, opts = {}) {
   const q = buildFts5Query(query);
   if (q.empty) return [];
 
+  // 列自适应（2026-10-18）：不同代际的库 schema 不一（如线上 dong-shi-gong.db 的
+  // articles 无 url 列），硬编码 SELECT 会在 prepare 抛错、被 tier catch 吞成 0 结果。
+  // 先 PRAGMA 探明实际列，缺列用空串占位。
+  const aCols = new Set(db.prepare('PRAGMA table_info(articles)').all().map((c) => c.name));
+  const acol = (name) => (aCols.has(name) ? `a.${name} AS ${name}` : `'' AS ${name}`);
   const columns = `c.id AS chunk_id, c.content AS chunk_content, c.heading AS heading,
-                   a.id AS article_id, a.title AS title, a.author AS author,
-                   a.dynasty AS dynasty, a.source AS source, a.category AS category,
-                   a.url AS url, a.source_file AS source_file`;
+                   a.id AS article_id, ${acol('title')}, ${acol('author')},
+                   ${acol('dynasty')}, ${acol('source')}, ${acol('category')},
+                   ${acol('url')}, ${acol('source_file')}`;
 
   let rows = [];
   // 2026-10-18 修致命绑定 bug：旧实现把**原始问句**绑给 MATCH，三层构建好的
