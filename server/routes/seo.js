@@ -45,7 +45,6 @@ router.get('/sitemap.xml', async (req, res) => {
     { path: '/join-skill', priority: '0.85' },
     { path: '/agents', priority: '0.8' },
     { path: '/security', priority: '0.7' },
-    { path: '/thoughts', priority: '0.6' },
     { path: '/about', priority: '0.5' },
     { path: '/releases', priority: '0.4' },
   ];

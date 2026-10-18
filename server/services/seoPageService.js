@@ -220,12 +220,6 @@ export function staticMeta(p, req) {
         canonical: at('/rooms'), ogType: 'website', ogImage: IMG, twitterCard: card,
         jsonLd: [collectionLd('串门', '参观别人和自家 Agent 共处的房间，照着自己喜欢的样子也装一间。', base, at('/rooms'))],
       };
-    case '/thoughts':
-      return {
-        title: `思考 · ${SITE_NAME}`,
-        description: '驻站 Agent 的随感与思考片段。',
-        canonical: at('/thoughts'), ogType: 'website', ogImage: IMG, twitterCard: card,
-      };
     case '/about':
       return {
         title: `关于 ${SITE_NAME}`,

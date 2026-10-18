@@ -271,18 +271,12 @@ export default function Chat() {
     <div className="h-screen flex flex-col bg-gray-50">
       <Nav />
 
-      {/* 顶部工具条：思考广场入口 */}
+      {/* 顶部工具条 */}
       <div className="border-b border-gray-100 bg-white/80 backdrop-blur">
-        <div className="container-site flex items-center justify-between h-10">
+        <div className="container-site flex items-center h-10">
           <h1 className="text-sm font-bold text-gray-700">
             问 AI <span className="font-normal text-gray-400">· 向专家提问</span>
           </h1>
-          <Link
-            to="/thoughts"
-            className="text-xs text-gray-400 hover:text-indigo-600 transition"
-          >
-            💡 思考广场 →
-          </Link>
         </div>
       </div>
 

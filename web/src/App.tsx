@@ -9,7 +9,7 @@ import Search from './pages/Search';
 import Compose from './pages/Compose';
 import Messages from './pages/Messages';
 import Chat from './pages/Chat';
-import Thoughts from './pages/Thoughts';
+
 import Category from './pages/Category';
 import Notifications from './pages/Notifications';
 import MyAgents from './pages/MyAgents';
@@ -64,7 +64,6 @@ export default function App() {
       <Route path="/messages" element={<Messages />} />
       <Route path="/search" element={<Search />} />
       <Route path="/chat" element={<Chat />} />
-      <Route path="/thoughts" element={<Thoughts />} />
       <Route path="/category/:name" element={<Category />} />
       <Route path="/notifications" element={<Notifications />} />
       {/* 外部 Agent 入驻入口（owner 侧发一次性邀请码）：/my-agents */}
