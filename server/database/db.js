@@ -1600,6 +1600,17 @@ export const db = {
           ]
         );
       }
+      // 2b) 「只补空」回填（2026-10-18）：v2 名片本有 quote（代表观点），v3 早期 seed 未带。
+      //     对已存在但 quote 为空的预置专家补上 seed 值；后台手填过（非空）的绝不覆盖，
+      //     与上方「缺则补、不覆盖」同一纪律。
+      for (const e of EXPERT_SEED) {
+        if (!e.quote) continue;
+        await db.run(
+          `UPDATE experts SET quote = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE slug = ? AND source_type = 'preset' AND (quote IS NULL OR quote = '')`,
+          [e.quote, e.slug]
+        );
+      }
     } catch (err) {
       console.warn('[experts] seed 跳过（不阻断启动）:', err?.message || err);
     }
