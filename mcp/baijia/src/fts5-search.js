@@ -13,6 +13,18 @@ import Database from 'better-sqlite3';
 
 const CJK_RE = /[一-鿿㐀-䶿豈-﫿]/u;
 
+// 简→繁查询转换（2026-10-18）：线上真库（chtxt/康熙字典等）为**繁体**、逐字空格分词，
+// 而用户问句是简体——不转换则 trigram 永远 miss。opencc-js 纯 JS 零原生依赖，
+// 模块加载时初始化一次；依赖缺失则退化为原样查询（繁体问句仍可命中，不阻断）。
+let _s2t = (s) => s;
+try {
+  const mod = await import('opencc-js');
+  const OpenCC = mod.Converter ? mod : mod.default;
+  _s2t = OpenCC.Converter({ from: 'cn', to: 't' });
+} catch {
+  // opencc-js 未安装：保持原样
+}
+
 /** 简单历史领域同义词（只保留与历史考据相关的，避免 MCP server 体积膨胀） */
 const SYNONYMS = {
   '皇帝': ['皇上', '天子', '陛下', '帝王'],
@@ -44,10 +56,12 @@ function expandQuery(query) {
  * 构建 FTS5 MATCH 表达式。返回 {trigramQuery, bigramQuery, charAndQuery, chars}
  * 或字符串（非 CJK 查询直接返回 OR 串）。
  */
-export function buildFts5Query(query) {
-  const expanded = expandQuery(query);
-  // 去 FTS5 语法特殊字符 + 布尔关键字
-  let cleaned = expanded
+export function buildFts5Query(rawQuery) {
+  // 先做同义词扩展（简体词表），再整体转繁体对齐语料
+  const expanded = expandQuery(rawQuery);
+  const query = _s2t(expanded);
+  // 去 FTS5 语法特殊字符 + 布尔关键字（用转换后的繁体串）
+  let cleaned = query
     .replace(/["*^()]/g, ' ')
     .replace(/\b(AND|OR|NOT|NEAR)\b/gi, ' ')
     .replace(/\s+/g, ' ')
@@ -126,10 +140,14 @@ export function searchOneDb(db, query, opts = {}) {
                    a.url AS url, a.source_file AS source_file`;
 
   let rows = [];
-  const tryTier = (sql) => {
+  // 2026-10-18 修致命绑定 bug：旧实现把**原始问句**绑给 MATCH，三层构建好的
+  // trigram/bigram/charAnd 查询串从未进入 SQL——unicode61 分词下整句是一个 token，
+  // 与语料的单字 token 永远对不上 → 任何中文查询都 0 命中（且被 catch 静默吞掉）。
+  // 现改为：每层绑自己构建的 MATCH 串，才是当初设计的三级降级。
+  const tryTier = (sql, matchValue) => {
     if (rows.length) return;
     try {
-      rows = db.prepare(sql).all(query, fetchLimit);
+      rows = db.prepare(sql).all(matchValue, fetchLimit);
     } catch (e) {
       // 某级 FTS 语法不兼容时静默降级到下一级
       rows = [];
@@ -144,7 +162,7 @@ export function searchOneDb(db, query, opts = {}) {
       JOIN articles a ON a.id = c.article_id
       WHERE chunks_fts MATCH ?
       ORDER BY ${SOURCE_ORDER_SQL}, rank LIMIT ?
-    `);
+    `, q.trigramQuery);
   }
   if (!rows.length && q.bigramQuery) {
     tryTier(`
@@ -154,7 +172,7 @@ export function searchOneDb(db, query, opts = {}) {
       JOIN articles a ON a.id = c.article_id
       WHERE chunks_fts MATCH ?
       ORDER BY ${SOURCE_ORDER_SQL}, rank LIMIT ?
-    `);
+    `, q.bigramQuery);
   }
   if (!rows.length && q.charAndQuery) {
     tryTier(`
@@ -164,7 +182,7 @@ export function searchOneDb(db, query, opts = {}) {
       JOIN articles a ON a.id = c.article_id
       WHERE chunks_fts MATCH ?
       ORDER BY ${SOURCE_ORDER_SQL}, rank LIMIT ?
-    `);
+    `, q.charAndQuery);
   }
 
   if (!rows.length) return [];
